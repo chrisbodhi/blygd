@@ -1,0 +1,215 @@
+package mention
+
+import (
+	"context"
+	"log/slog"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/chrisbodhi/blygd/internal/fetch"
+)
+
+// Workers drain the inbound verification queue and the outbound outbox.
+//
+// Both use the same lease pattern: a claim pushes next_attempt_at forward
+// and bumps attempts in one UPDATE … FOR UPDATE SKIP LOCKED, then the
+// network work runs outside any transaction. A crashed worker's rows simply
+// come due again when the lease expires. No Redis, no job table.
+type Workers struct {
+	Pool  *pgxpool.Pool
+	Fetch *fetch.Client
+	Log   *slog.Logger
+	Batch int
+	Idle  time.Duration
+}
+
+// verifyRetry is the backoff for a verification the network could not
+// conclude. After it is used up the claim fails.
+var verifyRetry = []time.Duration{time.Minute, 10 * time.Minute, time.Hour}
+
+// Run runs both loops until ctx ends.
+func (wk *Workers) Run(ctx context.Context) {
+	go loop(ctx, wk.idle(), wk.VerifyBatch, wk.Log.With("worker", "verify"))
+	go loop(ctx, wk.idle(), wk.SendBatch, wk.Log.With("worker", "send"))
+	go loop(ctx, 10*time.Minute, wk.pruneClaims, wk.Log.With("worker", "prune"))
+}
+
+func (wk *Workers) idle() time.Duration {
+	if wk.Idle > 0 {
+		return wk.Idle
+	}
+	return 5 * time.Second
+}
+
+func (wk *Workers) batch() int {
+	if wk.Batch > 0 {
+		return wk.Batch
+	}
+	return 10
+}
+
+func loop(ctx context.Context, idle time.Duration, fn func(context.Context) (int, error), log *slog.Logger) {
+	for {
+		n, err := fn(ctx)
+		if err != nil && ctx.Err() == nil {
+			log.Error("batch failed", "err", err)
+		}
+		if n > 0 && err == nil {
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(idle):
+		}
+	}
+}
+
+type inboundClaim struct {
+	id           int64
+	sourceURL    string
+	targetItemID string
+	origin       string
+	originID     int64
+	attempts     int
+	everVerified bool
+}
+
+// VerifyBatch verifies up to one batch of pending inbound mentions.
+func (wk *Workers) VerifyBatch(ctx context.Context) (int, error) {
+	rows, err := wk.Pool.Query(ctx, `UPDATE inbound_mentions m
+		SET next_attempt_at = now() + interval '2 minutes', attempts = attempts + 1
+		FROM origins o
+		WHERE o.id = m.origin_id AND m.id IN (
+			SELECT id FROM inbound_mentions
+			WHERE status = 'pending' AND next_attempt_at <= now()
+			ORDER BY next_attempt_at LIMIT $1 FOR UPDATE SKIP LOCKED)
+		RETURNING m.id, m.source_url, m.target_item_id, o.base_url, o.id, m.attempts, m.ever_verified`, wk.batch())
+	if err != nil {
+		return 0, err
+	}
+	claims, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (inboundClaim, error) {
+		var c inboundClaim
+		err := r.Scan(&c.id, &c.sourceURL, &c.targetItemID, &c.origin, &c.originID, &c.attempts, &c.everVerified)
+		return c, err
+	})
+	if err != nil {
+		return 0, err
+	}
+	for _, c := range claims {
+		out := Verify(ctx, wk.Fetch, c.sourceURL, Target{
+			Origin:   c.origin,
+			ItemID:   c.targetItemID,
+			IsPinned: wk.pinned(ctx, c.targetItemID),
+		})
+		if err := wk.recordInbound(ctx, c, out); err != nil {
+			return len(claims), err
+		}
+	}
+	return len(claims), nil
+}
+
+func (wk *Workers) pinned(ctx context.Context, itemID string) func(int) bool {
+	return func(v int) bool {
+		var ok bool
+		err := wk.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM item_versions
+			WHERE item_id = $1 AND version = $2 AND pinned_at IS NOT NULL)`, itemID, v).Scan(&ok)
+		return err == nil && ok
+	}
+}
+
+func (wk *Workers) recordInbound(ctx context.Context, c inboundClaim, out Outcome) error {
+	if out.Transient && c.attempts <= len(verifyRetry) {
+		_, err := wk.Pool.Exec(ctx, `UPDATE inbound_mentions SET next_attempt_at = now() + make_interval(secs => $2), failure = $3
+			WHERE id = $1`, c.id, verifyRetry[c.attempts-1].Seconds(), out.Reason)
+		return err
+	}
+	status := out.Status
+	// §15.4 rule 6: a mention that verified before and fails now is gone,
+	// and the record is kept so a later return is recognized.
+	if status == "failed" && c.everVerified {
+		status = "gone"
+	}
+	var relation any
+	if out.Relation != "" {
+		relation = out.Relation
+	}
+	_, err := wk.Pool.Exec(ctx, `UPDATE inbound_mentions SET
+		status = $2,
+		relation = coalesce($3, CASE WHEN $2 = 'gone' THEN relation END),
+		ever_verified = ever_verified OR $2 = 'verified',
+		source_origin = coalesce(nullif($4, ''), source_origin),
+		source_item_id = coalesce(nullif($5, ''), source_item_id),
+		source_version = coalesce(nullif($6, 0), source_version),
+		source_kind = coalesce(nullif($7, ''), source_kind),
+		source_author = CASE WHEN $2 = 'verified' THEN $8::jsonb ELSE source_author END,
+		source_page = coalesce(nullif($9, ''), source_page),
+		failure = CASE WHEN $2 = 'verified' THEN NULL ELSE $10 END,
+		verified_at = CASE WHEN $2 = 'verified' THEN now() ELSE verified_at END,
+		next_attempt_at = NULL
+		WHERE id = $1`,
+		c.id, status, relation, out.SourceOrigin, out.SourceID, out.SourceVersion, out.SourceKind,
+		nullJSON(out.SourceAuthor), out.SourcePage, out.Reason)
+	return err
+}
+
+func nullJSON(b []byte) any {
+	if len(b) == 0 {
+		return nil
+	}
+	return string(b)
+}
+
+type outboundClaim struct {
+	id       int64
+	m        Outbound
+	attempts int
+}
+
+// SendBatch sends up to one batch of due outbound mentions.
+func (wk *Workers) SendBatch(ctx context.Context) (int, error) {
+	rows, err := wk.Pool.Query(ctx, `UPDATE outbound_mentions
+		SET next_attempt_at = now() + interval '10 minutes', attempts = attempts + 1, updated_at = now()
+		WHERE id IN (
+			SELECT id FROM outbound_mentions
+			WHERE status = 'pending' AND next_attempt_at <= now()
+			ORDER BY next_attempt_at LIMIT $1 FOR UPDATE SKIP LOCKED)
+		RETURNING id, source_url, target_url, coalesce(target_origin, ''), attempts`, wk.batch())
+	if err != nil {
+		return 0, err
+	}
+	claims, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (outboundClaim, error) {
+		var c outboundClaim
+		err := r.Scan(&c.id, &c.m.SourceURL, &c.m.TargetURL, &c.m.TargetOrigin, &c.attempts)
+		return c, err
+	})
+	if err != nil {
+		return 0, err
+	}
+	for _, c := range claims {
+		res := Send(ctx, wk.Fetch, c.m)
+		status, next := res.Status, any(nil)
+		if status == "retry" {
+			if c.attempts > len(RetrySchedule) {
+				status = "abandoned"
+			} else {
+				status = "pending"
+				next = RetrySchedule[c.attempts-1].Seconds()
+			}
+		}
+		if _, err := wk.Pool.Exec(ctx, `UPDATE outbound_mentions SET status = $2,
+			next_attempt_at = CASE WHEN $3::float8 IS NULL THEN NULL ELSE now() + make_interval(secs => $3::float8) END,
+			endpoint = coalesce(nullif($4, ''), endpoint), last_result = $5, updated_at = now()
+			WHERE id = $1`, c.id, status, next, res.Endpoint, res.Detail); err != nil {
+			return len(claims), err
+		}
+	}
+	return len(claims), nil
+}
+
+func (wk *Workers) pruneClaims(ctx context.Context) (int, error) {
+	_, err := wk.Pool.Exec(ctx, `DELETE FROM mention_claims WHERE at < now() - interval '2 hours'`)
+	return 0, err
+}
