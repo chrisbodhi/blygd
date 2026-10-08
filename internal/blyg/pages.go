@@ -27,6 +27,7 @@ type PageSite struct {
 	Origin     string
 	Title      string
 	Webmention bool
+	Blogroll   bool // §11: the feed page SHOULD link a non-empty blogroll
 }
 
 var pageFuncs = template.FuncMap{
@@ -75,6 +76,9 @@ var feedPageTmpl = template.Must(template.New("feedpage").Funcs(pageFuncs).Parse
 <link rel="blyg" href="{{.Site.Origin}}">
 {{- if .Site.Webmention}}
 <link rel="webmention" href="{{.Site.Origin}}webmention">
+{{- end}}
+{{- if .Site.Blogroll}}
+<link rel="blogroll" type="text/x-opml" href="{{.Site.Origin}}blogroll.opml">
 {{- end}}
 <style>body{max-width:40rem;margin:2rem auto;padding:0 1rem;font:1rem/1.5 system-ui,sans-serif}
 .meta{color:#666;font-size:.875rem}article{border-bottom:1px solid #eee;padding:1rem 0}</style>

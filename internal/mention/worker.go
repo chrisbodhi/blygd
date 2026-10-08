@@ -3,6 +3,7 @@ package mention
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -165,7 +166,26 @@ func nullJSON(b []byte) any {
 type outboundClaim struct {
 	id       int64
 	m        Outbound
+	targetID string
 	attempts int
+}
+
+// importedPage returns the target's page as the import mirror holds it
+// (§15.2: "the target's page if the sender holds it, else the reference
+// convention"). The publish transaction wrote the convention, because it
+// does not read the mirror; the worker, which writes no surface, upgrades
+// the target here.
+func (wk *Workers) importedPage(ctx context.Context, origin, itemID string) string {
+	if origin == "" || itemID == "" {
+		return ""
+	}
+	var page string
+	err := wk.Pool.QueryRow(ctx, `SELECT ii.page_url FROM imported_items ii JOIN remote_origins ro ON ro.id = ii.remote_origin_id
+		WHERE ro.kind = 'blyg' AND ro.identity_url = $1 AND ii.item_id = $2 AND ii.page_url IS NOT NULL`, origin, itemID).Scan(&page)
+	if err != nil || !strings.HasPrefix(page, origin) {
+		return "" // a page outside the target's origin is not its page to name
+	}
+	return page
 }
 
 // SendBatch sends up to one batch of due outbound mentions.
@@ -176,19 +196,25 @@ func (wk *Workers) SendBatch(ctx context.Context) (int, error) {
 			SELECT id FROM outbound_mentions
 			WHERE status = 'pending' AND next_attempt_at <= now()
 			ORDER BY next_attempt_at LIMIT $1 FOR UPDATE SKIP LOCKED)
-		RETURNING id, source_url, target_url, coalesce(target_origin, ''), attempts`, wk.batch())
+		RETURNING id, source_url, target_url, coalesce(target_origin, ''), coalesce(target_id, ''), attempts`, wk.batch())
 	if err != nil {
 		return 0, err
 	}
 	claims, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (outboundClaim, error) {
 		var c outboundClaim
-		err := r.Scan(&c.id, &c.m.SourceURL, &c.m.TargetURL, &c.m.TargetOrigin, &c.attempts)
+		err := r.Scan(&c.id, &c.m.SourceURL, &c.m.TargetURL, &c.m.TargetOrigin, &c.targetID, &c.attempts)
 		return c, err
 	})
 	if err != nil {
 		return 0, err
 	}
 	for _, c := range claims {
+		if page := wk.importedPage(ctx, c.m.TargetOrigin, c.targetID); page != "" && page != c.m.TargetURL {
+			c.m.TargetURL = page
+			if _, err := wk.Pool.Exec(ctx, `UPDATE outbound_mentions SET target_url = $2 WHERE id = $1`, c.id, page); err != nil {
+				return len(claims), err
+			}
+		}
 		res := Send(ctx, wk.Fetch, c.m)
 		status, next := res.Status, any(nil)
 		if status == "retry" {

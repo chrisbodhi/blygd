@@ -1,15 +1,15 @@
 # blygd
 
 A [Blygger](https://github.com/blygger/blygger-spec) studio as one Go
-binary over Postgres: it publishes your blyg, will read everyone else's,
+binary over Postgres: it publishes your blyg, reads everyone else's,
 keeps your hoppers private, and sends and verifies Webmentions. It is
 headless — clients talk to it over a scoped-token API — and
 multi-tenant, with each user owning one path-mounted origin.
 
-Status: Phase 1 of [docs/PLAN.md](docs/PLAN.md). Fragments, pins,
-withdrawal, the full static surface, Webmentions in both directions, and
-hoppers over your own items work. The reader (Phase 2) and threads
-(Phase 3) are next.
+Status: Phases 1 and 2 of [docs/PLAN.md](docs/PLAN.md). Fragments, pins,
+withdrawal, the full static surface, Webmentions in both directions,
+hoppers, and the reader (subscriptions, the import mirror, a merged
+reading feed, the blogroll) work. Threads (Phase 3) are next.
 
 ## Run it
 
@@ -65,9 +65,30 @@ Every route takes `Authorization: Bearer <token>` and needs one scope.
 | `POST /api/items/{id}/withdraw` `{note?}` | `items:withdraw` |
 | `POST /api/items/{id}/versions/{n}/pin` | `items:pin` (irrevocable) |
 | `GET` / `POST /api/hoppers`, `GET` / `PATCH` / `DELETE /api/hoppers/{hid}` | `hoppers:read` / `hoppers:write` |
-| `POST /api/hoppers/{hid}/members` `{own_item_id}` or `{imported: {origin, id}}` | `hoppers:write` |
+| `POST /api/hoppers/{hid}/members` `{own_item_id}`, `{imported: {origin, id}}` or `{imported: {subscription_id, id}}` | `hoppers:write` |
 | `DELETE /api/hoppers/{hid}/members/{mid}` | `hoppers:write` |
 | `GET /api/mentions?status=…`, `GET /api/outbound` | `mentions:read` |
 | `GET` / `POST /api/tokens`, `DELETE /api/tokens/{tid}` | `tokens:write` |
+| `GET /api/subscriptions`, `GET /api/subscriptions/{sid}` | `reader:read` |
+| `POST /api/subscriptions` `{url}` (resolves per §12.1; 422 with the trail when nothing resolves) | `reader:write` |
+| `PATCH /api/subscriptions/{sid}` `{display_title?, in_blogroll?}` | `reader:write`, plus `origin:write` for `in_blogroll` |
+| `DELETE /api/subscriptions/{sid}` | `reader:write` |
+| `POST /api/subscriptions/{sid}/resolve` `{url?}` (reports, changes nothing) | `reader:read` |
+| `POST /api/subscriptions/{sid}/move` `{to}` (the confirmed identity change, §12.2) | `reader:write` |
+| `GET /api/reader/feed?limit=&before=&subscription=&unread=true` | `reader:read` |
+| `GET /api/reader/items/{sid}/{item_id}` | `reader:read` |
+| `PUT` / `DELETE /api/reader/items/{sid}/{item_id}/read` | `reader:write` |
+
+Imported content comes back verbatim, exactly as the origin served it.
+**Clients must sanitize or sandbox it before rendering** (§14); every
+reading response says so in a `notice` field.
+
+Subscribe to another blyg:
+
+```sh
+curl -s -H "Authorization: Bearer $T" localhost:8080/api/subscriptions \
+     -d '{"url": "https://example.com/blyg/"}'
+curl -s -H "Authorization: Bearer $T" localhost:8080/api/reader/feed
+```
 
 See [docs/DESIGN.md](docs/DESIGN.md) for how it works and why.

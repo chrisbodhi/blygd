@@ -21,6 +21,7 @@ const (
 	TypeJSON = "application/json; charset=utf-8"
 	TypeRSS  = "application/rss+xml; charset=utf-8"
 	TypeHTML = "text/html; charset=utf-8"
+	TypeOPML = "text/x-opml; charset=utf-8"
 )
 
 // putFile writes one surface file. Pins are write-once: the first render is
@@ -281,6 +282,20 @@ func (s *Studio) renderAggregates(ctx context.Context, tx pgx.Tx, o *Origin) err
 		return err
 	}
 
+	// ── blogroll (§11): served only when non-empty, and the manifest key
+	// only then too.
+	roll, err := blogroll(ctx, tx, o.ID)
+	if err != nil {
+		return err
+	}
+	if len(roll) > 0 {
+		if err := putFile(ctx, tx, o.ID, "blogroll.opml", TypeOPML, blyg.RenderOPML(title+" — blogroll", roll), false, false); err != nil {
+			return err
+		}
+	} else if err := deleteFile(ctx, tx, o.ID, "blogroll.opml"); err != nil {
+		return err
+	}
+
 	// ── manifest (§6.1).
 	updated := latest
 	if o.UpdatedAt.After(updated) {
@@ -293,6 +308,9 @@ func (s *Studio) renderAggregates(ctx context.Context, tx pgx.Tx, o *Origin) err
 	}
 	if o.AcceptMentions {
 		m.Webmention = "webmention"
+	}
+	if len(roll) > 0 {
+		m.Blogroll = "blogroll.opml"
 	}
 	mb, err := blyg.Marshal(m)
 	if err != nil {
@@ -325,7 +343,9 @@ func (s *Studio) renderAggregates(ctx context.Context, tx pgx.Tx, o *Origin) err
 	if err := prows.Err(); err != nil {
 		return err
 	}
-	fp, err := blyg.RenderFeedPage(pageSite(o), items)
+	site := pageSite(o)
+	site.Blogroll = len(roll) > 0
+	fp, err := blyg.RenderFeedPage(site, items)
 	if err != nil {
 		return err
 	}

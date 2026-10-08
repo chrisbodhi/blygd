@@ -84,7 +84,9 @@ func remoteRefs(own string, it *Item, v *Version, forkKind string) []outRef {
 			return
 		}
 		// §15.2: the target's page if the sender holds it, else the
-		// reference convention. Phase 2 will look up imported pages here.
+		// reference convention. The publish transaction never reads the
+		// import mirror, so this writes the convention and the send worker
+		// swaps in the imported page when there is one.
 		out = append(out, outRef{
 			key:           "blyg " + origin + " " + ref.ID,
 			relation:      rel,

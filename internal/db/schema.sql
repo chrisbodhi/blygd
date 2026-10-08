@@ -166,6 +166,19 @@ CREATE TABLE IF NOT EXISTS media (
   PRIMARY KEY (origin_id, path)
 );
 
+-- §11: the blogroll is a publishing act, so it lives in plane 1. Entries are
+-- written when the owner opts a subscription in, with the display values
+-- copied at that moment, so the renderer never reads the import mirror.
+CREATE TABLE IF NOT EXISTS blogroll_entries (
+  origin_id         bigint NOT NULL REFERENCES origins(id),
+  remote_origin_id  bigint NOT NULL,   -- which subscription it came from; never joined by the renderer
+  text              text NOT NULL,
+  xml_url           text NOT NULL,
+  html_url          text NOT NULL,
+  added_at          timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (origin_id, remote_origin_id)
+);
+
 -- The rendered public surface (§4). Every publish writes the affected files
 -- here once; the HTTP layer only ever serves these bytes. A dump of this
 -- table per origin is a conformant static blyg.
@@ -205,20 +218,31 @@ CREATE TRIGGER surface_guard BEFORE UPDATE OR DELETE ON surface_files
 
 -- ─────────────────── plane 2: import mirror ───────────────────
 -- Shared across users: one poll and one copy per remote origin, however
--- many users subscribe (§12.3 politeness). Importer is Phase 2.
+-- many users subscribe (§12.3 politeness). Written only by internal/reader.
 
 CREATE TABLE IF NOT EXISTS remote_origins (
   id                  bigserial PRIMARY KEY,
   kind                text NOT NULL CHECK (kind IN ('blyg', 'l0')),
-  -- §12.2 identity origin for a blyg; the feed URL for an L0 subscription.
+  -- §12.2 identity origin for a blyg (the post-redirect URL the manifest
+  -- came from, minus blyg.json); the final feed URL for an L0 subscription.
   identity_url        text NOT NULL UNIQUE,
-  manifest            jsonb,
+  manifest            jsonb,   -- verbatim, display-advisory (§12.2)
   title               text,
+  site_url            text,    -- L0: the feed's channel link (§11 htmlUrl)
+  -- §12.2: a manifest `site` that disagrees with the identity origin is
+  -- surfaced here and never adopted.
+  site_discrepancy    text,
   manifest_etag       text,
   feed_etag           text,
   feed_last_modified  text,
   index_etag          text,
   index_last_modified text,
+  -- §13.2 gap detection: the newest feed guid seen last poll. If it has left
+  -- the window, the poller falls back to an index diff.
+  feed_newest_guid    text,
+  reconciled_at       timestamptz,   -- last complete index diff
+  -- §13.2: an otherwise-live blyg whose items/index.json 404s.
+  lossy               boolean NOT NULL DEFAULT false,
   next_poll_at        timestamptz NOT NULL DEFAULT now(),
   poll_failures       integer NOT NULL DEFAULT 0,
   last_polled_at      timestamptz,
@@ -230,21 +254,34 @@ CREATE INDEX IF NOT EXISTS remote_origins_poll_idx ON remote_origins (next_poll_
 CREATE TABLE IF NOT EXISTS imported_items (
   id                bigserial PRIMARY KEY,
   remote_origin_id  bigint NOT NULL REFERENCES remote_origins(id),
-  item_id           text NOT NULL,   -- origin-scoped (§13.1 rule 7); synthetic for L0
+  -- Origin-scoped (§13.1 rule 7). For L0 it is synthetic, 'l0:' + hex, and
+  -- so can never be a valid blyg id (§13.6).
+  item_id           text NOT NULL,
   state             text NOT NULL CHECK (state IN ('current', 'withdrawn')),
-  watermark         integer NOT NULL,   -- §13.3: highest version ever seen
-  version           integer NOT NULL,
-  kind              text NOT NULL,
-  doc               jsonb,              -- latest document verbatim; NULL once rolled to null (§13.4)
-  page_url          text,
-  claimed_updated   timestamptz,
-  first_seen_at     timestamptz NOT NULL DEFAULT now(),   -- §13.7 ordering
+  watermark         integer NOT NULL CHECK (watermark >= 1),   -- §13.3: highest version ever seen
+  version           integer NOT NULL CHECK (version >= 1),
+  kind              text NOT NULL CHECK (kind IN ('fragment', 'thread', 'withdrawn', 'l0')),
+  -- The latest document verbatim; NULL once rolled to null (§13.4). Store
+  -- verbatim, sanitize at render (§14): nothing here is trusted HTML.
+  doc               jsonb,
+  content_hash      text,               -- as served, for stealth-edit detection (§13.3)
+  page_url          text,               -- absolute (§5.8); the entry link for L0
+  claimed_updated   timestamptz,        -- self-asserted (§5.2)
+  first_seen_at     timestamptz NOT NULL DEFAULT now(),
+  version_seen_at   timestamptz NOT NULL DEFAULT now(),   -- when this version was first observed
+  -- §13.7: an item sorts no newer than when we actually saw it.
+  sort_at           timestamptz GENERATED ALWAYS AS (least(claimed_updated, version_seen_at)) STORED,
   fetched_at        timestamptz NOT NULL DEFAULT now(),
-  discrepancy       text,               -- §13.3 rewrite / stealth edit, surfaced to the user
+  discrepancy       text,               -- §13.3 rewrite / stealth edit / bad hash, surfaced to the user
+  discrepancy_at    timestamptz,
+  CHECK (version <= watermark),
+  CHECK (state = 'current' OR doc IS NULL),
   UNIQUE (remote_origin_id, item_id)
 );
+CREATE INDEX IF NOT EXISTS imported_items_sort_idx ON imported_items (remote_origin_id, sort_at DESC, id DESC) WHERE state = 'current';
 
--- §13.4: the only content retainable past withdrawal.
+-- §13.4: the only content retainable past withdrawal. A pin's bytes never
+-- change at the origin (§8 rule 1), so neither do ours.
 CREATE TABLE IF NOT EXISTS imported_pins (
   remote_origin_id  bigint NOT NULL REFERENCES remote_origins(id),
   item_id           text NOT NULL,
@@ -254,16 +291,41 @@ CREATE TABLE IF NOT EXISTS imported_pins (
   PRIMARY KEY (remote_origin_id, item_id, version)
 );
 
+-- §13.3: the watermark never regresses, whatever the code above it does.
+CREATE OR REPLACE FUNCTION blygd_imported_items_guard() RETURNS trigger AS $$
+BEGIN
+  IF NEW.watermark < OLD.watermark THEN
+    RAISE EXCEPTION 'watermark never regresses (imported item %: % -> %)', OLD.item_id, OLD.watermark, NEW.watermark;
+  END IF;
+  IF NEW.remote_origin_id <> OLD.remote_origin_id OR NEW.item_id <> OLD.item_id THEN
+    RAISE EXCEPTION 'imported item identity is permanent (%)', OLD.item_id;
+  END IF;
+  RETURN NEW;
+END $$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS imported_items_guard ON imported_items;
+CREATE TRIGGER imported_items_guard BEFORE UPDATE ON imported_items
+  FOR EACH ROW EXECUTE FUNCTION blygd_imported_items_guard();
+
+CREATE OR REPLACE FUNCTION blygd_imported_pins_guard() RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'retained pins are immutable (% v%)', OLD.item_id, OLD.version;
+END $$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS imported_pins_guard ON imported_pins;
+CREATE TRIGGER imported_pins_guard BEFORE UPDATE ON imported_pins
+  FOR EACH ROW EXECUTE FUNCTION blygd_imported_pins_guard();
+
 -- ─────────────────── plane 3: private overlay ───────────────────
 
 CREATE TABLE IF NOT EXISTS subscriptions (
   user_id           bigint NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   remote_origin_id  bigint NOT NULL REFERENCES remote_origins(id),
   display_title     text,
-  in_blogroll       boolean NOT NULL DEFAULT false,   -- §11: opt-in, default excluded
   created_at        timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, remote_origin_id)
 );
+CREATE INDEX IF NOT EXISTS subscriptions_remote_idx ON subscriptions (remote_origin_id);
 
 CREATE TABLE IF NOT EXISTS hoppers (
   id           bigserial PRIMARY KEY,

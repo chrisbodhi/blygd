@@ -1,5 +1,6 @@
 // Command blygd is a Blygger studio: publisher, reader and hopper service in
-// one binary over Postgres.
+// one binary over Postgres. `serve` also runs the mention workers and the
+// reader's poller.
 //
 //	blygd serve                              run the server
 //	blygd user add <handle> [title]          create a user, their origin and an owner token
@@ -27,6 +28,7 @@ import (
 	"github.com/chrisbodhi/blygd/internal/fetch"
 	"github.com/chrisbodhi/blygd/internal/hopper"
 	"github.com/chrisbodhi/blygd/internal/mention"
+	"github.com/chrisbodhi/blygd/internal/reader"
 	"github.com/chrisbodhi/blygd/internal/studio"
 	"github.com/chrisbodhi/blygd/internal/web"
 )
@@ -45,7 +47,7 @@ const usage = `usage:
   blygd token mint <handle> <name> <scope>...
   blygd rebuild <handle>
 
-scopes: ` + "*, " + "items:read items:write items:publish items:withdraw items:pin hoppers:read hoppers:write mentions:read origin:write tokens:write"
+scopes: ` + "*, " + "items:read items:write items:publish items:withdraw items:pin hoppers:read hoppers:write mentions:read origin:write tokens:write reader:read reader:write"
 
 func run(log *slog.Logger, args []string) error {
 	if len(args) == 0 {
@@ -114,11 +116,13 @@ func serve(ctx context.Context, log *slog.Logger, cfg *config.Config, pool *pgxp
 		log.Warn("BLYGD_ALLOW_PRIVATE_FETCH is on: Webmention sources can reach private addresses. Development only.")
 	}
 	receiver := &mention.Receiver{Pool: pool, Limits: mention.DefaultRateLimits}
-	api := &web.API{Pool: pool, Accounts: accts, Studio: st, Hoppers: &hopper.Store{Pool: pool}, Log: log}
+	rd := &reader.Reader{Pool: pool, Fetch: &reader.LocalFirst{Studio: st, Remote: fc}, Log: log}
+	api := &web.API{Pool: pool, Accounts: accts, Studio: st, Hoppers: &hopper.Store{Pool: pool}, Reader: rd, Log: log}
 	surface := &web.Surface{Studio: st, Receiver: receiver, Scheme: cfg.Scheme(), TrustProxy: cfg.TrustProxy, Log: log}
 
 	workers := &mention.Workers{Pool: pool, Fetch: fc, Log: log}
 	workers.Run(ctx)
+	rd.Run(ctx)
 
 	srv := &http.Server{
 		Addr:              cfg.Listen,

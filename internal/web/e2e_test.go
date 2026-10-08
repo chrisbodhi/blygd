@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/chrisbodhi/blygd/internal/fetch"
 	"github.com/chrisbodhi/blygd/internal/hopper"
 	"github.com/chrisbodhi/blygd/internal/mention"
+	"github.com/chrisbodhi/blygd/internal/reader"
 	"github.com/chrisbodhi/blygd/internal/studio"
 	"github.com/chrisbodhi/blygd/internal/testdb"
 )
@@ -32,6 +34,8 @@ type env struct {
 	studio  *studio.Studio
 	accts   *account.Accounts
 	workers *mention.Workers
+	reader  *reader.Reader
+	fetch   *fetch.Client
 }
 
 func newEnv(t *testing.T, limits mention.RateLimits) *env {
@@ -44,10 +48,12 @@ func newEnv(t *testing.T, limits mention.RateLimits) *env {
 	fc := &fetch.Client{AllowPrivate: true, UserAgent: "blygd-test"}
 	st := &studio.Studio{Pool: pool, Generator: "blygd/test", Level: 2, Fetch: fc, FragmentCap: 2000}
 	accts := &account.Accounts{Pool: pool}
-	api := &API{Pool: pool, Accounts: accts, Studio: st, Hoppers: &hopper.Store{Pool: pool}, Log: log}
+	rd := &reader.Reader{Pool: pool, Fetch: &reader.LocalFirst{Studio: st, Remote: fc}, Log: log, ReconcileEvery: 1000 * time.Hour}
+	api := &API{Pool: pool, Accounts: accts, Studio: st, Hoppers: &hopper.Store{Pool: pool}, Reader: rd, Log: log}
 	surface := &Surface{Studio: st, Receiver: &mention.Receiver{Pool: pool, Limits: limits}, Scheme: "http", Log: log}
 	srv.Config.Handler = Router(api, surface, log)
-	return &env{t: t, srv: srv, pool: pool, studio: st, accts: accts, workers: &mention.Workers{Pool: pool, Fetch: fc, Log: log}}
+	return &env{t: t, srv: srv, pool: pool, studio: st, accts: accts, workers: &mention.Workers{Pool: pool, Fetch: fc, Log: log},
+		reader: rd, fetch: fc}
 }
 
 type user struct {

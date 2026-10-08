@@ -18,6 +18,7 @@ import (
 	"github.com/chrisbodhi/blygd/internal/account"
 	"github.com/chrisbodhi/blygd/internal/blyg"
 	"github.com/chrisbodhi/blygd/internal/hopper"
+	"github.com/chrisbodhi/blygd/internal/reader"
 	"github.com/chrisbodhi/blygd/internal/studio"
 )
 
@@ -29,6 +30,7 @@ type API struct {
 	Accounts *account.Accounts
 	Studio   *studio.Studio
 	Hoppers  *hopper.Store
+	Reader   *reader.Reader
 	Log      *slog.Logger
 }
 
@@ -68,6 +70,8 @@ func (a *API) Handler() http.Handler {
 
 	route("GET /api/mentions", account.ScopeMentionsRead, a.listMentions)
 	route("GET /api/outbound", account.ScopeMentionsRead, a.listOutbound)
+
+	a.readerRoutes(route)
 
 	route("GET /api/tokens", account.ScopeTokensWrite, a.listTokens)
 	route("POST /api/tokens", account.ScopeTokensWrite, a.mintToken)
@@ -503,8 +507,9 @@ func (a *API) addMember(w http.ResponseWriter, r *http.Request) error {
 	var in struct {
 		OwnItemID string `json:"own_item_id"`
 		Imported  *struct {
-			Origin string `json:"origin"`
-			ID     string `json:"id"`
+			Origin         string `json:"origin"`
+			SubscriptionID int64  `json:"subscription_id"`
+			ID             string `json:"id"`
 		} `json:"imported"`
 	}
 	if err := decode(r, &in); err != nil {
@@ -515,6 +520,8 @@ func (a *API) addMember(w http.ResponseWriter, r *http.Request) error {
 	switch {
 	case in.OwnItemID != "" && in.Imported == nil:
 		mid, err = a.Hoppers.AddOwn(r.Context(), uid, id, in.OwnItemID)
+	case in.OwnItemID == "" && in.Imported != nil && in.Imported.SubscriptionID > 0:
+		mid, err = a.Hoppers.AddImportedBySubscription(r.Context(), uid, id, in.Imported.SubscriptionID, in.Imported.ID)
 	case in.OwnItemID == "" && in.Imported != nil:
 		origin, nerr := blyg.NormalizeOrigin(in.Imported.Origin)
 		if nerr != nil {

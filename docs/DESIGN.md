@@ -6,7 +6,8 @@ reader, hoppers and Webmentions together. It is headless — every client
 multi-tenant, with each user owning one origin.
 
 Spec references (§) are to `blygger-spec` `docs/protocol-v0.3.md`, read at
-commit `c2da39f` (2026-10-07).
+commit `c2da39f` (2026-10-07) for Phase 1 and `d008e21` (2026-10-07) for
+Phase 2.
 
 ## Three planes
 
@@ -16,7 +17,7 @@ three planes apart, and the separation is structural:
 
 | Plane | What | Tables | Authority |
 |---|---|---|---|
-| 1. Own origins | Items this instance publishes | `origins`, `items`, `item_versions`, `media`, `surface_files` | Authoritative |
+| 1. Own origins | Items this instance publishes, and its blogroll | `origins`, `items`, `item_versions`, `media`, `blogroll_entries`, `surface_files` | Authoritative |
 | 2. Import mirror | Other origins' items, one copy per origin, shared by every subscriber | `remote_origins`, `imported_items`, `imported_pins` | Reconciled copy (§13) |
 | 3. Private overlay | Per-user: subscriptions, hoppers, reads | `subscriptions`, `hoppers`, `hopper_members`, `reads` | Private, never on the wire |
 
@@ -28,6 +29,14 @@ three planes apart, and the separation is structural:
   forbids. Own members may be drafts.
 - **The mirror is shared** so N users following one blyg cost that blyg
   one poll (§12.3), not N.
+- **The separation runs both ways.** `internal/studio` never queries the
+  mirror or the overlay, and `internal/reader` never queries plane-1
+  tables or writes the surface. A test in each package fails if a query
+  crosses the line.
+- **The blogroll is plane 1.** Publishing a reading choice is a publishing
+  act (§11). Opting a subscription in copies its outline (title, feed URL,
+  site URL) into `blogroll_entries`, and the renderer reads only that. The
+  copy is a snapshot: re-sending `in_blogroll: true` refreshes it.
 
 ## Render on publish
 
@@ -64,7 +73,10 @@ schema (triggers in `schema.sql`), not only in Go, and each has a test.
 | Item documents and pins stay 200 forever | §4, §8 | `surface_files.permanent` + trigger |
 | Pin bytes never change | §8 | `surface_files.immutable` + insert-or-ignore |
 | Drafts and unpinned versions 404 | §4, §8.4 | nothing renders them |
-| Imported items are never re-emitted | §13.5 | renderer reads plane 1 only |
+| Imported items are never re-emitted | §13.5 | renderer reads plane 1 only; structural test |
+| The import watermark never regresses | §13.3 | trigger `imported_items_guard` |
+| Retained pins never change | §8 rule 1, §13.4 | trigger `imported_pins_guard` |
+| A withdrawn import keeps no content | §13.4 | CHECK `state = 'current' OR doc IS NULL` |
 
 ## Origins and routing
 
@@ -123,6 +135,85 @@ once. A worker then:
 outside any transaction, and a crashed worker's rows come due again on
 their own.
 
+## The reader (Phase 2)
+
+**Resolution** (§12.1) is `reader.Resolve`: the six steps in order, at
+most six fetches, under a 45 s overall deadline because a subscribe
+request waits on it. The identity is the URL the manifest was fetched
+from, after redirects, minus `blyg.json` (§12.2). A manifest `site` that
+disagrees is stored as `site_discrepancy` and never adopted. A failure
+returns the trail of URLs tried. Only the HTML `<link rel="blyg">` is
+read; the optional HTTP `Link` header is not.
+
+**Identity changes are never automatic.** `POST
+/api/subscriptions/{id}/resolve` re-runs resolution and only reports.
+`POST …/move {to}` moves the subscription, and only if `to` resolves to
+exactly the identity named, so the user confirms the identity they saw,
+not a URL that redirects somewhere else.
+
+**The poller** leases due remote origins with the mention workers'
+pattern, and only origins someone subscribes to. One poll of one blyg:
+
+1. Conditional GET of `feed.xml`. Entries are triggers: an id we lack, or
+   a version above ours, queues a document fetch. The feed never writes
+   state (§13.2).
+2. Reconcile against `items/index.json` when due: on first poll, every
+   24 h, when the newest guid from last time has left the window, or when
+   the feed does not parse. Any entry whose version differs from ours is
+   fetched. A 404 index marks the subscription `lossy`.
+3. During reconciliation, re-fetch the 10 live documents fetched longest
+   ago. Stealth edits show up nowhere else (§13.3).
+4. Only a fetched document advances state, in its own short transaction
+   after its fetch.
+
+A poll fetches at most 200 documents. A large first backfill continues a
+minute later. Feed and index validators are saved only once everything
+they triggered has been fetched, so a 304 cannot hide an unfinished
+entry. Failure backs off exponentially from the 30-minute interval, up to
+24 h. It honors `Retry-After` and never polls sooner than the steady
+interval (§12.3). A poll failure never changes item state.
+
+**Applying a document** (`ApplyDocument`):
+
+- It must come from exactly `{origin}items/{id}.json`, after redirects.
+  The same rule as Webmention verification (§15.4).
+- Unknown kinds are ignored. The document is stored verbatim as `jsonb`:
+  key order and whitespace are not kept, every value is.
+- A lower version than the watermark is not adopted. It sets
+  `discrepancy`.
+- Same version, different hash: a stealth edit, adopted and recorded.
+- A `content_hash` that does not match `content_md`: recorded, adopted.
+- An endcap rolls the item to null: `doc` is cleared, `page_url` kept.
+- Pins the changelog names are fetched once into `imported_pins` and
+  kept through withdrawal (§13.4). A pin that 404s is a discrepancy.
+
+**L0** (§13.6): ids are `l0:` plus 32 hex characters of SHA-256 over the
+GUID (or link), which can never be a blyg id. A wrapped entry stores
+title, link, the summary HTML verbatim (capped at 64 KB) and a 1,000
+character plain-text cut. Changed content bumps a local version; entries
+that leave the window are kept.
+
+**Ordering** (§13.7): `sort_at = least(claimed updated, when we first
+saw this version)`, a stored generated column. Edits resurface; a
+future-dated origin sorts no later than now.
+
+**Same-instance subscriptions** go through `reader.LocalFirst`, which
+serves URLs inside an own origin from `surface_files` with the same
+status codes and ETags as HTTP. The importer sees exactly the bytes a
+remote reader would.
+
+**Outbound targets** (§15.2): the publish transaction writes the
+reference convention, because it does not read the mirror. The send
+worker, which writes no surface, swaps in the imported item's `page`
+when the mirror holds one.
+
+**Reading API**: subscriptions, a merged feed with keyset paging and an
+unread filter, single items with retained pins, and read marks per
+version (an item read at v3 is unread again at v4). Every imported byte
+is returned verbatim with a `notice` that clients must sanitize (§14).
+Hopper members that are imported items carry the verbatim document, or
+none once withdrawn.
+
 ## Outbound fetching
 
 Every outbound request goes through `internal/fetch`. Every URL it touches
@@ -155,10 +246,12 @@ flow.
   reference client's `html: false`), neuters `javascript:` URLs, and
   absolutizes every link (§5.2, decision #53). That is why own
   `content_html` is trusted in our pages.
-- **Imported content (Phase 2):** stored verbatim and never trusted. §14
-  requires readers to sanitize at render, so the API will hand clients
-  verbatim HTML plus the obligation to sanitize. A server-rendered reading
-  page, if one is ever added, sanitizes there.
+- **Imported content:** stored verbatim and never trusted. §14 requires
+  readers to sanitize at render, so the API hands clients verbatim HTML
+  plus the obligation to sanitize. A server-rendered reading page, if one
+  is ever added, sanitizes there. §13.6 calls the L0 summary "sanitized";
+  we store it verbatim too and leave sanitizing to the client, like
+  everything else imported.
 
 ## Deliberate departures from the reference client
 
@@ -171,5 +264,11 @@ flow.
   resolves yet.
 - Feed-title excerpts treat inline tags as zero-width. The reference turns
   every tag into a space, giving "**x**." → "x .".
+- The mirror is shared between users, so a discrepancy (§13.3) is
+  recorded once per item for everyone subscribed.
+- The user-confirmed reset after a regression (§13.3, MAY) is not
+  offered yet. The discrepancy is surfaced and the watermark holds.
+- Adding a subscription to the blogroll needs `origin:write` as well as
+  `reader:write`, because it publishes a reading choice (§11).
 - The manifest claims `level: 2`. That claim is informative (§3.2), but
   honest only once threads land (Phase 3); see PLAN.md.

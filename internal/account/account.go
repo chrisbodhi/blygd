@@ -35,12 +35,18 @@ const (
 	ScopeMentionsRead  = "mentions:read"
 	ScopeOriginWrite   = "origin:write"
 	ScopeTokensWrite   = "tokens:write"
+	// The reader. Subscribing is private (§11: there is no protocol
+	// follow); adding a subscription to the public blogroll also needs
+	// origin:write, because publishing a reading choice is a public act.
+	ScopeReaderRead  = "reader:read"
+	ScopeReaderWrite = "reader:write"
 )
 
 // AllScopes lists every grantable scope except "*".
 var AllScopes = []string{
 	ScopeItemsRead, ScopeItemsWrite, ScopeItemsPublish, ScopeItemsWithdraw, ScopeItemsPin,
 	ScopeHoppersRead, ScopeHoppersWrite, ScopeMentionsRead, ScopeOriginWrite, ScopeTokensWrite,
+	ScopeReaderRead, ScopeReaderWrite,
 }
 
 // ReservedHandles cannot be users: they are, or may become, host-rooted

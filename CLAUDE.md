@@ -29,7 +29,10 @@ on the command line or in the environment. Each test gets a fresh database.
 
 - **Plane separation.** Nothing that writes `surface_files` may read the
   import mirror (`remote_origins`, `imported_items`, `imported_pins`).
-  That is how imported items are never re-emitted (§13.5).
+  That is how imported items are never re-emitted (§13.5). The reverse
+  holds too: `internal/reader` never queries plane-1 tables, and reads a
+  same-instance origin through its rendered surface. Tests in both
+  packages check this.
 - **Render inside the transaction.** Any change to plane 1 re-renders its
   surface files in the same transaction. The HTTP layer never renders.
 - **Permanent things stay permanent.** Never weaken the triggers in
@@ -52,9 +55,11 @@ internal/blyg        protocol: wire types, ids, hashing, markdown, feed, pages (
 internal/db          pool + embedded schema.sql
 internal/studio      plane 1: item lifecycle, pins, outbox, render-on-publish
 internal/mention     §15: receiver, verifier, sender, lease workers
+internal/reader      §12–13: resolution, importer, poller, reading overlay
 internal/fetch       bounded, SSRF-guarded HTTP client
 internal/account     users, scoped tokens
 internal/hopper      hopper CRUD over references
 internal/web         HTTP: origin surface, /api, router; end-to-end tests
 internal/testdb      per-test databases
+internal/testblyg    a fake static blyg for import tests
 ```

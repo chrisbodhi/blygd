@@ -64,3 +64,23 @@ func TestBounds(t *testing.T) {
 		t.Errorf("file URL: %v", err)
 	}
 }
+
+func TestRetryAfter(t *testing.T) {
+	now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
+	for v, want := range map[string]time.Duration{
+		"120":                           2 * time.Minute,
+		"Wed, 07 Oct 2026 13:00:00 GMT": time.Hour,
+		"Wed, 07 Oct 2026 11:00:00 GMT": 0, // in the past
+		"soon":                          0,
+		"":                              0,
+		"-5":                            0,
+	} {
+		h := http.Header{}
+		if v != "" {
+			h.Set("Retry-After", v)
+		}
+		if got := RetryAfter(h, now); got != want {
+			t.Errorf("Retry-After %q: %v, want %v", v, got, want)
+		}
+	}
+}

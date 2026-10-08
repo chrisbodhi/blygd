@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -52,9 +53,48 @@ var (
 	ErrNotHTTP     = errors.New("only http and https URLs are fetched")
 )
 
+// ReaderLimits bound the import side's fetches: §12.2's RECOMMENDED 5
+// redirects, and room for a large archive index (§6.2 has no window).
+var ReaderLimits = Limits{MaxRedirects: 5, Timeout: 20 * time.Second, MaxBody: 16 << 20}
+
+// Conditional carries the validators of a conditional GET (§12.3).
+type Conditional struct {
+	ETag         string // sent as If-None-Match
+	LastModified string // sent as If-Modified-Since
+}
+
 // Get fetches url with GET.
 func (c *Client) Get(ctx context.Context, rawURL string, lim Limits, accept string) (*Response, error) {
 	return c.Do(ctx, http.MethodGet, rawURL, nil, "", lim, accept)
+}
+
+// GetIf fetches url with a conditional GET. A 304 comes back as a Response
+// with Status 304 and no body.
+func (c *Client) GetIf(ctx context.Context, rawURL string, lim Limits, accept string, cond Conditional) (*Response, error) {
+	h := http.Header{}
+	if cond.ETag != "" {
+		h.Set("If-None-Match", cond.ETag)
+	}
+	if cond.LastModified != "" {
+		h.Set("If-Modified-Since", cond.LastModified)
+	}
+	return c.do(ctx, http.MethodGet, rawURL, nil, "", lim, accept, h)
+}
+
+// RetryAfter parses a Retry-After header (seconds or an HTTP date) relative
+// to now. It returns 0 when the header is absent or unparseable.
+func RetryAfter(h http.Header, now time.Time) time.Duration {
+	v := strings.TrimSpace(h.Get("Retry-After"))
+	if v == "" {
+		return 0
+	}
+	if n, err := strconv.Atoi(v); err == nil && n > 0 {
+		return time.Duration(n) * time.Second
+	}
+	if t, err := http.ParseTime(v); err == nil && t.After(now) {
+		return t.Sub(now)
+	}
+	return 0
 }
 
 // Head fetches url with HEAD.
@@ -71,6 +111,10 @@ func (c *Client) PostForm(ctx context.Context, rawURL string, form url.Values, l
 
 // Do performs one bounded request.
 func (c *Client) Do(ctx context.Context, method, rawURL string, body io.Reader, contentType string, lim Limits, accept string) (*Response, error) {
+	return c.do(ctx, method, rawURL, body, contentType, lim, accept, nil)
+}
+
+func (c *Client) do(ctx context.Context, method, rawURL string, body io.Reader, contentType string, lim Limits, accept string, extra http.Header) (*Response, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, err
@@ -93,6 +137,9 @@ func (c *Client) Do(ctx context.Context, method, rawURL string, body io.Reader, 
 	}
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
+	}
+	for k, vs := range extra {
+		req.Header[k] = vs
 	}
 
 	hc := c.httpClient(lim)

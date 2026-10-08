@@ -14,10 +14,21 @@
 - Tests: unit tests for protocol, fetch and mention code, plus end-to-end
   tests on a real Postgres. Two deliberate rule breakages were caught.
 
-## Phase 2 — the reader
+## Phase 2 — the reader (done)
 
 The import mirror and the overlay that reads it. This is what makes blygd
-a frontend-agnostic reader for the Apple client and ygg.el.
+a frontend-agnostic reader for the Apple client and ygg.el. DESIGN.md
+("The reader") describes what was built.
+
+Left for later, all optional in the spec:
+
+- The user-confirmed reset to origin state after a regression (§13.3 MAY).
+- Running re-resolution on its own when surfaces 404 persistently (§12.2
+  MAY). Today the poll error says to re-resolve, and the user does.
+- The HTTP `Link` header form of `rel="blyg"` (§12.1 step 4, OPTIONAL).
+- Garbage-collecting mirror rows nobody subscribes to any more.
+- Upgrading an L0 subscription when its feed later gains
+  `<blyg:manifest>`.
 
 1. **Resolution** (§12.1), with the six-fetch bound. Subscription identity
    is the final fetch origin (§12.2), and identity changes require user
@@ -85,6 +96,13 @@ snapshots? no, they do not, so thin version pointers.
 
 ## Operations
 
+- **API description (after Phase 3).** The write and reading API is the
+  product, so it ships a hand-written OpenAPI document, embedded and
+  served unauthenticated at `GET /api/openapi.json`. It is tested at 100%
+  route coverage: a test fails when a registered route is missing from
+  the document, the document names a route that does not exist, or a
+  route's required scope differs between code and document.
+
 - **Migrations.** There are none yet: the schema is applied idempotently
   at startup, and while pre-release a schema change means recreating the
   dev database. Adopt a migration tool (tern or goose) before the first
@@ -94,4 +112,6 @@ snapshots? no, they do not, so thin version pointers.
   custom domains move TLS in-process, nightly `pg_dump`. Set
   `BLYGD_TRUST_PROXY=true` behind Caddy.
 - **Observability.** Request logs exist. Add queue-depth gauges for the
-  mention tables, and the poller, before the first public tenant.
+  mention tables, and the poller, before the first public tenant. The
+  poller records `last_error`, `poll_failures` and `lossy` per remote
+  origin, and the subscriptions API shows them.
