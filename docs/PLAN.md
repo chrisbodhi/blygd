@@ -99,7 +99,8 @@ Left for later:
 - **Media** upload: immutable, `media/{key}.{ext}`, retained forever when
   a pin references it (§5.4, §8 rule 4).
 - **Pinned version pages** `{page}v{n}/` (§8.4), plus pin citations on the
-  live page.
+  live page. *(Done: sanitized rather than verbatim, see DESIGN.md
+  departures; own forks' lineage links them.)*
 - **Public hoppers** at `/h/{slug}/` (§13.5): freeze the slug on first
   publicity, attribution and origin links, no protocol surface.
 - **Per-item display** of verified mentions (§15.5), opt-in.

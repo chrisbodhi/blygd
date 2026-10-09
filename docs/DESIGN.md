@@ -78,6 +78,7 @@ schema (triggers in `schema.sql`), not only in Go, and each has a test.
 | Item documents and pins stay 200 forever | §4, §8 | `surface_files.permanent` + trigger |
 | Pin bytes never change | §8 | `surface_files.immutable` + insert-or-ignore |
 | Drafts and unpinned versions 404 | §4, §8.4 | nothing renders them |
+| Pinned version pages stay 200 forever | §8.4 rule 1 | `surface_files.permanent` (re-renderable, not write-once) |
 | Imported items are never re-emitted | §13.5 | renderer reads plane 1 only; structural test |
 | The import watermark never regresses | §13.3 | trigger `imported_items_guard` |
 | Retained pins never change | §8 rule 1, §13.4 | trigger `imported_pins_guard` |
@@ -355,6 +356,14 @@ flow.
   rule 3 keeps quotes and generated prose apart), and an inline span that
   crosses a paragraph is closed and reopened, so the HTML stays well
   nested.
+- Pinned version pages (§8.4) show the pinned `content_html` sanitized,
+  not verbatim as rule 2 says. A pinned thread carries other origins'
+  bytes, and a page we must serve forever is the worst place for their
+  scripts. The pin's promise is its JSON file, which stays byte-exact and
+  is linked from the page. For the same reason the page is permanent but
+  not write-once: a rebuild re-renders it, so sanitizer and chrome fixes
+  reach old pins. Pinned pages advertise no Webmention endpoint, because
+  §15.3 accepts a target only as an item's page or document.
 - Fork flattening puts a blank line after each flattened quote. The
   reference does not, and the prose after a quote then joins it by lazy
   continuation.

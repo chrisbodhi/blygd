@@ -109,7 +109,7 @@ func (h *Surface) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// §4: public JSON and XML SHOULD carry permissive CORS.
 		hd.Set("Access-Control-Allow-Origin", "*")
 		hd.Set("Access-Control-Expose-Headers", "ETag")
-	} else if o.AcceptMentions {
+	} else if o.AcceptMentions && !blyg.IsPinnedPage(rel) {
 		// §15.1: announce the endpoint in a Link header too.
 		hd.Set("Link", `<`+o.BaseURL+`webmention>; rel="webmention"`)
 	}

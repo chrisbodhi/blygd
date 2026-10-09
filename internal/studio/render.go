@@ -108,12 +108,26 @@ func (s *Studio) renderItem(ctx context.Context, tx pgx.Tx, o *Origin, id string
 		if err := putFile(ctx, tx, o.ID, fmt.Sprintf("items/%s/v%d.json", id, v.Version), TypeJSON, pb, true, true); err != nil {
 			return err
 		}
+		// §8.4: the pin's human twin. Permanent like the JSON, but not
+		// write-once: its content is sanitized for our host (a deliberate
+		// departure from "verbatim", DESIGN.md), and chrome may evolve, so
+		// a rebuild re-renders it. The JSON twin keeps the promised bytes.
+		pp, err := blyg.RenderPinnedPage(pageSite(o), blyg.PinnedItem{
+			ID: id, Kind: v.Kind, Version: v.Version, At: v.At, Note: v.Note, Page: *it.Page,
+			ContentHTML: blyg.PageHTML(v.ContentHTML), Latest: it.Version, Withdrawn: it.Withdrawn,
+		})
+		if err != nil {
+			return err
+		}
+		if err := putFile(ctx, tx, o.ID, blyg.PinnedPage(*it.Page, v.Version), TypeHTML, pp, true, false); err != nil {
+			return err
+		}
 	}
 
 	page, err := blyg.RenderPermalink(pageSite(o), blyg.PageItem{
 		ID: id, Kind: latest.Kind, Version: it.Version, Updated: latest.At, Page: *it.Page,
 		ContentHTML: blyg.PageHTML(latest.ContentHTML), Pins: pins, Withdrawn: it.Withdrawn,
-		ForkedFrom: forkRef(it.ForkedFrom),
+		ForkedFrom: forkRef(it.ForkedFrom), ForkedFromURL: s.forkLink(ctx, tx, o, it.ForkedFrom),
 	})
 	if err != nil {
 		return err
@@ -171,6 +185,24 @@ func itemDoc(o *Origin, it *Item, vs []*Version) *blyg.ItemDoc {
 		doc.Generated = canon[[]blyg.Generated](latest.Generated)
 	}
 	return doc
+}
+
+// forkLink is where a fork's lineage line points (§5.6 rule 7): an own
+// source's pinned page, which we know we serve, else the pinned file.
+func (s *Studio) forkLink(ctx context.Context, tx pgx.Tx, o *Origin, raw json.RawMessage) string {
+	ref := forkRef(raw)
+	if ref == nil {
+		return ""
+	}
+	if blyg.SameOrigin(ref.Origin, o.BaseURL) {
+		var page *string
+		if tx.QueryRow(ctx, `SELECT i.page FROM items i JOIN item_versions v ON v.item_id = i.id
+			WHERE i.origin_id = $1 AND i.id = $2 AND v.version = $3 AND v.pinned_at IS NOT NULL`,
+			o.ID, ref.ID, ref.Version).Scan(&page) == nil && page != nil {
+			return o.BaseURL + blyg.PinnedPage(*page, ref.Version)
+		}
+	}
+	return blyg.PinURL(ref.Origin, ref.ID, ref.Version)
 }
 
 func forkRef(raw json.RawMessage) *blyg.Reference {

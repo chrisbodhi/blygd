@@ -3,6 +3,7 @@ package blyg
 import (
 	"errors"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -88,6 +89,18 @@ func ItemDocURL(origin, id string) string { return origin + "items/" + id + ".js
 func PinURL(origin, id string, version int) string {
 	return origin + "items/" + id + "/v" + strconv.Itoa(version) + ".json"
 }
+
+// PinnedPage is the optional rendered page of a pinned version (§8.4):
+// the item's permalink plus a version segment. page is origin-relative.
+func PinnedPage(page string, version int) string {
+	return page + "v" + strconv.Itoa(version) + "/"
+}
+
+var pinnedPagePath = regexp.MustCompile(`^[ft]/` + idClass + `/v[1-9][0-9]*/$`)
+
+// IsPinnedPage reports whether an origin-relative path is a pinned
+// version page under the f/{id}/ and t/{id}/ convention blygd uses.
+func IsPinnedPage(rel string) bool { return pinnedPagePath.MatchString(rel) }
 
 // DefaultPage is the reference convention for a permalink (§5.8): f/{id}/
 // for fragments, t/{id}/ for threads.
