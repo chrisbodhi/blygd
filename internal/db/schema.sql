@@ -384,14 +384,28 @@ CREATE TABLE IF NOT EXISTS hoppers (
   user_id      bigint NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name         text NOT NULL CHECK (length(name) BETWEEN 1 AND 200),
   slug         text NOT NULL CHECK (slug ~ '^[a-z0-9][a-z0-9-]*$'),
-  -- Public display (§13.5) is Phase 4. Once public, the slug is someone's
-  -- link and never changes again (reference studio's slug_frozen rule).
+  -- Public display (§13.5) is served live at {origin}h/{slug}/. Once public,
+  -- the slug is someone's link and never changes again (reference studio's
+  -- slug_frozen rule), even if the hopper goes private.
   public       boolean NOT NULL DEFAULT false,
   slug_frozen  boolean NOT NULL DEFAULT false,
   created_at   timestamptz NOT NULL DEFAULT now(),
   updated_at   timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (user_id, slug)
+  UNIQUE (user_id, slug),
+  CHECK (NOT public OR slug_frozen)
 );
+
+CREATE OR REPLACE FUNCTION blygd_hoppers_guard() RETURNS trigger AS $$
+BEGIN
+  IF OLD.slug_frozen AND (NOT NEW.slug_frozen OR NEW.slug <> OLD.slug) THEN
+    RAISE EXCEPTION 'hopper slug is frozen: it has been public (%)', OLD.slug;
+  END IF;
+  RETURN NEW;
+END $$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS hoppers_guard ON hoppers;
+CREATE TRIGGER hoppers_guard BEFORE UPDATE ON hoppers
+  FOR EACH ROW EXECUTE FUNCTION blygd_hoppers_guard();
 
 -- Members are references, never copies: a copy would outlive a withdrawal,
 -- which §13.4 forbids. Exactly one side is set.

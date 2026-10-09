@@ -69,7 +69,7 @@ func (a *API) routes() []route {
 		{"GET /api/hoppers", account.ScopeHoppersRead, a.listHoppers},
 		{"POST /api/hoppers", account.ScopeHoppersWrite, a.createHopper},
 		{"GET /api/hoppers/{hid}", account.ScopeHoppersRead, a.getHopper},
-		{"PATCH /api/hoppers/{hid}", account.ScopeHoppersWrite, a.renameHopper},
+		{"PATCH /api/hoppers/{hid}", account.ScopeHoppersWrite, a.patchHopper},
 		{"DELETE /api/hoppers/{hid}", account.ScopeHoppersWrite, a.deleteHopper},
 		{"POST /api/hoppers/{hid}/members", account.ScopeHoppersWrite, a.addMember},
 		{"DELETE /api/hoppers/{hid}/members/{mid}", account.ScopeHoppersWrite, a.removeMember},
@@ -541,27 +541,42 @@ func (a *API) getHopper(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-func (a *API) renameHopper(w http.ResponseWriter, r *http.Request) error {
+// patchHopper renames a hopper and/or makes it public or private. Making a
+// list public is a publishing act (§13.5), so it also needs origin:write,
+// as the blogroll does (§11).
+func (a *API) patchHopper(w http.ResponseWriter, r *http.Request) error {
 	id, err := pathInt(r, "hid")
 	if err != nil {
 		return err
 	}
 	var in struct {
-		Name string `json:"name"`
+		Name   *string `json:"name"`
+		Public *bool   `json:"public"`
 	}
 	if err := decode(r, &in); err != nil {
 		return err
 	}
-	h, err := a.Hoppers.Rename(r.Context(), principal(r.Context()).UserID, id, in.Name)
-	if err != nil {
-		if errors.Is(err, hopper.ErrNotFound) {
+	p := principal(r.Context())
+	if in.Public != nil && !p.Can(account.ScopeOriginWrite) {
+		return &httpError{403, "forbidden", "changing whether a hopper is public needs scope " + account.ScopeOriginWrite}
+	}
+	if in.Name == nil && in.Public == nil {
+		return badRequest("give name, public, or both")
+	}
+	var h *hopper.Hopper
+	if in.Name != nil {
+		if h, err = a.Hoppers.Rename(r.Context(), p.UserID, id, *in.Name); err != nil {
+			var pgErr *pgconn.PgError
+			if errors.Is(err, hopper.ErrNotFound) || errors.As(err, &pgErr) {
+				return err
+			}
+			return badRequest(err.Error())
+		}
+	}
+	if in.Public != nil {
+		if h, err = a.Hoppers.SetPublic(r.Context(), p.UserID, id, *in.Public); err != nil {
 			return err
 		}
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) {
-			return err
-		}
-		return badRequest(err.Error())
 	}
 	writeJSON(w, 200, h)
 	return nil

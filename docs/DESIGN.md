@@ -81,6 +81,8 @@ schema (triggers in `schema.sql`), not only in Go, and each has a test.
 | Media bytes never change | §5.4 | content-addressed path + trigger `media_guard` |
 | Media any published version references is kept forever | §8 rules 2 and 4 | `version_media` foreign key (RESTRICT) + trigger `version_media_guard` |
 | Media only drafts use is never served | §4 | the surface serves media only when `version_media` lists it |
+| A public hopper's slug never changes | §13.5 (reference `slug_frozen`) | CHECK `NOT public OR slug_frozen` + trigger `hoppers_guard` |
+| Public hoppers are never protocol surface | §13.5 | served live, never in `surface_files`; structural test in `internal/hopper` |
 | Pinned version pages stay 200 forever | §8.4 rule 1 | `surface_files.permanent` (re-renderable, not write-once) |
 | Imported items are never re-emitted | §13.5 | renderer reads plane 1 only; structural test |
 | The import watermark never regresses | §13.3 | trigger `imported_items_guard` |
@@ -318,6 +320,30 @@ declared type must match the sniffed bytes.
   Uploads that only drafts use 404 on the surface and may be deleted.
 - Served with `immutable` caching, `nosniff`, CORS, and a
   `default-src 'none'; sandbox` CSP.
+
+## Public hoppers (Phase 4)
+
+§13.5 lets a reader display imported content publicly as curation: a
+shown list with attribution and links, and no protocol surface. A public
+hopper is that, at `{origin}h/{slug}/`.
+
+- **Served live, never stored.** The web layer renders it per request
+  from `hopper.Store.Public`, with an ETag and `no-cache`. Nothing reaches
+  `surface_files`, so the renderer still never reads the mirror, a
+  withdrawal shows on the next request with nothing to re-render, and a
+  static export never holds anyone else's words. The page advertises no
+  Webmention endpoint and carries a strict CSP.
+- **Excerpts, not content.** Each entry is plain text (280 characters),
+  the source's title and the item's own author, with links to the item's
+  page and its origin. No imported HTML reaches the page.
+- **What shows:** own items only while published. Imported items only
+  from origins the owner still subscribes to, because only a polled copy
+  learns of a withdrawal. A withdrawn import shows its retained pin
+  (§13.4), marked, or nothing. L0 entries are marked as plain RSS.
+- **Going public is a publishing act:** `PATCH /api/hoppers/{id}
+  {public}` needs `origin:write` as well, as the blogroll does. The first
+  time a hopper goes public, its slug freezes for good, through renames
+  and going private again.
 
 ## Outbound fetching
 

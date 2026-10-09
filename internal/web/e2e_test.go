@@ -50,8 +50,9 @@ func newEnv(t *testing.T, limits mention.RateLimits) *env {
 	accts := &account.Accounts{Pool: pool}
 	rd := &reader.Reader{Pool: pool, Fetch: &reader.LocalFirst{Studio: st, Remote: fc}, Log: log, ReconcileEvery: 1000 * time.Hour}
 	st.Imports = rd
-	api := &API{Pool: pool, Accounts: accts, Studio: st, Hoppers: &hopper.Store{Pool: pool}, Reader: rd, Log: log}
-	surface := &Surface{Studio: st, Receiver: &mention.Receiver{Pool: pool, Limits: limits}, Scheme: "http", Log: log}
+	hoppers := &hopper.Store{Pool: pool}
+	api := &API{Pool: pool, Accounts: accts, Studio: st, Hoppers: hoppers, Reader: rd, Log: log}
+	surface := &Surface{Studio: st, Receiver: &mention.Receiver{Pool: pool, Limits: limits}, Hoppers: hoppers, Scheme: "http", Log: log}
 	srv.Config.Handler = Router(api, surface, log)
 	return &env{t: t, srv: srv, pool: pool, studio: st, accts: accts, workers: &mention.Workers{Pool: pool, Fetch: fc, Log: log},
 		reader: rd, fetch: fc}

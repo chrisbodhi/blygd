@@ -105,7 +105,9 @@ Left for later:
   live page. *(Done: sanitized rather than verbatim, see DESIGN.md
   departures; own forks' lineage links them.)*
 - **Public hoppers** at `/h/{slug}/` (§13.5): freeze the slug on first
-  publicity, attribution and origin links, no protocol surface.
+  publicity, attribution and origin links, no protocol surface. *(Done:
+  served live, excerpts only. Not yet linked from the feed page, which is
+  stored surface and must not read the overlay.)*
 - **Per-item display** of verified mentions (§15.5), opt-in.
 - **Static export:** tar `surface_files`, omitting the manifest
   `webmention` key (§15.7).

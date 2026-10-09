@@ -67,7 +67,7 @@ scope, named in the document's security requirement:
 | `hoppers:read` / `hoppers:write` | private hoppers |
 | `mentions:read` | inbound and outbound Webmentions |
 | `reader:read` / `reader:write` | subscriptions, the reading feed, read marks |
-| `origin:write` | origin settings, and publishing a blogroll entry |
+| `origin:write` | origin settings, publishing a blogroll entry, making a hopper public |
 | `tokens:write` | listing, minting (a subset of your own scopes) and revoking tokens |
 | `*` | everything: the owner token |
 

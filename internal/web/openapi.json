@@ -721,7 +721,7 @@
         "tags": [
           "hoppers"
         ],
-        "summary": "Rename a hopper.",
+        "summary": "Rename a hopper, or make it public or private.",
         "security": [
           {
             "bearer": [
@@ -761,7 +761,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/HopperName"
+                "$ref": "#/components/schemas/HopperPatch"
               }
             }
           }
@@ -3561,6 +3561,23 @@
         "required": [
           "media"
         ]
+      },
+      "HopperPatch": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "At least one of name or public.",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "The slug follows the name until the hopper has ever been public."
+          },
+          "public": {
+            "type": "boolean",
+            "description": "Show the list at {origin}h/{slug}/ (§13.5): excerpts with attribution and links, served live, never part of the protocol surface. Going public freezes the slug for good. Needs origin:write as well."
+          }
+        }
       }
     },
     "responses": {

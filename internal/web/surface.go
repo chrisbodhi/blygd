@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/chrisbodhi/blygd/internal/blyg"
+	"github.com/chrisbodhi/blygd/internal/hopper"
 	"github.com/chrisbodhi/blygd/internal/mention"
 	"github.com/chrisbodhi/blygd/internal/studio"
 )
@@ -19,6 +20,7 @@ import (
 type Surface struct {
 	Studio   *studio.Studio
 	Receiver *mention.Receiver
+	Hoppers  *hopper.Store // public hoppers (§13.5), served live
 	// Scheme is the public scheme. TLS normally terminates in front of
 	// blygd, so the request itself cannot say.
 	Scheme     string
@@ -82,6 +84,10 @@ func (h *Surface) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if strings.HasPrefix(rel, "media/") {
 		h.serveMedia(w, r, o, rel)
+		return
+	}
+	if strings.HasPrefix(rel, "h/") {
+		h.serveHopper(w, r, o, rel)
 		return
 	}
 
