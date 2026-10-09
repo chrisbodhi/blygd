@@ -67,11 +67,19 @@ CREATE TABLE IF NOT EXISTS items (
   page                text,
   -- §5.6: lineage, fixed at creation, immutable. A reference (§5.9).
   forked_from         jsonb,
+  -- §10.6: what this thread responds to, fixed at creation with its frozen
+  -- `cited` (§5.9). Each publish copies it onto the version, after the
+  -- version-agreement rule (rule 3).
+  draft_stub_of       jsonb,
+  -- Studio-private: what the client declared about each [TK] scope, by
+  -- position (model, at). Becomes generated[] at publish (§5.7).
+  draft_generation    jsonb,
   first_published_at  timestamptz,
   published_at        timestamptz,   -- latest publish event
   created_at          timestamptz NOT NULL DEFAULT now(),
   draft_updated_at    timestamptz NOT NULL DEFAULT now(),
-  CHECK (version > 0 OR (NOT withdrawn AND page IS NULL))
+  CHECK (version > 0 OR (NOT withdrawn AND page IS NULL)),
+  CHECK (draft_stub_of IS NULL OR authored_kind = 'thread')   -- §10.6: stubs are threads
 );
 CREATE INDEX IF NOT EXISTS items_origin_idx ON items (origin_id, published_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS items_page_idx ON items (origin_id, page) WHERE page IS NOT NULL;
@@ -98,7 +106,10 @@ CREATE TABLE IF NOT EXISTS item_versions (
   -- §8 rule 2: endcaps are never pinned.
   CHECK (kind <> 'withdrawn' OR pinned_at IS NULL),
   -- §9: an endcap says nothing.
-  CHECK (kind <> 'withdrawn' OR (content_md = '' AND content_html = '' AND generated IS NULL AND stub_of IS NULL))
+  CHECK (kind <> 'withdrawn' OR (content_md = '' AND content_html = '' AND generated IS NULL AND stub_of IS NULL)),
+  CHECK (stub_of IS NULL OR kind = 'thread'),                 -- §10.6
+  CHECK (kind <> 'thread' OR transclusions IS NOT NULL),      -- §10.3: threads always carry it
+  CHECK (kind <> 'fragment' OR transclusions IS NULL)         -- §10.3: fragments omit it
 );
 
 -- Invariants the protocol makes permanent are enforced here, not just in Go.
@@ -110,7 +121,11 @@ BEGIN
   IF NEW.item_id <> OLD.item_id OR NEW.version <> OLD.version OR NEW.kind <> OLD.kind
      OR NEW.at <> OLD.at OR NEW.note IS DISTINCT FROM OLD.note
      OR NEW.content_md <> OLD.content_md
-     OR NEW.content_html <> OLD.content_html OR NEW.content_hash <> OLD.content_hash THEN
+     OR NEW.content_html <> OLD.content_html OR NEW.content_hash <> OLD.content_hash
+     -- Provenance is part of the version (§10.3, §10.6 rule 4, §5.7 rule 5).
+     OR NEW.note_generated <> OLD.note_generated OR NEW.author IS DISTINCT FROM OLD.author
+     OR NEW.transclusions IS DISTINCT FROM OLD.transclusions OR NEW.stub_of IS DISTINCT FROM OLD.stub_of
+     OR NEW.generated IS DISTINCT FROM OLD.generated THEN
     RAISE EXCEPTION 'published versions are immutable (item %, v%)', OLD.item_id, OLD.version;
   END IF;
   -- §8 rule 1: a pin is irrevocable.

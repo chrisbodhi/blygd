@@ -43,16 +43,25 @@ type Target struct {
 // sourceDoc is the subset of an item document verification reads. Unknown
 // members are ignored (§13.1 rule 4).
 type sourceDoc struct {
-	Blyg          json.RawMessage  `json:"blyg"`
-	ID            string           `json:"id"`
-	Kind          string           `json:"kind"`
-	Origin        string           `json:"origin"`
-	Version       int              `json:"version"`
-	Page          string           `json:"page"`
-	Author        json.RawMessage  `json:"author"`
-	StubOf        json.RawMessage  `json:"stub_of"`
-	Transclusions []blyg.Reference `json:"transclusions"`
-	ForkedFrom    *blyg.Reference  `json:"forked_from"`
+	Blyg          json.RawMessage `json:"blyg"`
+	ID            string          `json:"id"`
+	Kind          string          `json:"kind"`
+	Origin        string          `json:"origin"`
+	Version       int             `json:"version"`
+	Page          string          `json:"page"`
+	Author        json.RawMessage `json:"author"`
+	StubOf        json.RawMessage `json:"stub_of"`
+	Transclusions []identity      `json:"transclusions"`
+	ForkedFrom    *identity       `json:"forked_from"`
+}
+
+// identity is a reference's machine-readable identity and nothing else
+// (§5.9). Decoding only these members is what keeps a malformed `cited` or
+// `selector` from deciding a verification: §15.4 must not consult them.
+type identity struct {
+	Origin  string `json:"origin"`
+	ID      string `json:"id"`
+	Version int    `json:"version"`
 }
 
 func failed(format string, a ...any) Outcome {
@@ -147,7 +156,7 @@ func Verify(ctx context.Context, c *fetch.Client, sourceURL string, t Target) Ou
 	// `selector` are never consulted.
 	us := func(o string) bool { return o != "" && blyg.SameOrigin(o, t.Origin) }
 	if doc.StubOf != nil {
-		var stub blyg.Reference
+		var stub identity
 		if json.Unmarshal(doc.StubOf, &stub) == nil && us(stub.Origin) && stub.ID == t.ItemID {
 			out.Status, out.Relation = "verified", "stub"
 			return out

@@ -6,10 +6,12 @@ keeps your hoppers private, and sends and verifies Webmentions. It is
 headless — clients talk to it over a scoped-token API — and
 multi-tenant, with each user owning one path-mounted origin.
 
-Status: Phases 1 and 2 of [docs/PLAN.md](docs/PLAN.md). Fragments, pins,
+Status: Phases 1–3 of [docs/PLAN.md](docs/PLAN.md). Fragments, pins,
 withdrawal, the full static surface, Webmentions in both directions,
-hoppers, and the reader (subscriptions, the import mirror, a merged
-reading feed, the blogroll) work. Threads (Phase 3) are next.
+hoppers, the reader (subscriptions, the import mirror, a merged reading
+feed, the blogroll), and threads (transclusion across origins, partial
+quotes, `[[id]]` links, stubs, generation provenance, fork flattening)
+work. Media, public hoppers and custom domains (Phase 4) are next.
 
 ## Run it
 

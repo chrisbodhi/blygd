@@ -90,6 +90,8 @@ func TestVerifyRelations(t *testing.T) {
 		{"stub", map[string]any{"stub_of": map[string]any{"origin": w.us(), "id": targetID, "version": 1, "cited": map[string]any{"retrieved": "x"}}}, nil, "verified", "stub"},
 		{"stub origin normalized", map[string]any{"stub_of": map[string]any{"origin": strings.ToUpper(w.srv.URL[:4]) + w.srv.URL[4:] + "/us", "id": targetID, "version": 1}}, nil, "verified", "stub"},
 		{"transclusion", map[string]any{"transclusions": []any{map[string]any{"id": "other0000000000000000000000"}, map[string]any{"origin": w.us(), "id": targetID, "version": 3}}}, nil, "verified", "transclusion"},
+		{"cited and selector are never consulted (§5.9)", map[string]any{"transclusions": []any{map[string]any{"origin": w.us(), "id": targetID, "version": 3,
+			"cited": map[string]any{"author": map[string]any{"name": "x"}, "retrieved": 7}, "selector": "not an object"}}}, nil, "verified", "transclusion"},
 		{"transclusion without origin is own-origin", map[string]any{"transclusions": []any{map[string]any{"id": targetID, "version": 3}}}, nil, "failed", ""},
 		{"fork of pinned", map[string]any{"forked_from": map[string]any{"origin": w.us(), "id": targetID, "version": 2}}, []int{2}, "verified", "fork"},
 		{"fork of unpinned", map[string]any{"forked_from": map[string]any{"origin": w.us(), "id": targetID, "version": 2}}, []int{1}, "failed", ""},

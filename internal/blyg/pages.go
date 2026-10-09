@@ -17,9 +17,10 @@ type PageItem struct {
 	Version     int
 	Updated     time.Time
 	Page        string
-	ContentHTML template.HTML // our own renderer's output: raw HTML already escaped
+	ContentHTML template.HTML // sanitized by PageHTML: threads carry other origins' bytes
 	Pins        []int
 	Withdrawn   bool
+	ForkedFrom  *Reference // §5.6 rule 7: a fork's page SHOULD show its lineage
 }
 
 // PageSite is the origin-level data every page needs.
@@ -60,6 +61,9 @@ var permalinkTmpl = template.Must(template.New("permalink").Funcs(pageFuncs).Par
 {{.Item.ContentHTML}}
 {{- end}}
 </article>
+{{- with .Item.ForkedFrom}}
+<p class="meta">Forked from <a href="{{pinURL .Origin .ID .Version}}">{{.Origin}} · {{.ID}} v{{.Version}}</a></p>
+{{- end}}
 <p class="meta">v{{.Item.Version}} · {{time .Item.Updated}}
 {{- if .Item.Pins}} · pinned:{{range .Item.Pins}} <a href="{{pinURL $.Site.Origin $.Item.ID .}}">v{{.}}</a>{{end}}{{end}}</p>
 </body>

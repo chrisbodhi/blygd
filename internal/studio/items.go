@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"regexp"
+	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -26,6 +26,8 @@ type Item struct {
 	Withdrawn        bool            `json:"withdrawn"`
 	Page             *string         `json:"page"`
 	ForkedFrom       json.RawMessage `json:"forked_from,omitempty"`
+	StubOf           json.RawMessage `json:"stub_of,omitempty"`    // §10.6, fixed at creation
+	Generation       json.RawMessage `json:"generation,omitempty"` // per [TK] scope: model, at
 	FirstPublishedAt *time.Time      `json:"first_published_at"`
 	PublishedAt      *time.Time      `json:"published_at"`
 	CreatedAt        time.Time       `json:"created_at"`
@@ -43,11 +45,11 @@ func (it *Item) State() string {
 	return "published"
 }
 
-const itemCols = `id, origin_id, authored_kind, draft_md, draft_note, version, withdrawn, page, forked_from, first_published_at, published_at, created_at, draft_updated_at`
+const itemCols = `id, origin_id, authored_kind, draft_md, draft_note, version, withdrawn, page, forked_from, draft_stub_of, draft_generation, first_published_at, published_at, created_at, draft_updated_at`
 
 func scanItem(row pgx.Row) (*Item, error) {
 	var it Item
-	err := row.Scan(&it.ID, &it.OriginID, &it.Kind, &it.DraftMD, &it.DraftNote, &it.Version, &it.Withdrawn, &it.Page, &it.ForkedFrom, &it.FirstPublishedAt, &it.PublishedAt, &it.CreatedAt, &it.DraftUpdatedAt)
+	err := row.Scan(&it.ID, &it.OriginID, &it.Kind, &it.DraftMD, &it.DraftNote, &it.Version, &it.Withdrawn, &it.Page, &it.ForkedFrom, &it.StubOf, &it.Generation, &it.FirstPublishedAt, &it.PublishedAt, &it.CreatedAt, &it.DraftUpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, notFound("item not found")
 	}
@@ -156,15 +158,25 @@ type NewDraft struct {
 	Kind       string // fragment or thread
 	ContentMD  string
 	ForkedFrom *blyg.Reference // §5.6: fixed now, immutable after
+	StubOf     *StubTarget     // §10.6: fixed now; makes the draft a stub
+}
+
+// StubTarget names what a stub responds to: an item by id (and origin, to
+// choose among imports), or a plain-web URL.
+type StubTarget struct {
+	Origin string          `json:"origin,omitempty"`
+	ID     string          `json:"id,omitempty"`
+	URL    string          `json:"url,omitempty"`
+	Cited  json.RawMessage `json:"cited,omitempty"` // {url} targets only: the client's label
 }
 
 // CreateDraft creates a never-published item. Drafts are invisible to the
 // protocol (§5.2) and 404 on the surface (§4).
+//
+// A fork sent without content_md starts from its source's pinned document,
+// flattened (§5.6 rule 6), and takes the source's kind unless one is given.
 func (s *Studio) CreateDraft(ctx context.Context, originID int64, in NewDraft) (*Item, error) {
-	if in.Kind == "" {
-		in.Kind = "fragment"
-	}
-	if in.Kind != "fragment" && in.Kind != "thread" {
+	if in.Kind != "" && in.Kind != "fragment" && in.Kind != "thread" {
 		return nil, invalid("kind must be fragment or thread")
 	}
 	var forked any
@@ -181,22 +193,108 @@ func (s *Studio) CreateDraft(ctx context.Context, originID int64, in NewDraft) (
 		if ref.Selector != nil {
 			return nil, invalid("forked_from takes no selector")
 		}
+		if strings.TrimSpace(in.ContentMD) == "" {
+			o, err := s.GetOrigin(ctx, originID)
+			if err != nil {
+				return nil, err
+			}
+			md, kind, err := s.forkContent(ctx, o, ref)
+			if err != nil {
+				return nil, err
+			}
+			in.ContentMD = md
+			if in.Kind == "" {
+				in.Kind = kind
+			}
+		}
 		b, _ := json.Marshal(ref)
 		forked = string(b)
 	}
-	return scanItem(s.Pool.QueryRow(ctx, `INSERT INTO items (id, origin_id, authored_kind, draft_md, forked_from)
-		VALUES ($1, $2, $3, $4, $5::jsonb) RETURNING `+itemCols, blyg.NewID(), originID, in.Kind, in.ContentMD, forked))
+	if in.Kind == "" {
+		in.Kind = "fragment"
+		if in.StubOf != nil {
+			in.Kind = "thread"
+		}
+	}
+	var stub any
+	if in.StubOf != nil {
+		if in.Kind != "thread" {
+			return nil, invalid("a stub is a thread (§10.6)")
+		}
+		o, err := s.GetOrigin(ctx, originID)
+		if err != nil {
+			return nil, err
+		}
+		raw, body, err := s.stubOf(ctx, o, in.StubOf)
+		if err != nil {
+			return nil, err
+		}
+		stub = string(raw)
+		if strings.TrimSpace(in.ContentMD) == "" {
+			in.ContentMD = body
+		}
+	}
+	return scanItem(s.Pool.QueryRow(ctx, `INSERT INTO items (id, origin_id, authored_kind, draft_md, forked_from, draft_stub_of)
+		VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb) RETURNING `+itemCols, blyg.NewID(), originID, in.Kind, in.ContentMD, forked, stub))
 }
 
-// UpdateDraft edits the draft content and/or the note for the next publish.
-// Editing a published item's draft changes nothing on the wire until the
-// next publish.
-func (s *Studio) UpdateDraft(ctx context.Context, originID int64, id string, contentMD, note *string) (*Item, error) {
+// DraftEdit changes a draft; nil leaves a field alone.
+type DraftEdit struct {
+	ContentMD *string
+	Note      *string // "" clears
+	// Generation is what the client declares about each [TK] scope, by
+	// position: [{"model": …, "at": …}] (§5.7). JSON null clears it.
+	Generation json.RawMessage
+}
+
+// UpdateDraft edits the draft content, the note for the next publish, and
+// the generation metadata. Editing a published item's draft changes
+// nothing on the wire until the next publish.
+func (s *Studio) UpdateDraft(ctx context.Context, originID int64, id string, in DraftEdit) (*Item, error) {
+	var gen any
+	if in.Generation != nil {
+		norm, err := normalizeGeneration(in.Generation)
+		if err != nil {
+			return nil, err
+		}
+		gen = norm
+	}
 	return scanItem(s.Pool.QueryRow(ctx, `UPDATE items SET
 		draft_md = coalesce($3, draft_md),
 		draft_note = CASE WHEN $4::text IS NULL THEN draft_note WHEN $4 = '' THEN NULL ELSE $4 END,
+		draft_generation = CASE WHEN $5::jsonb IS NULL THEN draft_generation WHEN $5::jsonb = 'null'::jsonb THEN NULL ELSE $5::jsonb END,
 		draft_updated_at = now()
-		WHERE origin_id = $1 AND id = $2 RETURNING `+itemCols, originID, id, contentMD, note))
+		WHERE origin_id = $1 AND id = $2 RETURNING `+itemCols, originID, id, in.ContentMD, in.Note, gen))
+}
+
+// normalizeGeneration checks a generation array and puts each `at` in the
+// protocol's timestamp form.
+func normalizeGeneration(raw json.RawMessage) (string, error) {
+	if string(raw) == "null" {
+		return "null", nil
+	}
+	var in []struct {
+		Model string `json:"model"`
+		At    string `json:"at"`
+	}
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&in); err != nil {
+		return "", invalid("generation must be an array of {model, at}, one per [TK] scope: %v", err)
+	}
+	out := make([]blyg.GenMeta, len(in))
+	for i, g := range in {
+		out[i].Model = strings.TrimSpace(g.Model)
+		if g.At != "" {
+			t, err := time.Parse(time.RFC3339, g.At)
+			if err != nil {
+				return "", invalid("generation[%d].at must be an RFC 3339 time", i)
+			}
+			out[i].At = blyg.Time(t)
+		}
+	}
+	b, _ := json.Marshal(out)
+	return string(b), nil
 }
 
 // DeleteDraft hard-deletes a never-published item (§9: discarding a draft is
@@ -224,20 +322,25 @@ type PublishResult struct {
 	Warnings []string `json:"warnings,omitempty"`
 }
 
-// internalLink matches [[id]] and ![[id]] (§10.1) anywhere. Resolving them is
-// Phase 3; until then publishing content that contains one is refused,
-// because §10.1 makes an unresolvable link a publish error.
-var internalLink = regexp.MustCompile(`\[\[[0-9a-hjkmnp-tv-z]{26}(@v\d+)?\]\]`)
+// PublishOptions are the per-publish inputs beside the draft.
+type PublishOptions struct {
+	Note *string // overrides the draft note when set
+	// NoteGenerated says the client wrote the note, not the author (§5.2).
+	NoteGenerated bool
+}
 
-// Publish publishes the draft as the next version.
-func (s *Studio) Publish(ctx context.Context, originID int64, id string, note *string) (*PublishResult, error) {
-	// Network checks happen before the transaction, never inside it.
+// Publish publishes the draft as the next version. A thread's directives
+// and every [[id]] link re-resolve now, against what the publisher holds:
+// local items first, then imported snapshots (§10.2). Nothing here touches
+// the network inside the transaction.
+func (s *Studio) Publish(ctx context.Context, originID int64, id string, opts PublishOptions) (*PublishResult, error) {
 	pre, _, err := s.GetItem(ctx, originID, id)
 	if err != nil {
 		return nil, err
 	}
-	if pre.Kind == "thread" {
-		return nil, invalid("threads are not supported yet (docs/PLAN.md, Phase 3)")
+	o, err := s.GetOrigin(ctx, originID)
+	if err != nil {
+		return nil, err
 	}
 	var warnings []string
 	var forkKind string
@@ -248,6 +351,14 @@ func (s *Studio) Publish(ctx context.Context, originID int64, id string, note *s
 		}
 		warnings = append(warnings, w...)
 		forkKind = kind
+	}
+	// The import lookup is a read of the mirror through reader, done before
+	// the transaction like any other outside input (CLAUDE.md).
+	var imports map[string][]Snapshot
+	if ids := referencedIDs(pre.DraftMD); len(ids) > 0 && s.Imports != nil {
+		if imports, err = s.Imports.Snapshots(ctx, o.OwnerID, ids); err != nil {
+			return nil, err
+		}
 	}
 
 	res := &PublishResult{Warnings: warnings}
@@ -260,51 +371,106 @@ func (s *Studio) Publish(ctx context.Context, originID int64, id string, note *s
 		if err != nil {
 			return err
 		}
-		md := it.DraftMD
+		if strings.TrimSpace(it.DraftMD) == "" {
+			return invalid("nothing to publish: the draft is empty")
+		}
+		if it.DraftMD != pre.DraftMD {
+			// The imports were looked up for the draft read above.
+			return conflict("the draft changed while publishing; publish again")
+		}
+		page := blyg.DefaultPage(it.Kind, it.ID)
+		if it.Page != nil {
+			page = *it.Page
+		}
+		var gen []blyg.GenMeta
+		if it.Generation != nil {
+			if err := json.Unmarshal(it.Generation, &gen); err != nil {
+				return fmt.Errorf("stored generation is malformed: %w", err)
+			}
+		}
+		rs := &resolver{ctx: ctx, tx: tx, origin: o, self: id, imports: imports}
+		c, err := blyg.Compose(blyg.ComposeInput{
+			ContentMD: it.DraftMD, Thread: it.Kind == "thread", PageURL: o.BaseURL + page,
+			Resolve: rs.resolve, Generation: gen,
+		})
+		if err != nil {
+			return err
+		}
+		if len(c.Problems) > 0 {
+			return unpublishable(c.Problems)
+		}
+		md := c.ContentMD
 		if strings.TrimSpace(md) == "" {
 			return invalid("nothing to publish: the draft is empty")
 		}
-		if n := utf8.RuneCountInString(md); s.FragmentCap > 0 && n > s.FragmentCap {
+		if n := utf8.RuneCountInString(md); it.Kind == "fragment" && s.FragmentCap > 0 && n > s.FragmentCap {
 			return invalid("fragment is %d characters; the cap is %d (§5.3)", n, s.FragmentCap)
-		}
-		if internalLink.MatchString(md) {
-			return invalid("[[id]] links and ![[id]] directives resolve at publish, which arrives in Phase 3")
 		}
 		var prev *Version
 		if it.Version > 0 {
 			if prev, err = scanVersion(tx.QueryRow(ctx, `SELECT `+versionCols+` FROM item_versions WHERE item_id = $1 AND version = $2`, id, it.Version)); err != nil {
 				return err
 			}
-			if !it.Withdrawn && prev.ContentMD == md {
+			// A thread whose text is unchanged may still republish: its
+			// quotes re-resolve to newer snapshots (§10.2).
+			if !it.Withdrawn && prev.ContentMD == md && prev.ContentHTML == c.ContentHTML {
 				// A publish event with nothing in it is churn every reader
 				// pays for (a new feed entry, a new guid).
 				return conflict("no change since v%d", it.Version)
 			}
 		}
+		note := opts.Note
 		if note == nil {
 			note = it.DraftNote
 		}
 		if note != nil && strings.TrimSpace(*note) == "" {
 			note = nil
 		}
-
-		page := blyg.DefaultPage(it.Kind, it.ID)
-		if it.Page != nil {
-			page = *it.Page
-		}
-		html, err := blyg.RenderMarkdown(md, o.BaseURL+page)
-		if err != nil {
-			return err
-		}
 		at := s.now()
 		if prev != nil && at.Before(prev.At) {
 			at = prev.At // keep the changelog ordered if the clock stepped back
 		}
+
+		var transclusions, stubOf, generated any
+		if it.Kind == "thread" {
+			for i, t := range c.Quoted {
+				if t.Origin == "" {
+					continue
+				}
+				// §5.9: each remote entry carries its human half, frozen now.
+				c.Transclusions[i].Cited = cited(rs.quoted[t.Origin+" "+t.ID], at)
+				if !t.Pinned {
+					res.Warnings = append(res.Warnings, fmt.Sprintf(
+						"![[%s]] quotes v%d at %s, which is not pinned: if it is withdrawn, this thread cannot be republished until the quote is removed (§10.2)",
+						t.ID, t.Version, t.Origin))
+				}
+			}
+			b, err := json.Marshal(c.Transclusions)
+			if err != nil {
+				return err
+			}
+			transclusions = string(b)
+			if it.StubOf != nil {
+				agreed, err := stubAgreement(it.StubOf, o.BaseURL, c.Transclusions)
+				if err != nil {
+					return err
+				}
+				stubOf = string(agreed)
+			}
+		}
+		if len(c.Generated) > 0 {
+			b, err := json.Marshal(c.Generated)
+			if err != nil {
+				return err
+			}
+			generated = string(b)
+		}
 		next := it.Version + 1
 		v, err := scanVersion(tx.QueryRow(ctx, `INSERT INTO item_versions
-			(item_id, version, kind, at, note, content_md, content_html, content_hash, author)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb) RETURNING `+versionCols,
-			id, next, it.Kind, at, note, md, html, blyg.ContentHash(md), nullableJSON(o.Byline)))
+			(item_id, version, kind, at, note, note_generated, content_md, content_html, content_hash, author, transclusions, stub_of, generated)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12::jsonb, $13::jsonb) RETURNING `+versionCols,
+			id, next, it.Kind, at, note, note != nil && opts.NoteGenerated, md, c.ContentHTML, blyg.ContentHash(md),
+			nullableJSON(o.Byline), transclusions, stubOf, generated))
 		if err != nil {
 			return err
 		}

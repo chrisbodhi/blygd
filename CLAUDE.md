@@ -27,9 +27,14 @@ on the command line or in the environment. Each test gets a fresh database.
 
 ## Rules of the house
 
-- **Plane separation.** Nothing that writes `surface_files` may read the
+- **Plane separation.** Nothing that writes `surface_files` may query the
   import mirror (`remote_origins`, `imported_items`, `imported_pins`).
-  That is how imported items are never re-emitted (§13.5). The reverse
+  That is how imported items are never re-emitted (§13.5). The one
+  sanctioned path from the mirror into plane 1 is `studio.Imports`,
+  implemented by `reader.Snapshots`: a read-only lookup, scoped to the
+  publisher's own subscriptions and called before the publish
+  transaction, whose results are only ever baked as a §10.2 snapshot, an
+  `[[id]]` anchor, or a frozen `cited`. Do not widen it. The reverse
   holds too: `internal/reader` never queries plane-1 tables, and reads a
   same-instance origin through its rendered surface. Tests in both
   packages check this.
@@ -42,6 +47,8 @@ on the command line or in the environment. Each test gets a fresh database.
 - **All outbound HTTP goes through `internal/fetch`.** Never use
   `http.DefaultClient` for a URL someone else chose.
 - **Store verbatim, sanitize at render** for anything imported (§14).
+  That includes our own thread pages: a bake carries another origin's
+  bytes, so pages go through `blyg.PageHTML`, never raw `template.HTML`.
 - Every new invariant gets a test, and the test should fail when the rule
   is broken: try it.
 - No migrations yet. Schema changes edit `schema.sql` and assume a fresh
@@ -51,7 +58,8 @@ on the command line or in the environment. Each test gets a fresh database.
 
 ```
 cmd/blygd            CLI: serve, user add, token mint, rebuild
-internal/blyg        protocol: wire types, ids, hashing, markdown, feed, pages (pure)
+internal/blyg        protocol: wire types, ids, hashing, markdown, feed, pages,
+                     thread grammar and composition, fork flattening (pure)
 internal/db          pool + embedded schema.sql
 internal/studio      plane 1: item lifecycle, pins, outbox, render-on-publish
 internal/mention     §15: receiver, verifier, sender, lease workers

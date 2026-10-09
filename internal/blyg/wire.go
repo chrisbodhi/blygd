@@ -14,13 +14,46 @@ func Time(t time.Time) string { return t.UTC().Format("2006-01-02T15:04:05Z") }
 func RFC822(t time.Time) string { return t.UTC().Format("Mon, 02 Jan 2006 15:04:05 GMT") }
 
 // Reference is the citation shape of §5.9. Only Origin, ID and Version are
-// identity; Cited and Selector ride along verbatim and are never compared.
+// identity; Cited and Selector ride along and are never compared.
 type Reference struct {
-	Origin   string          `json:"origin,omitempty"`
-	ID       string          `json:"id"`
-	Version  int             `json:"version"`
-	Selector json.RawMessage `json:"selector,omitempty"`
-	Cited    json.RawMessage `json:"cited,omitempty"`
+	Origin   string    `json:"origin,omitempty"`
+	ID       string    `json:"id"`
+	Version  int       `json:"version"`
+	Selector *Selector `json:"selector,omitempty"`
+	Cited    *Cited    `json:"cited,omitempty"`
+}
+
+// Cited is the human half of a citation (§5.9): frozen when the reference
+// was made, self-asserted, never verified. retrieved is REQUIRED.
+type Cited struct {
+	Source    string `json:"source,omitempty"`
+	Author    string `json:"author,omitempty"`
+	Excerpt   string `json:"excerpt,omitempty"`
+	URL       string `json:"url,omitempty"`
+	Retrieved string `json:"retrieved"`
+}
+
+// StubOf is either stub_of shape (§10.6): a reference, or {url}.
+type StubOf struct {
+	URL     string `json:"url,omitempty"`
+	Origin  string `json:"origin,omitempty"`
+	ID      string `json:"id,omitempty"`
+	Version int    `json:"version,omitempty"`
+	Cited   *Cited `json:"cited,omitempty"`
+}
+
+// Canonical re-encodes stored JSON through v's type, so members appear in
+// the spec's order whatever order the database kept them in (jsonb sorts
+// keys). nil stays nil.
+func Canonical[T any](raw json.RawMessage) (json.RawMessage, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	var v T
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return nil, err
+	}
+	return json.Marshal(v)
 }
 
 // ChangelogEntry is metadata about one version, never content (§5.2).

@@ -7,7 +7,7 @@ multi-tenant, with each user owning one origin.
 
 Spec references (§) are to `blygger-spec` `docs/protocol-v0.3.md`, read at
 commit `c2da39f` (2026-10-07) for Phase 1 and `d008e21` (2026-10-07) for
-Phase 2.
+Phases 2 and 3.
 
 ## Three planes
 
@@ -23,7 +23,12 @@ three planes apart, and the separation is structural:
 
 - **The renderer reads only plane 1.** Imported items can never be
   re-emitted (§13.5) because nothing that writes `surface_files` queries
-  plane 2.
+  plane 2. A thread may quote an imported item (§10.2), and that is the
+  one door: `studio.Imports`, implemented by `reader.Snapshots`, hands a
+  publish the snapshots the publisher's own subscriptions hold. It runs
+  before the transaction. What it returns is baked once into the new
+  version and stored in plane 1, where it is the publisher's bytes from
+  then on.
 - **Hopper members are references**, exactly one of `own_item_id` or
   `imported_item_id`. A copy would outlive a withdrawal, which §13.4
   forbids. Own members may be drafts.
@@ -77,6 +82,10 @@ schema (triggers in `schema.sql`), not only in Go, and each has a test.
 | The import watermark never regresses | §13.3 | trigger `imported_items_guard` |
 | Retained pins never change | §8 rule 1, §13.4 | trigger `imported_pins_guard` |
 | A withdrawn import keeps no content | §13.4 | CHECK `state = 'current' OR doc IS NULL` |
+| A version's provenance never changes | §10.3, §10.6 rule 4, §5.7 rule 5 | trigger `item_versions_guard` |
+| Threads carry `transclusions`, fragments never | §10.3 | CHECK constraints |
+| Stubs are threads | §10.6 | CHECK constraints on `items` and `item_versions` |
+| A tenant quotes only what its own subscriptions imported | §10.2 step 2 | `reader.Snapshots` joins `subscriptions`; e2e test |
 
 ## Origins and routing
 
@@ -214,6 +223,73 @@ is returned verbatim with a `notice` that clients must sanitize (§14).
 Hopper members that are imported items carry the verbatim document, or
 none once withdrawn.
 
+## Threads (Phase 3)
+
+**Composition** is `blyg.Compose`, pure apart from a resolver callback,
+and it runs inside the publish transaction:
+
+1. `[TK]` scopes are stripped to their output. That is the wire
+   `content_md` the hash covers (§5.7 rule 2).
+2. A thread is split at its directive lines. Each directive resolves and
+   bakes. A directive with an attached blockquote is a partial quote: the
+   selection must be a substring of the target's text content (§10.2),
+   and it bakes as escaped `<p>` lines with `blyg-partial`. The selector
+   records the first match with 32 characters of context either side.
+3. The prose between directives is rendered with `[[id]]` links swapped
+   for sentinels, generated spans are wrapped in `blyg-tk-gen`, and the
+   links are spliced back as absolute anchors. A link inside another
+   link's text becomes its label, and one inside a URL or a tag goes back
+   to the author's literal.
+
+Code spans and code blocks are found with goldmark's own parser, so the
+grammar is inert in exactly the places the renderer shows code (§10.1).
+`SelectionText` follows the reference client's normalizer rule for rule,
+because any reader may re-run the partial check.
+
+**Resolution** (§10.2) is the studio's `resolver`. It looks in this
+origin first: a published item of either kind, then the local closure
+check for threads, walking stored `transclusions[]` within this origin
+only. After that it looks at imports fetched before the transaction.
+L0 rows, items withdrawn with nothing retained, and ids imported from
+two origins are publish errors. A withdrawn import with a retained pin
+bakes the latest pin. Every problem is reported at once, as `422` with a
+`problems` list. A remote entry carries a `cited` frozen at publish, and
+the response warns when a remote quote is unpinned (§10.2 SHOULD).
+Republishing a thread whose text is unchanged is allowed when its bake
+changed, because quotes re-resolve.
+
+**Stubs** (§10.6). `POST /api/items {stub_of}` resolves the target and
+freezes `stub_of` with its `cited` on the draft (`draft_stub_of`). Its
+first body is `![[id]]`. Each publish copies it to the version after
+version agreement (rule 3): the baked version when the body quotes the
+target, else the version set at creation. A `{url}` stub carries the
+client's `cited`, dated, with its excerpt held to 200 characters.
+
+**Generated provenance** (§5.7). blygd runs no model, so it reads the
+reference client's `[TK]` grammar as the client's declaration, and
+discloses every scope. `[TK]instruction[=]output[/TK]` takes its sources
+from the instruction's `![[id]]`s, which must be own published items
+(rule 1). The model and time come from `PATCH /api/items/{id}
+{generation: [{model, at}]}`, by scope position.
+`[TK]impyrt <model>=text[/TK]` is text generated elsewhere (rule 7). A
+publish with `note_generated: true` marks the changelog note as
+client-written (§5.2).
+
+**Forks** (§5.6 rule 6). `POST /api/items {forked_from}` without
+`content_md` fetches the pinned document before any transaction (or
+reads it from plane 1 when it is our own). `blyg.FlattenFork` then
+builds the draft:
+
+- own prose is copied byte-exact;
+- each bake becomes a plain blockquote with an attribution line, nested
+  quotes nested, and partiality read from the bake's class;
+- `[[id]]` links become the anchors the bake rendered;
+- generated spans become `[TK]impyrt …[/TK]`, so the fork discloses them
+  again.
+
+When the prose cannot be matched to the bake, the whole draft is rebuilt
+from the HTML. A fork's page shows its lineage (rule 7).
+
 ## Outbound fetching
 
 Every outbound request goes through `internal/fetch`. Every URL it touches
@@ -244,8 +320,12 @@ flow.
 
 - **Our own content:** the markdown renderer escapes raw HTML (the
   reference client's `html: false`), neuters `javascript:` URLs, and
-  absolutizes every link (§5.2, decision #53). That is why own
-  `content_html` is trusted in our pages.
+  absolutizes every link (§5.2, decision #53).
+- **Our own pages:** a thread's `content_html` carries other origins'
+  bytes, baked verbatim as §10.2 requires. Pages share a host with every
+  tenant and the API, so `blyg.PageHTML` sanitizes every `content_html`
+  shown on a page (bluemonday's UGC policy, plus the protocol's own
+  classes and `data-blyg-*`). The wire keeps the bytes.
 - **Imported content:** stored verbatim and never trusted. §14 requires
   readers to sanitize at render, so the API hands clients verbatim HTML
   plus the obligation to sanitize. A server-rendered reading page, if one
@@ -259,9 +339,20 @@ flow.
   are `f/{id}/` and `t/{id}/`, which never need to.
 - A publish with no content change is refused (409). It would cost every
   reader a new feed entry and guid for nothing.
-- Content containing `[[id]]` or `![[id]]` is refused until Phase 3,
-  because §10.1 makes an unresolvable link a publish error, and nothing
-  resolves yet.
+- A fragment containing a live `![[id]]` is refused. Only threads
+  transclude (§10), and printing the directive literally would surprise
+  the author.
+- Every `[TK]` scope is disclosed. The reference wraps only scopes its own
+  generate endpoint produced; blygd has none, so a scope is the client's
+  declaration. A directive inside generated output is refused (§5.7
+  rule 3 keeps quotes and generated prose apart), and an inline span that
+  crosses a paragraph is closed and reopened, so the HTML stays well
+  nested.
+- Fork flattening puts a blank line after each flattened quote. The
+  reference does not, and the prose after a quote then joins it by lazy
+  continuation.
+- A remote `[[id]]` anchor is labelled the way the reference labels it
+  (leading heading, else a quoted excerpt), using our own excerpt rule.
 - Feed-title excerpts treat inline tags as zero-width. The reference turns
   every tag into a space, giving "**x**." → "x .".
 - The mirror is shared between users, so a discrepancy (§13.3) is
@@ -270,5 +361,6 @@ flow.
   offered yet. The discrepancy is surfaced and the watermark holds.
 - Adding a subscription to the blogroll needs `origin:write` as well as
   `reader:write`, because it publishes a reading choice (§11).
-- The manifest claims `level: 2`. That claim is informative (§3.2), but
-  honest only once threads land (Phase 3); see PLAN.md.
+- The manifest claims `level: 2` (§3). With threads it is honest: every
+  L1 and L2 publisher construct is implemented. The claim stays
+  informative (§3.2).

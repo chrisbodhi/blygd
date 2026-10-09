@@ -49,6 +49,7 @@ func newEnv(t *testing.T, limits mention.RateLimits) *env {
 	st := &studio.Studio{Pool: pool, Generator: "blygd/test", Level: 2, Fetch: fc, FragmentCap: 2000}
 	accts := &account.Accounts{Pool: pool}
 	rd := &reader.Reader{Pool: pool, Fetch: &reader.LocalFirst{Studio: st, Remote: fc}, Log: log, ReconcileEvery: 1000 * time.Hour}
+	st.Imports = rd
 	api := &API{Pool: pool, Accounts: accts, Studio: st, Hoppers: &hopper.Store{Pool: pool}, Reader: rd, Log: log}
 	surface := &Surface{Studio: st, Receiver: &mention.Receiver{Pool: pool, Limits: limits}, Scheme: "http", Log: log}
 	srv.Config.Handler = Router(api, surface, log)

@@ -130,6 +130,10 @@ func (a *API) handleErr(w http.ResponseWriter, r *http.Request, err error) {
 		if status == 0 {
 			status = 500
 		}
+		if len(se.Problems) > 0 {
+			writeJSON(w, status, map[string]any{"error": se.Code, "message": se.Msg, "problems": se.Problems})
+			return
+		}
 		writeError(w, status, se.Code, se.Msg)
 	case errors.Is(err, hopper.ErrNotFound):
 		writeError(w, 404, "not_found", "not found")
@@ -282,9 +286,10 @@ func (a *API) listItems(w http.ResponseWriter, r *http.Request) error {
 
 func (a *API) createItem(w http.ResponseWriter, r *http.Request) error {
 	var in struct {
-		Kind       string          `json:"kind"`
-		ContentMD  string          `json:"content_md"`
-		ForkedFrom *blyg.Reference `json:"forked_from"`
+		Kind       string             `json:"kind"`
+		ContentMD  string             `json:"content_md"`
+		ForkedFrom *blyg.Reference    `json:"forked_from"`
+		StubOf     *studio.StubTarget `json:"stub_of"`
 	}
 	if err := decode(r, &in); err != nil {
 		return err
@@ -293,7 +298,7 @@ func (a *API) createItem(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	it, err := a.Studio.CreateDraft(r.Context(), o.ID, studio.NewDraft{Kind: in.Kind, ContentMD: in.ContentMD, ForkedFrom: in.ForkedFrom})
+	it, err := a.Studio.CreateDraft(r.Context(), o.ID, studio.NewDraft{Kind: in.Kind, ContentMD: in.ContentMD, ForkedFrom: in.ForkedFrom, StubOf: in.StubOf})
 	if err != nil {
 		return err
 	}
@@ -316,8 +321,9 @@ func (a *API) getItem(w http.ResponseWriter, r *http.Request) error {
 
 func (a *API) patchItem(w http.ResponseWriter, r *http.Request) error {
 	var in struct {
-		ContentMD *string `json:"content_md"`
-		Note      *string `json:"note"`
+		ContentMD  *string         `json:"content_md"`
+		Note       *string         `json:"note"`
+		Generation json.RawMessage `json:"generation"`
 	}
 	if err := decode(r, &in); err != nil {
 		return err
@@ -326,7 +332,7 @@ func (a *API) patchItem(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	it, err := a.Studio.UpdateDraft(r.Context(), o.ID, r.PathValue("id"), in.ContentMD, in.Note)
+	it, err := a.Studio.UpdateDraft(r.Context(), o.ID, r.PathValue("id"), studio.DraftEdit{ContentMD: in.ContentMD, Note: in.Note, Generation: in.Generation})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return &httpError{404, "not_found", "item not found"}
 	}
@@ -365,15 +371,20 @@ func optionalNote(r *http.Request) (*string, error) {
 }
 
 func (a *API) publish(w http.ResponseWriter, r *http.Request) error {
-	note, err := optionalNote(r)
-	if err != nil {
-		return err
+	var in struct {
+		Note          *string `json:"note"`
+		NoteGenerated bool    `json:"note_generated"`
+	}
+	if r.ContentLength != 0 {
+		if err := decode(r, &in); err != nil {
+			return err
+		}
 	}
 	o, err := a.origin(r)
 	if err != nil {
 		return err
 	}
-	res, err := a.Studio.Publish(r.Context(), o.ID, r.PathValue("id"), note)
+	res, err := a.Studio.Publish(r.Context(), o.ID, r.PathValue("id"), studio.PublishOptions{Note: in.Note, NoteGenerated: in.NoteGenerated})
 	if err != nil {
 		return err
 	}

@@ -117,6 +117,7 @@ func serve(ctx context.Context, log *slog.Logger, cfg *config.Config, pool *pgxp
 	}
 	receiver := &mention.Receiver{Pool: pool, Limits: mention.DefaultRateLimits}
 	rd := &reader.Reader{Pool: pool, Fetch: &reader.LocalFirst{Studio: st, Remote: fc}, Log: log}
+	st.Imports = rd // §10.2 step 2: imported snapshots reach a publish only through this
 	api := &web.API{Pool: pool, Accounts: accts, Studio: st, Hoppers: &hopper.Store{Pool: pool}, Reader: rd, Log: log}
 	surface := &web.Surface{Studio: st, Receiver: receiver, Scheme: cfg.Scheme(), TrustProxy: cfg.TrustProxy, Log: log}
 

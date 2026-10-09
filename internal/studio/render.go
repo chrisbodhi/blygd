@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html/template"
 	"strings"
 	"time"
 
@@ -113,7 +112,8 @@ func (s *Studio) renderItem(ctx context.Context, tx pgx.Tx, o *Origin, id string
 
 	page, err := blyg.RenderPermalink(pageSite(o), blyg.PageItem{
 		ID: id, Kind: latest.Kind, Version: it.Version, Updated: latest.At, Page: *it.Page,
-		ContentHTML: template.HTML(latest.ContentHTML), Pins: pins, Withdrawn: it.Withdrawn,
+		ContentHTML: blyg.PageHTML(latest.ContentHTML), Pins: pins, Withdrawn: it.Withdrawn,
+		ForkedFrom: forkRef(it.ForkedFrom),
 	})
 	if err != nil {
 		return err
@@ -155,8 +155,8 @@ func itemDoc(o *Origin, it *Item, vs []*Version) *blyg.ItemDoc {
 		ContentMD:   latest.ContentMD,
 		ContentHTML: latest.ContentHTML,
 		ContentHash: latest.ContentHash,
-		Media:       []blyg.Media{}, // media upload is Phase 4
-		ForkedFrom:  it.ForkedFrom,  // survives withdrawal (§9)
+		Media:       []blyg.Media{},                       // media upload is Phase 4
+		ForkedFrom:  canon[blyg.Reference](it.ForkedFrom), // survives withdrawal (§9)
 		Changelog:   changelog,
 	}
 	if it.Kind == "thread" {
@@ -167,10 +167,29 @@ func itemDoc(o *Origin, it *Item, vs []*Version) *blyg.ItemDoc {
 		doc.Transclusions = &refs
 	}
 	if latest.Kind != "withdrawn" {
-		doc.StubOf = latest.StubOf
-		doc.Generated = latest.Generated
+		doc.StubOf = canon[blyg.StubOf](latest.StubOf)
+		doc.Generated = canon[[]blyg.Generated](latest.Generated)
 	}
 	return doc
+}
+
+func forkRef(raw json.RawMessage) *blyg.Reference {
+	var ref blyg.Reference
+	if raw == nil || json.Unmarshal(raw, &ref) != nil {
+		return nil
+	}
+	return &ref
+}
+
+// canon puts stored JSON back in the spec's member order; jsonb keeps its
+// own. Stored values are our own writes, so a decode failure passes the
+// bytes through unchanged.
+func canon[T any](raw json.RawMessage) json.RawMessage {
+	out, err := blyg.Canonical[T](raw)
+	if err != nil {
+		return raw
+	}
+	return out
 }
 
 func pinDoc(o *Origin, it *Item, v *Version) *blyg.PinDoc {
@@ -187,9 +206,9 @@ func pinDoc(o *Origin, it *Item, v *Version) *blyg.PinDoc {
 		ContentMD:   v.ContentMD,
 		ContentHTML: v.ContentHTML,
 		ContentHash: v.ContentHash,
-		StubOf:      v.StubOf,
-		ForkedFrom:  it.ForkedFrom,
-		Generated:   v.Generated,
+		StubOf:      canon[blyg.StubOf](v.StubOf),
+		ForkedFrom:  canon[blyg.Reference](it.ForkedFrom),
+		Generated:   canon[[]blyg.Generated](v.Generated),
 	}
 	if v.Kind == "thread" {
 		refs := []blyg.Reference{}
@@ -336,7 +355,7 @@ func (s *Studio) renderAggregates(ctx context.Context, tx pgx.Tx, o *Origin) err
 			prows.Close()
 			return err
 		}
-		p.ContentHTML = template.HTML(html)
+		p.ContentHTML = blyg.PageHTML(html)
 		items = append(items, p)
 	}
 	prows.Close()

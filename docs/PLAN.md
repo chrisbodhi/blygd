@@ -59,7 +59,13 @@ Left for later, all optional in the spec:
 **Answered question that shapes this phase:** do clients need offline
 snapshots? no, they do not, so thin version pointers.
 
-## Phase 3 — threads
+## Phase 3 — threads (done)
+
+DESIGN.md ("Threads") describes what was built. Thread composition is
+pure (`blyg.Compose`). Imported snapshots reach a publish only through
+`studio.Imports`, read before the transaction and scoped to the
+publisher's subscriptions. Pages sanitize, because bakes carry other
+origins' bytes.
 
 - Directive grammar and resolution (§10.1–10.2): local first, then
   imported from a subscribed origin; ambiguity is a publish error.
@@ -71,11 +77,22 @@ snapshots? no, they do not, so thin version pointers.
   wire.
 - Stubs: `stub_of` on versions, both shapes, `cited` with `retrieved`, and
   the version-agreement rule (§10.6 rule 3).
-- `generated[]` and `blyg-tk-gen` wrapping (§5.7); generated changelog
-  notes (§5.2).
-- Fork flattening helper (§5.6 rule 6), so clients get a correct
-  `content_md` for a fork.
-- Lift the publish guard against `[[`. Review the manifest `level` claim.
+- `generated[]` and `blyg-tk-gen` wrapping (§5.7), through the reference
+  client's `[TK]` grammar; generated changelog notes (§5.2).
+- Fork flattening (§5.6 rule 6) when a fork is created without content,
+  and lineage on the fork's page (rule 7).
+- The publish guard against `[[` is gone, and the manifest's `level: 2`
+  is now honest.
+
+Left for later:
+
+- A draft preview endpoint that renders unresolvable directives in place
+  instead of refusing (the reference client has one). Today the publish
+  `422` lists every problem.
+- A frozen `cited` on `forked_from` (§5.9 allows it; nothing sets it).
+- A `{url}` stub sends a plain W3C Webmention through the existing outbox
+  (`relation = 'url'`). Nothing yet stubs an L0 entry by id: clients pass
+  its link as `{url}`.
 
 ## Phase 4 — surface and access
 

@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/chrisbodhi/blygd/internal/blyg"
 	"github.com/chrisbodhi/blygd/internal/fetch"
 )
 
@@ -22,14 +23,16 @@ type Studio struct {
 	Pool         *pgxpool.Pool
 	Generator    string // name/version, §3.2
 	GeneratorURL string
-	// Level is the manifest's informative conformance claim (§3.2). See
-	// docs/PLAN.md: an honest claim of either level needs threads (Phase 3).
+	// Level is the manifest's informative conformance claim (§3.2).
 	Level int
 	Fetch *fetch.Client
 	Now   func() time.Time
 	// FragmentCap is the studio-enforced fragment length in characters
 	// (§5.3: SHOULD cap at 2,000; RECOMMENDED 1,000).
 	FragmentCap int
+	// Imports supplies imported snapshots for threads (§10.2 step 2). Nil
+	// means only local items resolve.
+	Imports Imports
 }
 
 func (s *Studio) now() time.Time {
@@ -43,13 +46,22 @@ func (s *Studio) now() time.Time {
 type Error struct {
 	Code string // not_found, invalid, conflict
 	Msg  string
+	// Problems lists every reason a draft cannot be published (§10.2:
+	// unresolvable directives and links are publish errors).
+	Problems []blyg.Problem
 }
 
 func (e *Error) Error() string { return e.Msg }
 
-func notFound(format string, a ...any) error { return &Error{"not_found", fmt.Sprintf(format, a...)} }
-func invalid(format string, a ...any) error  { return &Error{"invalid", fmt.Sprintf(format, a...)} }
-func conflict(format string, a ...any) error { return &Error{"conflict", fmt.Sprintf(format, a...)} }
+func notFound(format string, a ...any) error {
+	return &Error{Code: "not_found", Msg: fmt.Sprintf(format, a...)}
+}
+func invalid(format string, a ...any) error {
+	return &Error{Code: "invalid", Msg: fmt.Sprintf(format, a...)}
+}
+func conflict(format string, a ...any) error {
+	return &Error{Code: "conflict", Msg: fmt.Sprintf(format, a...)}
+}
 
 // IsCode reports whether err is a studio Error with the given code.
 func IsCode(err error, code string) bool {
