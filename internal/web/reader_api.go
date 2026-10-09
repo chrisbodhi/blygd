@@ -14,19 +14,21 @@ import (
 // reads, and read marks. Every imported byte is returned verbatim with the
 // §14 notice: the client sanitizes.
 
-func (a *API) readerRoutes(route func(pattern, scope string, fn func(http.ResponseWriter, *http.Request) error)) {
-	route("GET /api/subscriptions", account.ScopeReaderRead, a.listSubscriptions)
-	route("POST /api/subscriptions", account.ScopeReaderWrite, a.subscribe)
-	route("GET /api/subscriptions/{sid}", account.ScopeReaderRead, a.getSubscription)
-	route("PATCH /api/subscriptions/{sid}", account.ScopeReaderWrite, a.patchSubscription)
-	route("DELETE /api/subscriptions/{sid}", account.ScopeReaderWrite, a.unsubscribe)
-	route("POST /api/subscriptions/{sid}/resolve", account.ScopeReaderRead, a.reresolve)
-	route("POST /api/subscriptions/{sid}/move", account.ScopeReaderWrite, a.moveSubscription)
+func (a *API) readerRoutes() []route {
+	return []route{
+		{"GET /api/subscriptions", account.ScopeReaderRead, a.listSubscriptions},
+		{"POST /api/subscriptions", account.ScopeReaderWrite, a.subscribe},
+		{"GET /api/subscriptions/{sid}", account.ScopeReaderRead, a.getSubscription},
+		{"PATCH /api/subscriptions/{sid}", account.ScopeReaderWrite, a.patchSubscription},
+		{"DELETE /api/subscriptions/{sid}", account.ScopeReaderWrite, a.unsubscribe},
+		{"POST /api/subscriptions/{sid}/resolve", account.ScopeReaderRead, a.reresolve},
+		{"POST /api/subscriptions/{sid}/move", account.ScopeReaderWrite, a.moveSubscription},
 
-	route("GET /api/reader/feed", account.ScopeReaderRead, a.readerFeed)
-	route("GET /api/reader/items/{sid}/{iid}", account.ScopeReaderRead, a.readerItem)
-	route("PUT /api/reader/items/{sid}/{iid}/read", account.ScopeReaderWrite, a.markRead)
-	route("DELETE /api/reader/items/{sid}/{iid}/read", account.ScopeReaderWrite, a.markUnread)
+		{"GET /api/reader/feed", account.ScopeReaderRead, a.readerFeed},
+		{"GET /api/reader/items/{sid}/{iid}", account.ScopeReaderRead, a.readerItem},
+		{"PUT /api/reader/items/{sid}/{iid}/read", account.ScopeReaderWrite, a.markRead},
+		{"DELETE /api/reader/items/{sid}/{iid}/read", account.ScopeReaderWrite, a.markUnread},
+	}
 }
 
 // resolveFailed reports a failed resolution with its trail (§12.1 step 6).

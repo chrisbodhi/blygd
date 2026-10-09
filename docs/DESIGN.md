@@ -308,6 +308,13 @@ development only.
 
 ## Write API and scopes
 
+The API is described by a hand-written OpenAPI 3.1 document at
+`GET /api/openapi.json`. Each operation's bearer requirement names its one
+scope (3.1 permits scopes on non-OAuth schemes). The router is built from
+a route table, and the tests compare that table with the document both
+ways, scopes included. They also validate every response the e2e suite
+sees against the documented schema.
+
 Bearer tokens are stored as SHA-256 hashes, shown once at mint time,
 revocable, and scoped. Consequential public acts have their own scopes, so
 a drafting tool or an agent can be given `items:write` without the power

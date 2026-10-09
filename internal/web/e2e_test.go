@@ -119,6 +119,10 @@ func (e *env) do(method, u, token string, body any, hdr ...string) resp {
 	}
 	defer r.Body.Close()
 	b, _ := io.ReadAll(r.Body)
+	if api := e.srv.URL + "/api/"; strings.HasPrefix(u, api) {
+		// Every API response the suite sees must match openapi.json.
+		checkResponse(e.t, method, req.URL.Path, r.StatusCode, b)
+	}
 	return resp{r.StatusCode, r.Header, b}
 }
 

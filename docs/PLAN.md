@@ -113,12 +113,14 @@ Left for later:
 
 ## Operations
 
-- **API description (after Phase 3).** The write and reading API is the
-  product, so it ships a hand-written OpenAPI document, embedded and
-  served unauthenticated at `GET /api/openapi.json`. It is tested at 100%
-  route coverage: a test fails when a registered route is missing from
-  the document, the document names a route that does not exist, or a
-  route's required scope differs between code and document.
+- **API description (done).** `internal/web/openapi.json`, OpenAPI 3.1,
+  hand-written, embedded, served unauthenticated at
+  `GET /api/openapi.json`. `openapi_test.go` fails when a registered route
+  is missing from the document, the document names a route that does not
+  exist, or a route's scope differs between the two. Every `/api/`
+  response the e2e suite receives is also checked against the documented
+  schema for its status: required members, undocumented members, and
+  types. Every operation is exercised.
 
 - **Migrations.** There are none yet: the schema is applied idempotently
   at startup, and while pre-release a schema change means recreating the

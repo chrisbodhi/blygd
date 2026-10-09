@@ -42,41 +42,57 @@ func principal(ctx context.Context) *account.Principal {
 }
 
 // Handler returns the API's routes.
+// route is one /api/ route: its mux pattern, the scope a token needs (""
+// for any token), and its handler. The table is the single source both the
+// mux and the OpenAPI coverage test read.
+type route struct {
+	pattern string
+	scope   string
+	fn      func(http.ResponseWriter, *http.Request) error
+}
+
+func (a *API) routes() []route {
+	rs := []route{
+		{"GET /api/me", "", a.me},
+		{"GET /api/origin", account.ScopeItemsRead, a.getOrigin},
+		{"PATCH /api/origin", account.ScopeOriginWrite, a.patchOrigin},
+
+		{"GET /api/items", account.ScopeItemsRead, a.listItems},
+		{"POST /api/items", account.ScopeItemsWrite, a.createItem},
+		{"GET /api/items/{id}", account.ScopeItemsRead, a.getItem},
+		{"PATCH /api/items/{id}", account.ScopeItemsWrite, a.patchItem},
+		{"DELETE /api/items/{id}", account.ScopeItemsWrite, a.deleteItem},
+		{"POST /api/items/{id}/publish", account.ScopeItemsPublish, a.publish},
+		{"POST /api/items/{id}/withdraw", account.ScopeItemsWithdraw, a.withdraw},
+		{"POST /api/items/{id}/versions/{n}/pin", account.ScopeItemsPin, a.pin},
+
+		{"GET /api/hoppers", account.ScopeHoppersRead, a.listHoppers},
+		{"POST /api/hoppers", account.ScopeHoppersWrite, a.createHopper},
+		{"GET /api/hoppers/{hid}", account.ScopeHoppersRead, a.getHopper},
+		{"PATCH /api/hoppers/{hid}", account.ScopeHoppersWrite, a.renameHopper},
+		{"DELETE /api/hoppers/{hid}", account.ScopeHoppersWrite, a.deleteHopper},
+		{"POST /api/hoppers/{hid}/members", account.ScopeHoppersWrite, a.addMember},
+		{"DELETE /api/hoppers/{hid}/members/{mid}", account.ScopeHoppersWrite, a.removeMember},
+
+		{"GET /api/mentions", account.ScopeMentionsRead, a.listMentions},
+		{"GET /api/outbound", account.ScopeMentionsRead, a.listOutbound},
+	}
+	rs = append(rs, a.readerRoutes()...)
+	return append(rs,
+		route{"GET /api/tokens", account.ScopeTokensWrite, a.listTokens},
+		route{"POST /api/tokens", account.ScopeTokensWrite, a.mintToken},
+		route{"DELETE /api/tokens/{tid}", account.ScopeTokensWrite, a.revokeToken},
+	)
+}
+
 func (a *API) Handler() http.Handler {
 	mux := http.NewServeMux()
-	route := func(pattern, scope string, fn func(http.ResponseWriter, *http.Request) error) {
-		mux.Handle(pattern, a.guard(scope, fn))
+	for _, r := range a.routes() {
+		mux.Handle(r.pattern, a.guard(r.scope, r.fn))
 	}
-	route("GET /api/me", "", a.me)
-	route("GET /api/origin", account.ScopeItemsRead, a.getOrigin)
-	route("PATCH /api/origin", account.ScopeOriginWrite, a.patchOrigin)
-
-	route("GET /api/items", account.ScopeItemsRead, a.listItems)
-	route("POST /api/items", account.ScopeItemsWrite, a.createItem)
-	route("GET /api/items/{id}", account.ScopeItemsRead, a.getItem)
-	route("PATCH /api/items/{id}", account.ScopeItemsWrite, a.patchItem)
-	route("DELETE /api/items/{id}", account.ScopeItemsWrite, a.deleteItem)
-	route("POST /api/items/{id}/publish", account.ScopeItemsPublish, a.publish)
-	route("POST /api/items/{id}/withdraw", account.ScopeItemsWithdraw, a.withdraw)
-	route("POST /api/items/{id}/versions/{n}/pin", account.ScopeItemsPin, a.pin)
-
-	route("GET /api/hoppers", account.ScopeHoppersRead, a.listHoppers)
-	route("POST /api/hoppers", account.ScopeHoppersWrite, a.createHopper)
-	route("GET /api/hoppers/{hid}", account.ScopeHoppersRead, a.getHopper)
-	route("PATCH /api/hoppers/{hid}", account.ScopeHoppersWrite, a.renameHopper)
-	route("DELETE /api/hoppers/{hid}", account.ScopeHoppersWrite, a.deleteHopper)
-	route("POST /api/hoppers/{hid}/members", account.ScopeHoppersWrite, a.addMember)
-	route("DELETE /api/hoppers/{hid}/members/{mid}", account.ScopeHoppersWrite, a.removeMember)
-
-	route("GET /api/mentions", account.ScopeMentionsRead, a.listMentions)
-	route("GET /api/outbound", account.ScopeMentionsRead, a.listOutbound)
-
-	a.readerRoutes(route)
-
-	route("GET /api/tokens", account.ScopeTokensWrite, a.listTokens)
-	route("POST /api/tokens", account.ScopeTokensWrite, a.mintToken)
-	route("DELETE /api/tokens/{tid}", account.ScopeTokensWrite, a.revokeToken)
-
+	// The API description is public: it says what exists, never what a
+	// user has (docs/PLAN.md, Operations).
+	mux.HandleFunc("GET "+openAPIPath, serveOpenAPI)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "no such route")
 	})

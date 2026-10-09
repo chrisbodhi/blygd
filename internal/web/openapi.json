@@ -1,0 +1,3490 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "blygd API",
+    "version": "0.3.0",
+    "description": "The write and reading API of blygd, a Blygger studio (protocol 0.3). It is studio-private, not protocol (§16.6): the public surface is each origin's static files. Spec references (§) are to blygger-spec docs/protocol-v0.3.md.\n\nEvery HTML string that came from another origin is returned verbatim; clients MUST sanitize it before rendering (§14). Responses that carry imported bytes include a notice saying so.\n\nAuthenticate with a bearer token. Each operation's security requirement names the one scope it needs; the owner token `*` holds every scope."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "tags": [
+    {
+      "name": "meta"
+    },
+    {
+      "name": "origin"
+    },
+    {
+      "name": "items"
+    },
+    {
+      "name": "hoppers"
+    },
+    {
+      "name": "mentions"
+    },
+    {
+      "name": "reader"
+    },
+    {
+      "name": "tokens"
+    }
+  ],
+  "security": [
+    {
+      "bearer": []
+    }
+  ],
+  "paths": {
+    "/api/openapi.json": {
+      "get": {
+        "operationId": "getOpenAPI",
+        "tags": [
+          "meta"
+        ],
+        "summary": "This document.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The OpenAPI document.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me": {
+      "get": {
+        "operationId": "getMe",
+        "tags": [
+          "meta"
+        ],
+        "summary": "The calling token's user, scopes and origin.",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/origin": {
+      "get": {
+        "operationId": "getOrigin",
+        "tags": [
+          "origin"
+        ],
+        "summary": "Origin settings.",
+        "security": [
+          {
+            "bearer": [
+              "items:read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Origin"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "patchOrigin",
+        "tags": [
+          "origin"
+        ],
+        "summary": "Change origin settings and re-render the surface.",
+        "security": [
+          {
+            "bearer": [
+              "origin:write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Origin"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OriginPatch"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/items": {
+      "get": {
+        "operationId": "listItems",
+        "tags": [
+          "items"
+        ],
+        "summary": "List own items, newest activity first.",
+        "security": [
+          {
+            "bearer": [
+              "items:read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItemList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "parameters": [
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "draft",
+                "published",
+                "withdrawn"
+              ]
+            },
+            "description": "Filter by state."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            },
+            "description": "Default 100."
+          }
+        ]
+      },
+      "post": {
+        "operationId": "createItem",
+        "tags": [
+          "items"
+        ],
+        "summary": "Create a draft: a fragment, a thread, a stub (stub_of), or a fork (forked_from).",
+        "security": [
+          {
+            "bearer": [
+              "items:write"
+            ]
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Item"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "description": "A fork without content_md fetches the pinned source (or reads it, if it is your own) and flattens it into the draft (§5.6 rule 6).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ItemCreate"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/items/{id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ItemID"
+        }
+      ],
+      "get": {
+        "operationId": "getItem",
+        "tags": [
+          "items"
+        ],
+        "summary": "An item with every published version.",
+        "security": [
+          {
+            "bearer": [
+              "items:read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Item"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "patchItem",
+        "tags": [
+          "items"
+        ],
+        "summary": "Edit the draft, the next note, or generation metadata.",
+        "security": [
+          {
+            "bearer": [
+              "items:write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Item"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "description": "Nothing changes on the wire until the next publish.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ItemPatch"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteItem",
+        "tags": [
+          "items"
+        ],
+        "summary": "Hard-delete a never-published draft.",
+        "security": [
+          {
+            "bearer": [
+              "items:write"
+            ]
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Done."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/items/{id}/publish": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ItemID"
+        }
+      ],
+      "post": {
+        "operationId": "publishItem",
+        "tags": [
+          "items"
+        ],
+        "summary": "Publish the draft as the next version.",
+        "security": [
+          {
+            "bearer": [
+              "items:publish"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublishResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "description": "Directives and [[id]] links resolve now: own items first, then your subscriptions' imports (§10.2). Every unresolvable one is listed in a 422's problems. 409 when nothing changed.",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/items/{id}/withdraw": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ItemID"
+        }
+      ],
+      "post": {
+        "operationId": "withdrawItem",
+        "tags": [
+          "items"
+        ],
+        "summary": "Publish a withdrawal endcap (§9).",
+        "security": [
+          {
+            "bearer": [
+              "items:withdraw"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WithdrawResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoteRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/items/{id}/versions/{n}/pin": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ItemID"
+        },
+        {
+          "$ref": "#/components/parameters/VersionN"
+        }
+      ],
+      "post": {
+        "operationId": "pinVersion",
+        "tags": [
+          "items"
+        ],
+        "summary": "Pin a version: irrevocable (§8).",
+        "security": [
+          {
+            "bearer": [
+              "items:pin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PinResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/hoppers": {
+      "get": {
+        "operationId": "listHoppers",
+        "tags": [
+          "hoppers"
+        ],
+        "summary": "List hoppers.",
+        "security": [
+          {
+            "bearer": [
+              "hoppers:read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HopperList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createHopper",
+        "tags": [
+          "hoppers"
+        ],
+        "summary": "Create a hopper.",
+        "security": [
+          {
+            "bearer": [
+              "hoppers:write"
+            ]
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Hopper"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HopperName"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/hoppers/{hid}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/HopperID"
+        }
+      ],
+      "get": {
+        "operationId": "getHopper",
+        "tags": [
+          "hoppers"
+        ],
+        "summary": "A hopper and its members.",
+        "security": [
+          {
+            "bearer": [
+              "hoppers:read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HopperDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "renameHopper",
+        "tags": [
+          "hoppers"
+        ],
+        "summary": "Rename a hopper.",
+        "security": [
+          {
+            "bearer": [
+              "hoppers:write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Hopper"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HopperName"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteHopper",
+        "tags": [
+          "hoppers"
+        ],
+        "summary": "Delete a hopper.",
+        "security": [
+          {
+            "bearer": [
+              "hoppers:write"
+            ]
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Done."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/hoppers/{hid}/members": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/HopperID"
+        }
+      ],
+      "post": {
+        "operationId": "addMember",
+        "tags": [
+          "hoppers"
+        ],
+        "summary": "Add a reference to an own or imported item.",
+        "security": [
+          {
+            "bearer": [
+              "hoppers:write"
+            ]
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Created"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemberCreate"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/hoppers/{hid}/members/{mid}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/HopperID"
+        },
+        {
+          "$ref": "#/components/parameters/MemberID"
+        }
+      ],
+      "delete": {
+        "operationId": "removeMember",
+        "tags": [
+          "hoppers"
+        ],
+        "summary": "Remove a member.",
+        "security": [
+          {
+            "bearer": [
+              "hoppers:write"
+            ]
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Done."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/mentions": {
+      "get": {
+        "operationId": "listMentions",
+        "tags": [
+          "mentions"
+        ],
+        "summary": "Inbound Webmentions, newest first (at most 200).",
+        "security": [
+          {
+            "bearer": [
+              "mentions:read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MentionList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "verified",
+                "failed",
+                "gone"
+              ]
+            },
+            "description": "Filter by status."
+          }
+        ]
+      }
+    },
+    "/api/outbound": {
+      "get": {
+        "operationId": "listOutbound",
+        "tags": [
+          "mentions"
+        ],
+        "summary": "Outbound Webmentions, most recently changed first (at most 200).",
+        "security": [
+          {
+            "bearer": [
+              "mentions:read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutboundList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/subscriptions": {
+      "get": {
+        "operationId": "listSubscriptions",
+        "tags": [
+          "reader"
+        ],
+        "summary": "List subscriptions.",
+        "security": [
+          {
+            "bearer": [
+              "reader:read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      },
+      "post": {
+        "operationId": "subscribe",
+        "tags": [
+          "reader"
+        ],
+        "summary": "Subscribe by any URL; resolution follows §12.1.",
+        "security": [
+          {
+            "bearer": [
+              "reader:write"
+            ]
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscribeResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "description": "Resolution failed; trail lists the URLs tried.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "url"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/subscriptions/{sid}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/SubscriptionID"
+        }
+      ],
+      "get": {
+        "operationId": "getSubscription",
+        "tags": [
+          "reader"
+        ],
+        "summary": "One subscription.",
+        "security": [
+          {
+            "bearer": [
+              "reader:read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Subscription"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "patchSubscription",
+        "tags": [
+          "reader"
+        ],
+        "summary": "Rename for yourself, or publish/withdraw a blogroll entry.",
+        "security": [
+          {
+            "bearer": [
+              "reader:write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Subscription"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "description": "in_blogroll also needs origin:write (§11).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubscriptionPatch"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "unsubscribe",
+        "tags": [
+          "reader"
+        ],
+        "summary": "Unsubscribe; drops any blogroll entry for it.",
+        "security": [
+          {
+            "bearer": [
+              "reader:write"
+            ]
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Done."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/subscriptions/{sid}/resolve": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/SubscriptionID"
+        }
+      ],
+      "post": {
+        "operationId": "reresolveSubscription",
+        "tags": [
+          "reader"
+        ],
+        "summary": "Re-run resolution and report; changes nothing (§12.2).",
+        "security": [
+          {
+            "bearer": [
+              "reader:read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReresolveResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "description": "Resolution failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/subscriptions/{sid}/move": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/SubscriptionID"
+        }
+      ],
+      "post": {
+        "operationId": "moveSubscription",
+        "tags": [
+          "reader"
+        ],
+        "summary": "Move to a confirmed new identity (§12.2).",
+        "security": [
+          {
+            "bearer": [
+              "reader:write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MoveResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "description": "Resolution failed, or to resolves elsewhere.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "to": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "to"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/reader/feed": {
+      "get": {
+        "operationId": "readerFeed",
+        "tags": [
+          "reader"
+        ],
+        "summary": "The merged reading feed (§13.7), keyset-paged.",
+        "security": [
+          {
+            "bearer": [
+              "reader:read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "parameters": [
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Cursor from a previous page's next."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            },
+            "description": "Default 50."
+          },
+          {
+            "name": "subscription",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "description": "Only this subscription."
+          },
+          {
+            "name": "unread",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true"
+              ]
+            },
+            "description": "Only unread items."
+          }
+        ]
+      }
+    },
+    "/api/reader/items/{sid}/{iid}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/SubscriptionID"
+        },
+        {
+          "$ref": "#/components/parameters/ImportedItemID"
+        }
+      ],
+      "get": {
+        "operationId": "readerItem",
+        "tags": [
+          "reader"
+        ],
+        "summary": "One imported item, with retained pins.",
+        "security": [
+          {
+            "bearer": [
+              "reader:read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderItemResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/reader/items/{sid}/{iid}/read": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/SubscriptionID"
+        },
+        {
+          "$ref": "#/components/parameters/ImportedItemID"
+        }
+      ],
+      "put": {
+        "operationId": "markRead",
+        "tags": [
+          "reader"
+        ],
+        "summary": "Mark read at the current version.",
+        "security": [
+          {
+            "bearer": [
+              "reader:write"
+            ]
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Done."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "markUnread",
+        "tags": [
+          "reader"
+        ],
+        "summary": "Mark unread.",
+        "security": [
+          {
+            "bearer": [
+              "reader:write"
+            ]
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Done."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/tokens": {
+      "get": {
+        "operationId": "listTokens",
+        "tags": [
+          "tokens"
+        ],
+        "summary": "List tokens.",
+        "security": [
+          {
+            "bearer": [
+              "tokens:write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      },
+      "post": {
+        "operationId": "mintToken",
+        "tags": [
+          "tokens"
+        ],
+        "summary": "Mint a token with a subset of your scopes.",
+        "security": [
+          {
+            "bearer": [
+              "tokens:write"
+            ]
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenMinted"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenMint"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tokens/{tid}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TokenID"
+        }
+      ],
+      "delete": {
+        "operationId": "revokeToken",
+        "tags": [
+          "tokens"
+        ],
+        "summary": "Revoke a token.",
+        "security": [
+          {
+            "bearer": [
+              "tokens:write"
+            ]
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Done."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A token minted by `blygd user add`, `blygd token mint` or POST /api/tokens. Scopes are listed per operation."
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Stable code: invalid, not_found, conflict, forbidden, unauthorized, unresolved, internal."
+          },
+          "message": {
+            "type": "string"
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Problem"
+            },
+            "description": "Every reason a draft cannot be published (§10.2), on a 422 from publish."
+          },
+          "trail": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "URLs tried, on a failed resolution (§12.1 step 6)."
+          }
+        },
+        "required": [
+          "error",
+          "message"
+        ],
+        "additionalProperties": false
+      },
+      "Problem": {
+        "type": "object",
+        "properties": {
+          "at": {
+            "type": "string",
+            "description": "The directive, link or [TK] scope at fault, as written."
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "Me": {
+        "type": "object",
+        "properties": {
+          "handle": {
+            "type": "string"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            }
+          },
+          "origin": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "required": [
+          "handle",
+          "scopes",
+          "origin"
+        ],
+        "additionalProperties": false
+      },
+      "Scope": {
+        "type": "string",
+        "enum": [
+          "*",
+          "items:read",
+          "items:write",
+          "items:publish",
+          "items:withdraw",
+          "items:pin",
+          "hoppers:read",
+          "hoppers:write",
+          "mentions:read",
+          "origin:write",
+          "tokens:write",
+          "reader:read",
+          "reader:write"
+        ]
+      },
+      "Origin": {
+        "type": "object",
+        "properties": {
+          "origin": {
+            "type": "string",
+            "format": "uri",
+            "description": "Identity origin (§12.2), ending in /."
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "author": {
+            "description": "Manifest author (§6.1), an object or null."
+          },
+          "byline": {
+            "description": "Default per-item author (§5.5), an opaque object or null."
+          },
+          "accept_mentions": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "origin",
+          "title",
+          "description",
+          "author",
+          "byline",
+          "accept_mentions"
+        ],
+        "additionalProperties": false
+      },
+      "OriginPatch": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "author": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "byline": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "accept_mentions": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "Selector": {
+        "type": "object",
+        "properties": {
+          "exact": {
+            "type": "string"
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "suffix": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "exact"
+        ],
+        "description": "W3C text-quote selector of a partial transclusion (§10.3).",
+        "additionalProperties": false
+      },
+      "Cited": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string"
+          },
+          "author": {
+            "type": "string"
+          },
+          "excerpt": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "url": {
+            "type": "string"
+          },
+          "retrieved": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "retrieved"
+        ],
+        "description": "The human half of a citation (§5.9): frozen, self-asserted, never verified.",
+        "additionalProperties": false
+      },
+      "Reference": {
+        "type": "object",
+        "properties": {
+          "origin": {
+            "type": "string",
+            "format": "uri",
+            "description": "Identity origin. Omitted in transclusions[] for own-origin sources (§10.3)."
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-hjkmnp-tv-z]{26}$",
+            "description": "Item id (§5.1): 26 characters of lowercase Crockford base32."
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "selector": {
+            "$ref": "#/components/schemas/Selector"
+          },
+          "cited": {
+            "$ref": "#/components/schemas/Cited"
+          }
+        },
+        "required": [
+          "id",
+          "version"
+        ],
+        "description": "The reference shape (§5.9).",
+        "additionalProperties": false
+      },
+      "StubOf": {
+        "description": "stub_of (§10.6): a blyg reference, or a plain-web {url}.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "origin": {
+                "type": "string",
+                "format": "uri"
+              },
+              "id": {
+                "type": "string",
+                "pattern": "^[0-9a-hjkmnp-tv-z]{26}$",
+                "description": "Item id (§5.1): 26 characters of lowercase Crockford base32."
+              },
+              "version": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "cited": {
+                "$ref": "#/components/schemas/Cited"
+              }
+            },
+            "required": [
+              "origin",
+              "id",
+              "version"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string",
+                "format": "uri"
+              },
+              "cited": {
+                "$ref": "#/components/schemas/Cited"
+              }
+            },
+            "required": [
+              "url"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "StubTarget": {
+        "description": "What a new stub responds to. By id, the studio resolves the target (own items first, then your subscriptions; give origin to choose) and freezes version and cited. By url, cited is yours; retrieved defaults to now and the excerpt is held to 200 characters.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[0-9a-hjkmnp-tv-z]{26}$",
+                "description": "Item id (§5.1): 26 characters of lowercase Crockford base32."
+              },
+              "origin": {
+                "type": "string",
+                "format": "uri"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string",
+                "format": "uri"
+              },
+              "cited": {
+                "$ref": "#/components/schemas/Cited"
+              }
+            },
+            "required": [
+              "url"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "GenSource": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-hjkmnp-tv-z]{26}$",
+            "description": "Item id (§5.1): 26 characters of lowercase Crockford base32."
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "id",
+          "version"
+        ],
+        "additionalProperties": false
+      },
+      "Generated": {
+        "type": "object",
+        "properties": {
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GenSource"
+            }
+          },
+          "model": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "sources"
+        ],
+        "description": "One generated span's provenance (§5.7).",
+        "additionalProperties": false
+      },
+      "GenMeta": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "description": "What the client declares about one [TK] scope, by position.",
+        "additionalProperties": false
+      },
+      "Version": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "integer"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "fragment",
+              "thread",
+              "withdrawn"
+            ]
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "note_generated": {
+            "type": "boolean"
+          },
+          "content_md": {
+            "type": "string"
+          },
+          "content_html": {
+            "type": "string",
+            "description": "For a thread, contains other origins' baked HTML verbatim (§10.2). Sanitize before rendering (§14)."
+          },
+          "content_hash": {
+            "type": "string"
+          },
+          "author": {
+            "description": "Arbitrary JSON, passed through verbatim."
+          },
+          "transclusions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Reference"
+            }
+          },
+          "stub_of": {
+            "$ref": "#/components/schemas/StubOf"
+          },
+          "generated": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Generated"
+            }
+          },
+          "pinned_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "version",
+          "kind",
+          "at",
+          "note",
+          "note_generated",
+          "content_md",
+          "content_html",
+          "content_hash",
+          "pinned_at"
+        ],
+        "additionalProperties": false
+      },
+      "Item": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-hjkmnp-tv-z]{26}$",
+            "description": "Item id (§5.1): 26 characters of lowercase Crockford base32."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "fragment",
+              "thread"
+            ],
+            "description": "Authored kind."
+          },
+          "draft_md": {
+            "type": "string",
+            "description": "Studio-private draft, [TK] grammar included."
+          },
+          "draft_note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "description": "Latest published version; 0 for a draft."
+          },
+          "withdrawn": {
+            "type": "boolean"
+          },
+          "page": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Origin-relative permalink (§5.8), fixed at first publish."
+          },
+          "forked_from": {
+            "$ref": "#/components/schemas/Reference"
+          },
+          "stub_of": {
+            "$ref": "#/components/schemas/StubOf"
+          },
+          "generation": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GenMeta"
+            }
+          },
+          "first_published_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "published_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "draft_updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "published",
+              "withdrawn"
+            ]
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Version"
+            },
+            "description": "Every published version, on GET /api/items/{id}."
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "draft_md",
+          "draft_note",
+          "version",
+          "withdrawn",
+          "page",
+          "first_published_at",
+          "published_at",
+          "created_at",
+          "draft_updated_at",
+          "state"
+        ],
+        "additionalProperties": false
+      },
+      "ItemCreate": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "fragment",
+              "thread"
+            ],
+            "description": "Default fragment; thread with stub_of; the source's kind for a fork without content."
+          },
+          "content_md": {
+            "type": "string"
+          },
+          "forked_from": {
+            "$ref": "#/components/schemas/Reference",
+            "description": "§5.6 lineage, immutable. Without content_md, the draft starts as the pinned source flattened (§5.6 rule 6)."
+          },
+          "stub_of": {
+            "$ref": "#/components/schemas/StubTarget",
+            "description": "Makes the draft a stub (§10.6). Without content_md, a blyg stub starts as ![[id]]."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ItemPatch": {
+        "type": "object",
+        "properties": {
+          "content_md": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string",
+            "description": "Note for the next publish; empty clears."
+          },
+          "generation": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/GenMeta"
+            },
+            "description": "Per [TK] scope, by position; null clears."
+          }
+        },
+        "additionalProperties": false
+      },
+      "PublishRequest": {
+        "type": "object",
+        "properties": {
+          "note": {
+            "type": "string"
+          },
+          "note_generated": {
+            "type": "boolean",
+            "description": "The client wrote the note, not the author (§5.2)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "NoteRequest": {
+        "type": "object",
+        "properties": {
+          "note": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "PublishResult": {
+        "type": "object",
+        "properties": {
+          "item": {
+            "$ref": "#/components/schemas/Item"
+          },
+          "version": {
+            "$ref": "#/components/schemas/Version"
+          },
+          "warnings": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "item",
+          "version"
+        ],
+        "additionalProperties": false
+      },
+      "WithdrawResult": {
+        "type": "object",
+        "properties": {
+          "item": {
+            "$ref": "#/components/schemas/Item"
+          },
+          "version": {
+            "$ref": "#/components/schemas/Version"
+          }
+        },
+        "required": [
+          "item",
+          "version"
+        ],
+        "additionalProperties": false
+      },
+      "PinResult": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "$ref": "#/components/schemas/Version"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "required": [
+          "version",
+          "url"
+        ],
+        "additionalProperties": false
+      },
+      "ItemList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Item"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false
+      },
+      "Hopper": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "public": {
+            "type": "boolean"
+          },
+          "slug_frozen": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "member_count": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "public",
+          "slug_frozen",
+          "created_at",
+          "updated_at",
+          "member_count"
+        ],
+        "additionalProperties": false
+      },
+      "HopperName": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "OwnRef": {
+        "type": "object",
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "pattern": "^[0-9a-hjkmnp-tv-z]{26}$",
+            "description": "Item id (§5.1): 26 characters of lowercase Crockford base32."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "published",
+              "withdrawn"
+            ]
+          },
+          "version": {
+            "type": "integer"
+          },
+          "page": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "item_id",
+          "state",
+          "version",
+          "page"
+        ],
+        "additionalProperties": false
+      },
+      "ImportRef": {
+        "type": "object",
+        "properties": {
+          "subscription_id": {
+            "type": "integer"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "item_id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "current",
+              "withdrawn"
+            ]
+          },
+          "version": {
+            "type": "integer"
+          },
+          "page": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "doc": {
+            "description": "The origin's verbatim document, or null once withdrawn (§13.4). Sanitize (§14)."
+          }
+        },
+        "required": [
+          "subscription_id",
+          "origin",
+          "item_id",
+          "kind",
+          "state",
+          "version",
+          "page",
+          "doc"
+        ],
+        "additionalProperties": false
+      },
+      "Member": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "added_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "own": {
+            "$ref": "#/components/schemas/OwnRef"
+          },
+          "imported": {
+            "$ref": "#/components/schemas/ImportRef"
+          }
+        },
+        "required": [
+          "id",
+          "added_at"
+        ],
+        "additionalProperties": false
+      },
+      "HopperDetail": {
+        "type": "object",
+        "properties": {
+          "hopper": {
+            "$ref": "#/components/schemas/Hopper"
+          },
+          "members": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/Member"
+            }
+          }
+        },
+        "required": [
+          "hopper",
+          "members"
+        ],
+        "additionalProperties": false
+      },
+      "HopperList": {
+        "type": "object",
+        "properties": {
+          "hoppers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Hopper"
+            }
+          }
+        },
+        "required": [
+          "hoppers"
+        ],
+        "additionalProperties": false
+      },
+      "MemberCreate": {
+        "description": "Exactly one of own_item_id or imported. An import is named by subscription_id, or by origin.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "own_item_id": {
+                "type": "string",
+                "pattern": "^[0-9a-hjkmnp-tv-z]{26}$",
+                "description": "Item id (§5.1): 26 characters of lowercase Crockford base32."
+              }
+            },
+            "required": [
+              "own_item_id"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "imported": {
+                "type": "object",
+                "properties": {
+                  "subscription_id": {
+                    "type": "integer"
+                  },
+                  "origin": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "imported"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "Created": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "Mention": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "target_item_id": {
+            "type": "string",
+            "pattern": "^[0-9a-hjkmnp-tv-z]{26}$",
+            "description": "Item id (§5.1): 26 characters of lowercase Crockford base32."
+          },
+          "source_url": {
+            "type": "string"
+          },
+          "target_url": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "verified",
+              "failed",
+              "gone"
+            ]
+          },
+          "relation": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "stub",
+              "transclusion",
+              "fork",
+              null
+            ]
+          },
+          "source_origin": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source_item_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source_version": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "source_kind": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source_author": {
+            "description": "Arbitrary JSON, passed through verbatim."
+          },
+          "source_page": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "failure": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "verified_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "target_item_id",
+          "source_url",
+          "target_url",
+          "status",
+          "relation",
+          "received_at",
+          "verified_at"
+        ],
+        "additionalProperties": false
+      },
+      "MentionList": {
+        "type": "object",
+        "properties": {
+          "mentions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Mention"
+            }
+          }
+        },
+        "required": [
+          "mentions"
+        ],
+        "additionalProperties": false
+      },
+      "Outbound": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "source_item_id": {
+            "type": "string",
+            "pattern": "^[0-9a-hjkmnp-tv-z]{26}$",
+            "description": "Item id (§5.1): 26 characters of lowercase Crockford base32."
+          },
+          "relation": {
+            "type": "string",
+            "enum": [
+              "stub",
+              "transclusion",
+              "fork",
+              "url"
+            ]
+          },
+          "target_url": {
+            "type": "string"
+          },
+          "target_version": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "sent",
+              "failed",
+              "no_endpoint",
+              "abandoned"
+            ]
+          },
+          "endpoint": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "attempts": {
+            "type": "integer"
+          },
+          "last_result": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "source_item_id",
+          "relation",
+          "target_url",
+          "target_version",
+          "status",
+          "endpoint",
+          "attempts",
+          "last_result",
+          "updated_at"
+        ],
+        "additionalProperties": false
+      },
+      "OutboundList": {
+        "type": "object",
+        "properties": {
+          "outbound": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Outbound"
+            }
+          }
+        },
+        "required": [
+          "outbound"
+        ],
+        "additionalProperties": false
+      },
+      "Token": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            }
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_used_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "scopes",
+          "created_at",
+          "last_used_at",
+          "revoked_at"
+        ],
+        "additionalProperties": false
+      },
+      "TokenList": {
+        "type": "object",
+        "properties": {
+          "tokens": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/Token"
+            }
+          }
+        },
+        "required": [
+          "tokens"
+        ],
+        "additionalProperties": false
+      },
+      "TokenMint": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            },
+            "description": "Only scopes the calling token holds."
+          }
+        },
+        "required": [
+          "name",
+          "scopes"
+        ],
+        "additionalProperties": false
+      },
+      "TokenMinted": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "token": {
+            "type": "string",
+            "description": "Shown once."
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            }
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "token",
+          "scopes",
+          "note"
+        ],
+        "additionalProperties": false
+      },
+      "Subscription": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "The remote origin id; scopes imported item ids (§13.1)."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "blyg",
+              "l0"
+            ]
+          },
+          "origin": {
+            "type": "string",
+            "description": "Identity origin (§12.2), or the final feed URL for L0."
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "display_title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "site_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "in_blogroll": {
+            "type": "boolean"
+          },
+          "site_discrepancy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lossy": {
+            "type": "boolean"
+          },
+          "items": {
+            "type": "integer"
+          },
+          "unread": {
+            "type": "integer"
+          },
+          "discrepancies": {
+            "type": "integer"
+          },
+          "last_polled_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "next_poll_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "poll_failures": {
+            "type": "integer"
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "origin",
+          "title",
+          "display_title",
+          "in_blogroll",
+          "site_discrepancy",
+          "lossy",
+          "items",
+          "unread",
+          "discrepancies",
+          "last_polled_at",
+          "next_poll_at",
+          "poll_failures",
+          "last_error",
+          "created_at"
+        ],
+        "additionalProperties": false
+      },
+      "SubscriptionList": {
+        "type": "object",
+        "properties": {
+          "subscriptions": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/Subscription"
+            }
+          }
+        },
+        "required": [
+          "subscriptions"
+        ],
+        "additionalProperties": false
+      },
+      "SubscriptionPatch": {
+        "type": "object",
+        "properties": {
+          "display_title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "in_blogroll": {
+            "type": "boolean",
+            "description": "Publishes or withdraws a blogroll entry (§11). Needs origin:write as well."
+          }
+        },
+        "additionalProperties": false
+      },
+      "Resolution": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "blyg",
+              "l0"
+            ]
+          },
+          "identity": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "site_url": {
+            "type": "string"
+          },
+          "site_discrepancy": {
+            "type": "string"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "trail": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "kind",
+          "identity",
+          "trail"
+        ],
+        "additionalProperties": false
+      },
+      "SubscribeResult": {
+        "type": "object",
+        "properties": {
+          "subscription": {
+            "$ref": "#/components/schemas/Subscription"
+          },
+          "resolution": {
+            "$ref": "#/components/schemas/Resolution"
+          }
+        },
+        "required": [
+          "subscription",
+          "resolution"
+        ],
+        "additionalProperties": false
+      },
+      "ReresolveResult": {
+        "type": "object",
+        "properties": {
+          "current": {
+            "type": "string"
+          },
+          "resolution": {
+            "$ref": "#/components/schemas/Resolution"
+          },
+          "changed": {
+            "type": "boolean"
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "current",
+          "resolution",
+          "changed",
+          "note"
+        ],
+        "additionalProperties": false
+      },
+      "MoveResult": {
+        "type": "object",
+        "properties": {
+          "subscription": {
+            "$ref": "#/components/schemas/Subscription"
+          },
+          "resolution": {
+            "$ref": "#/components/schemas/Resolution"
+          },
+          "notes": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "subscription",
+          "resolution"
+        ],
+        "additionalProperties": false
+      },
+      "Pin": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "integer"
+          },
+          "url": {
+            "type": "string"
+          },
+          "doc": {
+            "description": "Verbatim pinned document. Sanitize (§14)."
+          }
+        },
+        "required": [
+          "version",
+          "url",
+          "doc"
+        ],
+        "additionalProperties": false
+      },
+      "ReaderItem": {
+        "type": "object",
+        "properties": {
+          "subscription_id": {
+            "type": "integer"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "item_id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "fragment",
+              "thread",
+              "withdrawn",
+              "l0"
+            ]
+          },
+          "l0": {
+            "type": "boolean"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "current",
+              "withdrawn"
+            ]
+          },
+          "version": {
+            "type": "integer"
+          },
+          "page": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "claimed_updated": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "first_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sort_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "read": {
+            "type": "boolean"
+          },
+          "discrepancy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "doc": {
+            "description": "The origin's verbatim document, or null once withdrawn (§13.4). Sanitize (§14)."
+          },
+          "pins": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Pin"
+            }
+          }
+        },
+        "required": [
+          "subscription_id",
+          "origin",
+          "source",
+          "item_id",
+          "kind",
+          "l0",
+          "state",
+          "version",
+          "page",
+          "claimed_updated",
+          "first_seen_at",
+          "sort_at",
+          "read",
+          "discrepancy",
+          "doc"
+        ],
+        "additionalProperties": false
+      },
+      "FeedPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/ReaderItem"
+            }
+          },
+          "next": {
+            "type": "string",
+            "description": "Cursor for the next page; empty at the end."
+          },
+          "notice": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "items",
+          "next",
+          "notice"
+        ],
+        "additionalProperties": false
+      },
+      "ReaderItemResult": {
+        "type": "object",
+        "properties": {
+          "item": {
+            "$ref": "#/components/schemas/ReaderItem"
+          },
+          "notice": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "item",
+          "notice"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Malformed request.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Missing, unknown or revoked token.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "The token lacks the scope this operation needs.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "Not found, or not yours.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "Conflicts with current state, or an invariant refused the change.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Invalid": {
+        "description": "Well-formed but not acceptable; see message and, for publish, problems.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    },
+    "parameters": {
+      "ItemID": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^[0-9a-hjkmnp-tv-z]{26}$",
+          "description": "Item id (§5.1): 26 characters of lowercase Crockford base32."
+        }
+      },
+      "VersionN": {
+        "name": "n",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "HopperID": {
+        "name": "hid",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "MemberID": {
+        "name": "mid",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "TokenID": {
+        "name": "tid",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "SubscriptionID": {
+        "name": "sid",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "ImportedItemID": {
+        "name": "iid",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        },
+        "description": "Item id as scoped by the subscription; an L0 id is l0: plus hex."
+      }
+    }
+  }
+}

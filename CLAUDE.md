@@ -51,6 +51,9 @@ on the command line or in the environment. Each test gets a fresh database.
   bytes, so pages go through `blyg.PageHTML`, never raw `template.HTML`.
 - Every new invariant gets a test, and the test should fail when the rule
   is broken: try it.
+- **The API is described.** Any change to an `/api/` route, its scope, or
+  a request or response shape edits `internal/web/openapi.json` in the
+  same change. `openapi_test.go` and the e2e suite fail until it does.
 - No migrations yet. Schema changes edit `schema.sql` and assume a fresh
   dev database (PLAN.md, Operations).
 

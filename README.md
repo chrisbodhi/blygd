@@ -54,32 +54,24 @@ curl -s localhost:8080/chris/items/$ID.json
 
 ## API
 
-Every route takes `Authorization: Bearer <token>` and needs one scope.
+The API is described by an OpenAPI 3.1 document, served without a token
+at `GET /api/openapi.json` (source: `internal/web/openapi.json`). Every
+other route takes `Authorization: Bearer <token>` and needs at most one
+scope, named in the document's security requirement:
 
-| Route | Scope |
+| Scope | Allows |
 |---|---|
-| `GET /api/me` | any |
-| `GET /api/origin` / `PATCH /api/origin` | `items:read` / `origin:write` |
-| `GET /api/items?state=draft\|published\|withdrawn` | `items:read` |
-| `POST /api/items` `{kind?, content_md, forked_from?}` | `items:write` |
-| `GET` / `PATCH` / `DELETE /api/items/{id}` | `items:read` / `items:write` / `items:write` (drafts only) |
-| `POST /api/items/{id}/publish` `{note?}` | `items:publish` |
-| `POST /api/items/{id}/withdraw` `{note?}` | `items:withdraw` |
-| `POST /api/items/{id}/versions/{n}/pin` | `items:pin` (irrevocable) |
-| `GET` / `POST /api/hoppers`, `GET` / `PATCH` / `DELETE /api/hoppers/{hid}` | `hoppers:read` / `hoppers:write` |
-| `POST /api/hoppers/{hid}/members` `{own_item_id}`, `{imported: {origin, id}}` or `{imported: {subscription_id, id}}` | `hoppers:write` |
-| `DELETE /api/hoppers/{hid}/members/{mid}` | `hoppers:write` |
-| `GET /api/mentions?status=…`, `GET /api/outbound` | `mentions:read` |
-| `GET` / `POST /api/tokens`, `DELETE /api/tokens/{tid}` | `tokens:write` |
-| `GET /api/subscriptions`, `GET /api/subscriptions/{sid}` | `reader:read` |
-| `POST /api/subscriptions` `{url}` (resolves per §12.1; 422 with the trail when nothing resolves) | `reader:write` |
-| `PATCH /api/subscriptions/{sid}` `{display_title?, in_blogroll?}` | `reader:write`, plus `origin:write` for `in_blogroll` |
-| `DELETE /api/subscriptions/{sid}` | `reader:write` |
-| `POST /api/subscriptions/{sid}/resolve` `{url?}` (reports, changes nothing) | `reader:read` |
-| `POST /api/subscriptions/{sid}/move` `{to}` (the confirmed identity change, §12.2) | `reader:write` |
-| `GET /api/reader/feed?limit=&before=&subscription=&unread=true` | `reader:read` |
-| `GET /api/reader/items/{sid}/{item_id}` | `reader:read` |
-| `PUT` / `DELETE /api/reader/items/{sid}/{item_id}/read` | `reader:write` |
+| `items:read` / `items:write` | reading and editing drafts and items |
+| `items:publish` / `items:withdraw` / `items:pin` | the public acts, each separately; pins are irrevocable |
+| `hoppers:read` / `hoppers:write` | private hoppers |
+| `mentions:read` | inbound and outbound Webmentions |
+| `reader:read` / `reader:write` | subscriptions, the reading feed, read marks |
+| `origin:write` | origin settings, and publishing a blogroll entry |
+| `tokens:write` | listing, minting (a subset of your own scopes) and revoking tokens |
+| `*` | everything: the owner token |
+
+A publish that cannot resolve every `![[id]]` and `[[id]]` (§10.2)
+returns `422` with a `problems` list naming each one.
 
 Imported content comes back verbatim, exactly as the origin served it.
 **Clients must sanitize or sandbox it before rendering** (§14); every
@@ -91,6 +83,14 @@ Subscribe to another blyg:
 curl -s -H "Authorization: Bearer $T" localhost:8080/api/subscriptions \
      -d '{"url": "https://example.com/blyg/"}'
 curl -s -H "Authorization: Bearer $T" localhost:8080/api/reader/feed
+```
+
+Quote it in a thread. A `>` block straight after the directive quotes
+part of it:
+
+```sh
+curl -s -H "Authorization: Bearer $T" localhost:8080/api/items \
+     -d '{"kind": "thread", "content_md": "Worth reading:\n\n![[<item id>]]"}'
 ```
 
 See [docs/DESIGN.md](docs/DESIGN.md) for how it works and why.

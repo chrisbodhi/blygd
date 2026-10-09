@@ -430,3 +430,21 @@ func TestBakedHTMLIsSanitizedOnPages(t *testing.T) {
 		}
 	}
 }
+
+// Calls the operations no other test reaches, so every documented response
+// shape is checked against a real response (openapi_test.go).
+func TestAPIDescribedOperations(t *testing.T) {
+	e := newEnv(t, mention.DefaultRateLimits)
+	alice, bob := e.user("alice"), e.user("bob")
+	expect(t, alice.api("GET", "/me", nil), 200)
+	expect(t, alice.api("GET", "/origin", nil), 200)
+	expect(t, alice.api("POST", "/hoppers", map[string]any{"name": "Reading"}), 201)
+	expect(t, alice.api("GET", "/hoppers", nil), 200)
+	expect(t, alice.api("GET", "/tokens", nil), 200)
+
+	f := alice.draft(t, map[string]any{"content_md": "x"})
+	alice.publish(t, f, 200)
+	sid := itoa(bob.subscribe(t, alice.origin))
+	expect(t, bob.api("PUT", "/reader/items/"+sid+"/"+f+"/read", nil), 204)
+	expect(t, bob.api("DELETE", "/reader/items/"+sid+"/"+f+"/read", nil), 204)
+}
