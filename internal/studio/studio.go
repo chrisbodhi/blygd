@@ -30,6 +30,8 @@ type Studio struct {
 	// FragmentCap is the studio-enforced fragment length in characters
 	// (§5.3: SHOULD cap at 2,000; RECOMMENDED 1,000).
 	FragmentCap int
+	// MediaMax caps an upload in bytes; 0 means DefaultMediaMax.
+	MediaMax int
 	// Imports supplies imported snapshots for threads (§10.2 step 2). Nil
 	// means only local items resolve.
 	Imports Imports

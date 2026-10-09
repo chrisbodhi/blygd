@@ -68,7 +68,7 @@ func run(log *slog.Logger, args []string) error {
 
 	fc := &fetch.Client{UserAgent: cfg.Generator() + " (+" + cfg.GeneratorURL + ")", AllowPrivate: cfg.AllowPrivate}
 	st := &studio.Studio{Pool: pool, Generator: cfg.Generator(), GeneratorURL: cfg.GeneratorURL,
-		Level: cfg.Level, Fetch: fc, FragmentCap: cfg.FragmentCap}
+		Level: cfg.Level, Fetch: fc, FragmentCap: cfg.FragmentCap, MediaMax: cfg.MediaMax}
 	accts := &account.Accounts{Pool: pool}
 
 	switch {

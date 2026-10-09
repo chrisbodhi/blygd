@@ -74,6 +74,10 @@ func (a *API) routes() []route {
 		{"POST /api/hoppers/{hid}/members", account.ScopeHoppersWrite, a.addMember},
 		{"DELETE /api/hoppers/{hid}/members/{mid}", account.ScopeHoppersWrite, a.removeMember},
 
+		{"GET /api/media", account.ScopeItemsRead, a.listMedia},
+		{"POST /api/media", account.ScopeItemsWrite, a.uploadMedia},
+		{"DELETE /api/media/{file}", account.ScopeItemsWrite, a.deleteMedia},
+
 		{"GET /api/mentions", account.ScopeMentionsRead, a.listMentions},
 		{"GET /api/outbound", account.ScopeMentionsRead, a.listOutbound},
 	}
@@ -439,6 +443,55 @@ func (a *API) pin(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	writeJSON(w, 200, map[string]any{"version": v, "url": blyg.PinURL(o.BaseURL, r.PathValue("id"), int(n))})
+	return nil
+}
+
+// ── media ────────────────────────────────────────────────────
+
+func (a *API) listMedia(w http.ResponseWriter, r *http.Request) error {
+	o, err := a.origin(r)
+	if err != nil {
+		return err
+	}
+	ms, err := a.Studio.ListMedia(r.Context(), o)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, 200, map[string]any{"media": ms})
+	return nil
+}
+
+// uploadMedia takes the raw bytes as the body, typed by Content-Type.
+func (a *API) uploadMedia(w http.ResponseWriter, r *http.Request) error {
+	o, err := a.origin(r)
+	if err != nil {
+		return err
+	}
+	limit := a.Studio.MediaMaxBytes()
+	body, err := io.ReadAll(io.LimitReader(r.Body, int64(limit)+1))
+	if err != nil {
+		return badRequest("reading the upload: " + err.Error())
+	}
+	if len(body) > limit {
+		return &httpError{http.StatusRequestEntityTooLarge, "too_large", "media is over the cap of " + strconv.Itoa(limit) + " bytes"}
+	}
+	m, err := a.Studio.Upload(r.Context(), o, r.Header.Get("Content-Type"), body)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, 201, m)
+	return nil
+}
+
+func (a *API) deleteMedia(w http.ResponseWriter, r *http.Request) error {
+	o, err := a.origin(r)
+	if err != nil {
+		return err
+	}
+	if err := a.Studio.DeleteMedia(r.Context(), o, "media/"+r.PathValue("file")); err != nil {
+		return err
+	}
+	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
 

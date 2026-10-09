@@ -87,6 +87,9 @@ func (s *Studio) renderItem(ctx context.Context, tx pgx.Tx, o *Origin, id string
 	latest := vs[len(vs)-1]
 
 	doc := itemDoc(o, it, vs)
+	if doc.Media, err = versionMedia(ctx, tx, id, latest.Version); err != nil {
+		return err
+	}
 	body, err := blyg.Marshal(doc)
 	if err != nil {
 		return err
@@ -169,7 +172,7 @@ func itemDoc(o *Origin, it *Item, vs []*Version) *blyg.ItemDoc {
 		ContentMD:   latest.ContentMD,
 		ContentHTML: latest.ContentHTML,
 		ContentHash: latest.ContentHash,
-		Media:       []blyg.Media{},                       // media upload is Phase 4
+		Media:       []blyg.Media{},                       // filled by renderItem (§5.4)
 		ForkedFrom:  canon[blyg.Reference](it.ForkedFrom), // survives withdrawal (§9)
 		Changelog:   changelog,
 	}

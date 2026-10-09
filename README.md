@@ -49,6 +49,7 @@ curl -s localhost:8080/chris/items/$ID.json
 | `BLYGD_TRUST_PROXY` | `false` | Honor `X-Forwarded-Proto` (set behind Caddy or nginx) |
 | `BLYGD_FRAGMENT_CAP` | `2000` | Characters (§5.3) |
 | `BLYGD_LEVEL` | `2` | Informative manifest claim (§3.2) |
+| `BLYGD_MEDIA_MAX_BYTES` | `10485760` | Largest accepted upload (PNG, JPEG, GIF, WebP) |
 | `BLYGD_GENERATOR_URL` | this repo | Manifest `generator_url` |
 | `BLYGD_ALLOW_PRIVATE_FETCH` | `false` | Development only: lets fetches reach private addresses |
 
@@ -61,7 +62,7 @@ scope, named in the document's security requirement:
 
 | Scope | Allows |
 |---|---|
-| `items:read` / `items:write` | reading and editing drafts and items |
+| `items:read` / `items:write` | reading and editing drafts and items, uploading media |
 | `items:publish` / `items:withdraw` / `items:pin` | the public acts, each separately; pins are irrevocable |
 | `hoppers:read` / `hoppers:write` | private hoppers |
 | `mentions:read` | inbound and outbound Webmentions |

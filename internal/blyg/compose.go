@@ -74,6 +74,7 @@ type ComposeInput struct {
 	ContentMD  string // the draft, TK grammar included
 	Thread     bool
 	PageURL    string // the item's absolute page: links resolve against it
+	Origin     string // the publishing origin: media/… resolves against it (§5.4)
 	Resolve    Resolver
 	Generation []GenMeta
 }
@@ -279,7 +280,7 @@ func (c *composer) thread(md string) string {
 		}
 		ref := Reference{Origin: t.Origin, ID: t.ID, Version: t.Version}
 		if partial {
-			rendered, err := RenderMarkdown(quote, c.in.PageURL)
+			rendered, err := RenderMarkdownIn(quote, c.in.PageURL, c.in.Origin)
 			if err != nil {
 				c.err = err
 				continue
@@ -336,7 +337,7 @@ func BakePartial(t *Target, selection string) string {
 // spans wrapped.
 func (c *composer) prose(md string) string {
 	text, links := c.substituteLinks(md)
-	h, err := RenderMarkdown(text, c.in.PageURL)
+	h, err := RenderMarkdownIn(text, c.in.PageURL, c.in.Origin)
 	if err != nil {
 		if c.err == nil {
 			c.err = err

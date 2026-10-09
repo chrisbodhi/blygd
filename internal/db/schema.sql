@@ -169,17 +169,54 @@ DROP TRIGGER IF EXISTS items_guard ON items;
 CREATE TRIGGER items_guard BEFORE UPDATE OR DELETE ON items
   FOR EACH ROW EXECUTE FUNCTION blygd_items_guard();
 
--- §5.4: media objects are immutable; bytes referenced by a pin are kept
--- forever (§8 rule 4). Upload API is Phase 4.
+-- §5.4: a media URL always serves the same bytes. Paths are content
+-- addressed (media/{first 32 hex of sha256}.{ext}), so an upload of the same
+-- bytes is the same object.
 CREATE TABLE IF NOT EXISTS media (
   origin_id   bigint NOT NULL REFERENCES origins(id),
-  path        text NOT NULL CHECK (path ~ '^media/[0-9a-z]+\.[0-9a-z]+$'),
-  mime        text NOT NULL,
+  path        text NOT NULL CHECK (path ~ '^media/[0-9a-f]{32}\.(png|jpg|gif|webp)$'),
+  mime        text NOT NULL CHECK (mime IN ('image/png', 'image/jpeg', 'image/gif', 'image/webp')),
   bytes       bytea NOT NULL,
   sha256      bytea NOT NULL,
   created_at  timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (origin_id, path)
 );
+
+CREATE OR REPLACE FUNCTION blygd_media_guard() RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'media objects are immutable (%)', OLD.path;
+END $$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS media_guard ON media;
+CREATE TRIGGER media_guard BEFORE UPDATE ON media
+  FOR EACH ROW EXECUTE FUNCTION blygd_media_guard();
+
+-- Which media each published version references, written once at publish.
+-- §8 rule 4 keeps a pinned version's media forever, and any version may be
+-- pinned later (§8 rule 2), so media any version references can never be
+-- deleted: the foreign key refuses. Media only drafts use stays private
+-- (the surface serves media only when listed here) and may be deleted.
+CREATE TABLE IF NOT EXISTS version_media (
+  origin_id  bigint NOT NULL,
+  item_id    text NOT NULL,
+  version    integer NOT NULL,
+  ord        integer NOT NULL,   -- order of first reference in content_html
+  path       text NOT NULL,
+  alt        text NOT NULL DEFAULT '',
+  PRIMARY KEY (item_id, version, path),
+  FOREIGN KEY (item_id, version) REFERENCES item_versions(item_id, version),
+  FOREIGN KEY (origin_id, path) REFERENCES media(origin_id, path) ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS version_media_path_idx ON version_media (origin_id, path);
+
+CREATE OR REPLACE FUNCTION blygd_version_media_guard() RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'a published version''s media references are permanent (item %, v%)', OLD.item_id, OLD.version;
+END $$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS version_media_guard ON version_media;
+CREATE TRIGGER version_media_guard BEFORE UPDATE OR DELETE ON version_media
+  FOR EACH ROW EXECUTE FUNCTION blygd_version_media_guard();
 
 -- §11: the blogroll is a publishing act, so it lives in plane 1. Entries are
 -- written when the owner opts a subscription in, with the display values

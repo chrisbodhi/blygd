@@ -3,6 +3,7 @@
 package web
 
 import (
+	"encoding/hex"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -79,6 +80,11 @@ func (h *Surface) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if strings.HasPrefix(rel, "media/") {
+		h.serveMedia(w, r, o, rel)
+		return
+	}
+
 	f, err := h.Studio.GetFile(ctx, o.ID, rel)
 	if err != nil {
 		h.fail(w, r, err)
@@ -121,6 +127,38 @@ func (h *Surface) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Write(f.Body) //nolint:errcheck
+}
+
+// serveMedia serves a media object once a published version references it
+// (§5.4). Its bytes never change, so it is cached as immutable. An upload
+// only drafts use 404s like the draft (§4).
+func (h *Surface) serveMedia(w http.ResponseWriter, r *http.Request, o *studio.Origin, rel string) {
+	mime, body, sum, err := h.Studio.PublicMedia(r.Context(), o.ID, rel)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	if body == nil {
+		http.NotFound(w, r)
+		return
+	}
+	etag := `"` + hex.EncodeToString(sum[:16]) + `"`
+	hd := w.Header()
+	hd.Set("Content-Type", mime)
+	hd.Set("ETag", etag)
+	hd.Set("Cache-Control", "public, max-age=31536000, immutable")
+	hd.Set("X-Content-Type-Options", "nosniff")
+	hd.Set("Content-Security-Policy", "default-src 'none'; sandbox")
+	hd.Set("Access-Control-Allow-Origin", "*")
+	hd.Set("Access-Control-Expose-Headers", "ETag")
+	if etagMatch(r.Header.Get("If-None-Match"), etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	if r.Method == http.MethodHead {
+		return
+	}
+	w.Write(body) //nolint:errcheck
 }
 
 func etagMatch(header, etag string) bool {

@@ -390,14 +390,19 @@ func (s *Studio) Publish(ctx context.Context, originID int64, id string, opts Pu
 		}
 		rs := &resolver{ctx: ctx, tx: tx, origin: o, self: id, imports: imports}
 		c, err := blyg.Compose(blyg.ComposeInput{
-			ContentMD: it.DraftMD, Thread: it.Kind == "thread", PageURL: o.BaseURL + page,
+			ContentMD: it.DraftMD, Thread: it.Kind == "thread", PageURL: o.BaseURL + page, Origin: o.BaseURL,
 			Resolve: rs.resolve, Generation: gen,
 		})
 		if err != nil {
 			return err
 		}
-		if len(c.Problems) > 0 {
-			return unpublishable(c.Problems)
+		media := blyg.MediaRefs(c.ContentHTML, o.BaseURL)
+		missing, err := recordMedia(ctx, tx, o, media)
+		if err != nil {
+			return err
+		}
+		if problems := append(c.Problems, missing...); len(problems) > 0 {
+			return unpublishable(problems)
 		}
 		md := c.ContentMD
 		if strings.TrimSpace(md) == "" {
@@ -472,6 +477,9 @@ func (s *Studio) Publish(ctx context.Context, originID int64, id string, opts Pu
 			id, next, it.Kind, at, note, note != nil && opts.NoteGenerated, md, c.ContentHTML, blyg.ContentHash(md),
 			nullableJSON(o.Byline), transclusions, stubOf, generated))
 		if err != nil {
+			return err
+		}
+		if err := insertVersionMedia(ctx, tx, o, id, next, media); err != nil {
 			return err
 		}
 		it, err = scanItem(tx.QueryRow(ctx, `UPDATE items SET version = $2, withdrawn = false, page = $3,

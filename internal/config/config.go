@@ -25,6 +25,7 @@ type Config struct {
 	AllowPrivate bool   // BLYGD_ALLOW_PRIVATE_FETCH: dev only
 	GeneratorURL string // BLYGD_GENERATOR_URL
 	FragmentCap  int    // BLYGD_FRAGMENT_CAP, default 2000 (§5.3)
+	MediaMax     int    // BLYGD_MEDIA_MAX_BYTES, default 10 MiB
 	Level        int    // BLYGD_LEVEL, default 2
 }
 
@@ -40,6 +41,9 @@ func Load() (*Config, error) {
 	}
 	var err error
 	if c.FragmentCap, err = intEnv("BLYGD_FRAGMENT_CAP", 2000); err != nil {
+		return nil, err
+	}
+	if c.MediaMax, err = intEnv("BLYGD_MEDIA_MAX_BYTES", 10<<20); err != nil {
 		return nil, err
 	}
 	if c.Level, err = intEnv("BLYGD_LEVEL", 2); err != nil {

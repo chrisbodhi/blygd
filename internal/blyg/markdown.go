@@ -28,9 +28,17 @@ import (
 // Transclusion directives and [[id]] links (§10.1) are not handled here;
 // thread resolution is Phase 3 and will run before this.
 func RenderMarkdown(contentMD, pageURL string) (string, error) {
+	return RenderMarkdownIn(contentMD, pageURL, "")
+}
+
+// RenderMarkdownIn is RenderMarkdown for an item of the origin at
+// originURL: a destination written media/… names one of the origin's media
+// objects (§5.4: media URLs are relative to the origin), so it resolves
+// against the origin, not the page.
+func RenderMarkdownIn(contentMD, pageURL, originURL string) (string, error) {
 	md := goldmark.New(
 		goldmark.WithExtensions(extension.Linkify),
-		goldmark.WithParser(safeParser(pageURL)),
+		goldmark.WithParser(safeParser(pageURL, originURL)),
 	)
 	var buf bytes.Buffer
 	if err := md.Convert([]byte(contentMD), &buf); err != nil {
@@ -41,7 +49,7 @@ func RenderMarkdown(contentMD, pageURL string) (string, error) {
 
 // safeParser is goldmark's default parser minus its two raw-HTML parsers,
 // so HTML in the source is ordinary text and gets escaped on output.
-func safeParser(pageURL string) parser.Parser {
+func safeParser(pageURL, originURL string) parser.Parser {
 	var blocks []util.PrioritizedValue
 	for _, v := range parser.DefaultBlockParsers() {
 		if !strings.Contains(fmt.Sprintf("%T", v.Value), "htmlBlockParser") {
@@ -58,22 +66,26 @@ func safeParser(pageURL string) parser.Parser {
 		parser.WithBlockParsers(blocks...),
 		parser.WithInlineParsers(inlines...),
 		parser.WithParagraphTransformers(parser.DefaultParagraphTransformers()...),
-		parser.WithASTTransformers(util.Prioritized(absoluteURLs{base: pageURL}, 100)),
+		parser.WithASTTransformers(util.Prioritized(absoluteURLs{base: pageURL, origin: originURL}, 100)),
 	)
 }
 
 // absoluteURLs rewrites link and image destinations to absolute URLs.
-type absoluteURLs struct{ base string }
+type absoluteURLs struct{ base, origin string }
 
 func (a absoluteURLs) Transform(doc *ast.Document, _ text.Reader, _ parser.Context) {
 	base, err := url.Parse(a.base)
 	if err != nil || a.base == "" {
 		return
 	}
+	origin, _ := url.Parse(a.origin)
 	abs := func(dest []byte) []byte {
 		ref, err := url.Parse(string(dest))
 		if err != nil {
 			return dest
+		}
+		if a.origin != "" && strings.HasPrefix(string(dest), "media/") {
+			return []byte(origin.ResolveReference(ref).String())
 		}
 		return []byte(base.ResolveReference(ref).String())
 	}

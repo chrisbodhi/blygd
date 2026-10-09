@@ -98,6 +98,8 @@ func (e *env) do(method, u, token string, body any, hdr ...string) resp {
 		switch b := body.(type) {
 		case url.Values:
 			rd = strings.NewReader(b.Encode())
+		case []byte:
+			rd = bytes.NewReader(b) // raw upload; the caller sets Content-Type
 		default:
 			j, _ := json.Marshal(b)
 			rd = bytes.NewReader(j)

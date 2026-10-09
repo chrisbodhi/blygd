@@ -78,6 +78,9 @@ schema (triggers in `schema.sql`), not only in Go, and each has a test.
 | Item documents and pins stay 200 forever | §4, §8 | `surface_files.permanent` + trigger |
 | Pin bytes never change | §8 | `surface_files.immutable` + insert-or-ignore |
 | Drafts and unpinned versions 404 | §4, §8.4 | nothing renders them |
+| Media bytes never change | §5.4 | content-addressed path + trigger `media_guard` |
+| Media any published version references is kept forever | §8 rules 2 and 4 | `version_media` foreign key (RESTRICT) + trigger `version_media_guard` |
+| Media only drafts use is never served | §4 | the surface serves media only when `version_media` lists it |
 | Pinned version pages stay 200 forever | §8.4 rule 1 | `surface_files.permanent` (re-renderable, not write-once) |
 | Imported items are never re-emitted | §13.5 | renderer reads plane 1 only; structural test |
 | The import watermark never regresses | §13.3 | trigger `imported_items_guard` |
@@ -290,6 +293,31 @@ builds the draft:
 
 When the prose cannot be matched to the bake, the whole draft is rebuilt
 from the HTML. A fork's page shows its lineage (rule 7).
+
+## Media (Phase 4)
+
+Bytes live in Postgres (`media.bytes`). Backups stay one `pg_dump`, and
+publishing a version and recording its media share a transaction. Uploads
+are capped (`BLYGD_MEDIA_MAX_BYTES`, default 10 MiB) and limited to PNG,
+JPEG, GIF and WebP. SVG is left out because it can carry script. The
+declared type must match the sniffed bytes.
+
+- **Content-addressed:** the path is `media/{first 32 hex of sha256}.{ext}`.
+  A path can never name other bytes (§5.4), and the same upload dedupes.
+- **Referenced, not attached:** markdown writes `![alt](media/….png)`, and
+  the renderer resolves `media/…` against the origin, not the page (§5.4:
+  media URLs are origin-relative). At publish the studio collects every
+  `{origin}media/…` the new `content_html` references, own baked quotes
+  included. It refuses unknown ones, records them in `version_media`, and
+  the item document's `media[]` is that list, with each `<img>` alt.
+  Clients never maintain `media[]`.
+- **Permanent once published, not once pinned.** §8 rule 4 keeps a pinned
+  version's media forever, but any published version may be pinned later
+  (rule 2). So media any version references cannot be deleted: the
+  foreign key refuses, and the reference rows themselves are guarded.
+  Uploads that only drafts use 404 on the surface and may be deleted.
+- Served with `immutable` caching, `nosniff`, CORS, and a
+  `default-src 'none'; sandbox` CSP.
 
 ## Outbound fetching
 

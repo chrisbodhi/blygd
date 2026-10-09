@@ -97,7 +97,10 @@ Left for later:
 ## Phase 4 — surface and access
 
 - **Media** upload: immutable, `media/{key}.{ext}`, retained forever when
-  a pin references it (§5.4, §8 rule 4).
+  a pin references it (§5.4, §8 rule 4). *(Done, in Postgres with a 10 MiB
+  images-only cap. Kept forever once any published version references it,
+  since any version may be pinned later. Static export must include
+  published media.)*
 - **Pinned version pages** `{page}v{n}/` (§8.4), plus pin citations on the
   live page. *(Done: sanitized rather than verbatim, see DESIGN.md
   departures; own forks' lineage links them.)*

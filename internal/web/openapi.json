@@ -21,6 +21,9 @@
       "name": "items"
     },
     {
+      "name": "media"
+    },
+    {
       "name": "hoppers"
     },
     {
@@ -885,6 +888,146 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/media": {
+      "get": {
+        "operationId": "listMedia",
+        "tags": [
+          "media"
+        ],
+        "summary": "List uploaded media, newest first.",
+        "security": [
+          {
+            "bearer": [
+              "items:read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      },
+      "post": {
+        "operationId": "uploadMedia",
+        "tags": [
+          "media"
+        ],
+        "summary": "Upload an image: the raw bytes as the body, typed by Content-Type.",
+        "security": [
+          {
+            "bearer": [
+              "items:write"
+            ]
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Stored, or already stored: the same bytes are the same object.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Media"
+                }
+              }
+            }
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "description": "The declared type must match the bytes. Reference it from markdown as media/… ; publish checks every reference exists, and lists them in the item's media array.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "image/png": {
+              "schema": {
+                "type": "string",
+                "contentMediaType": "image/png"
+              }
+            },
+            "image/jpeg": {
+              "schema": {
+                "type": "string",
+                "contentMediaType": "image/jpeg"
+              }
+            },
+            "image/gif": {
+              "schema": {
+                "type": "string",
+                "contentMediaType": "image/gif"
+              }
+            },
+            "image/webp": {
+              "schema": {
+                "type": "string",
+                "contentMediaType": "image/webp"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/media/{file}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/MediaFile"
+        }
+      ],
+      "delete": {
+        "operationId": "deleteMedia",
+        "tags": [
+          "media"
+        ],
+        "summary": "Delete media no published version references.",
+        "security": [
+          {
+            "bearer": [
+              "items:write"
+            ]
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Done."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -3356,6 +3499,68 @@
           "notice"
         ],
         "additionalProperties": false
+      },
+      "Media": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "An uploaded object (§5.4). Its path is derived from its bytes, so it never changes meaning.",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Origin-relative; write it in markdown as ![alt](media/…)."
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "mime": {
+            "type": "string",
+            "enum": [
+              "image/png",
+              "image/jpeg",
+              "image/gif",
+              "image/webp"
+            ]
+          },
+          "size": {
+            "type": "integer"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "published": {
+            "type": "boolean",
+            "description": "Referenced by a published version: served publicly and kept forever (§8 rules 2 and 4). Until then it 404s and may be deleted."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "path",
+          "url",
+          "mime",
+          "size",
+          "sha256",
+          "published",
+          "created_at"
+        ]
+      },
+      "MediaList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "media": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Media"
+            }
+          }
+        },
+        "required": [
+          "media"
+        ]
       }
     },
     "responses": {
@@ -3411,6 +3616,16 @@
       },
       "Invalid": {
         "description": "Well-formed but not acceptable; see message and, for publish, problems.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "TooLarge": {
+        "description": "Over the upload cap (BLYGD_MEDIA_MAX_BYTES).",
         "content": {
           "application/json": {
             "schema": {
@@ -3484,6 +3699,16 @@
           "type": "string"
         },
         "description": "Item id as scoped by the subscription; an L0 id is l0: plus hex."
+      },
+      "MediaFile": {
+        "name": "file",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}\\.(png|jpg|gif|webp)$"
+        },
+        "description": "The file name under media/."
       }
     }
   }

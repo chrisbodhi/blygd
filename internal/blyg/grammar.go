@@ -44,7 +44,7 @@ func inSpans(ss []span, pos int) bool {
 // inside code is covered whatever its indentation.
 func codeSpans(src string) []span {
 	b := []byte(src)
-	doc := goldmark.New(goldmark.WithParser(safeParser(""))).Parser().Parse(text.NewReader(b))
+	doc := goldmark.New(goldmark.WithParser(safeParser("", ""))).Parser().Parse(text.NewReader(b))
 	var out []span
 	lines := func(n ast.Node) {
 		for i := 0; i < n.Lines().Len(); i++ {
