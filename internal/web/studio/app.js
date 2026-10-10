@@ -2,8 +2,8 @@
 // only to /api/ on this host, with a pasted bearer token kept in this
 // browser's localStorage. Everything shown is built as DOM nodes with text
 // in them, never parsed from a string: imported content is someone else's
-// HTML (§14), and here it is only ever read as plain text
-// (studio_test.go enforces it).
+// HTML (§14): it is parsed inert and rebuilt node by node from an
+// allowlist (richOf), never assigned as markup (studio_test.go enforces it).
 "use strict";
 
 const main = document.getElementById("main");
@@ -48,6 +48,83 @@ function textOf(html) {
   if (!html) return "";
   return new DOMParser().parseFromString(html, "text/html").body.textContent.replace(/\s+/g, " ").trim();
 }
+
+// Someone's HTML rebuilt as fresh nodes. The DOMParser document is inert;
+// from it only allowlisted elements are recreated, with no attributes but
+// an http(s) href, and everything else is kept as text. Bare URLs in text
+// become links.
+const RICH_TAGS = new Set(["p", "br", "blockquote", "em", "i", "strong", "b", "code", "pre", "ul", "ol", "li",
+  "h1", "h2", "h3", "h4", "h5", "h6", "hr", "del", "s", "sup", "sub", "a"]);
+
+function richOf(html) {
+  const frag = document.createDocumentFragment();
+  if (html) copyRich(new DOMParser().parseFromString(html, "text/html").body, frag, false);
+  return frag;
+}
+
+function copyRich(from, to, inLink) {
+  for (const n of from.childNodes) {
+    if (n.nodeType === Node.TEXT_NODE) {
+      to.append(inLink ? document.createTextNode(n.data) : linkify(n.data));
+      continue;
+    }
+    if (n.nodeType !== Node.ELEMENT_NODE) continue;
+    const tag = n.localName;
+    if (tag === "script" || tag === "style" || tag === "template") continue;
+    if (!RICH_TAGS.has(tag) || (tag === "a" && inLink)) {
+      copyRich(n, to, inLink);
+      continue;
+    }
+    let el;
+    if (tag === "a") {
+      const href = safeHref(n.getAttribute("href"));
+      if (!href) {
+        copyRich(n, to, inLink);
+        continue;
+      }
+      el = extLink(href);
+    } else {
+      el = document.createElement(tag);
+    }
+    copyRich(n, el, inLink || tag === "a");
+    to.append(el);
+  }
+}
+
+function safeHref(href) {
+  try {
+    const u = new URL(href || "");
+    return u.protocol === "https:" || u.protocol === "http:" ? u.href : null;
+  } catch {
+    return null;
+  }
+}
+
+function extLink(href, text) {
+  return h("a", { href, target: "_blank", rel: "noopener noreferrer nofollow" }, text);
+}
+
+function linkify(text) {
+  const frag = document.createDocumentFragment();
+  const re = /\bhttps?:\/\/[^\s<>"]+/g;
+  let last = 0, m;
+  while ((m = re.exec(text))) {
+    // Trailing punctuation is more often prose than URL.
+    const url = m[0].replace(/[.,;:!?)\]'"]+$/, "");
+    const href = safeHref(url);
+    if (!href) continue;
+    frag.append(text.slice(last, m.index), extLink(href, url));
+    last = m.index + url.length;
+    re.lastIndex = last;
+  }
+  frag.append(text.slice(last));
+  return frag;
+}
+
+// Clipped rich text fades out only when there is more below the fold.
+const overflowWatch = new ResizeObserver((entries) => {
+  for (const { target } of entries) target.classList.toggle("more", target.scrollHeight > target.clientHeight + 1);
+});
 
 function clip(s, n) {
   s = s || "";
@@ -440,14 +517,14 @@ function readerCard(it) {
   const doc = it.doc || {};
   const body = it.l0 ? (doc.title ? doc.title + " — " : "") + (doc.summary_text || "") : textOf(doc.content_html);
   const author = doc.author && doc.author.name;
-  const full = h("div", { class: "text" }, clip(body, 400));
-  let expanded = false;
+  const full = h("div", { class: "rich clipped" }, it.l0 ? h("p", {}, linkify(body)) : richOf(doc.content_html));
+  overflowWatch.observe(full);
   return h("div", { class: "card" },
     h("div", {}, !it.read ? h("span", { class: "badge unread" }, "new") : null,
       h("span", { class: "badge" }, it.l0 ? "rss" : it.kind), it.discrepancy ? h("span", { class: "badge" }, "changed") : null),
-    h("div", { class: "tap", onclick: async () => {
-      expanded = !expanded;
-      full.textContent = expanded ? body : clip(body, 400);
+    h("div", { class: "tap", onclick: async (e) => {
+      if (e.target.closest("a")) return;
+      full.classList.toggle("clipped");
       if (!it.read) {
         it.read = true;
         await attempt(() => api("PUT", `/reader/items/${it.subscription_id}/${encodeURIComponent(it.item_id)}/read`));

@@ -30,7 +30,8 @@ func TestStudioIsServed(t *testing.T) {
 }
 
 // The studio never turns text into markup: imported content is someone
-// else's HTML (§14), and the studio only ever reads it as text.
+// else's HTML (§14). It is parsed inert and rebuilt from fresh nodes, so
+// no foreign node or attribute (but a checked href) reaches the page.
 func TestStudioNeverWritesHTML(t *testing.T) {
 	f, err := studioFiles.Open("studio/app.js")
 	if err != nil {
@@ -46,6 +47,9 @@ func TestStudioNeverWritesHTML(t *testing.T) {
 	}
 	if m := regexp.MustCompile(`innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval\(|new Function`).Find(src); m != nil {
 		t.Errorf("app.js uses %q: build nodes with textContent instead", m)
+	}
+	if m := regexp.MustCompile(`cloneNode|importNode|adoptNode|\.attributes\b|getAttributeNames|getAttribute\("(?:[^h]|h[^r])`).Find(src); m != nil {
+		t.Errorf("app.js uses %q: rebuild foreign nodes, never copy them or their attributes", m)
 	}
 }
 
