@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/chrisbodhi/blygd/internal/fetch"
 )
@@ -217,6 +218,25 @@ func TestDiscovery(t *testing.T) {
 	}
 }
 
+func TestRetryDelayHonorsASoonerRetryAfter(t *testing.T) {
+	for _, c := range []struct {
+		n          int
+		retryAfter time.Duration
+		want       time.Duration
+	}{
+		{1, 0, 15 * time.Minute},              // §15.2's schedule
+		{1, 40 * time.Second, time.Minute},    // sooner, but never under a minute
+		{1, 5 * time.Minute, 5 * time.Minute}, // the receiver said when
+		{1, 2 * time.Hour, 15 * time.Minute},  // a later Retry-After never stretches the step
+		{2, 30 * time.Minute, 30 * time.Minute},
+		{5, 0, 24 * time.Hour},
+	} {
+		if got := RetryDelay(c.n, c.retryAfter); got != c.want {
+			t.Errorf("RetryDelay(%d, %v) = %v, want %v", c.n, c.retryAfter, got, c.want)
+		}
+	}
+}
+
 func TestSendClassification(t *testing.T) {
 	codes := map[string]int{"/ok": 202, "/bad": 400, "/busy": 429, "/err": 500, "/moved": 301}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -227,6 +247,9 @@ func TestSendClassification(t *testing.T) {
 			}
 			if r.URL.Path == "/moved" {
 				w.Header().Set("Location", "/ok")
+			}
+			if r.URL.Path == "/busy" {
+				w.Header().Set("Retry-After", "40")
 			}
 			w.WriteHeader(codes[r.URL.Path])
 			return
@@ -241,6 +264,9 @@ func TestSendClassification(t *testing.T) {
 		res := Send(context.Background(), c, Outbound{SourceURL: "https://s.example/x/", TargetURL: srv.URL + "/page?ep=" + ep})
 		if res.Status != status {
 			t.Errorf("%s: got %s (%s), want %s", ep, res.Status, res.Detail, status)
+		}
+		if ep == "/busy" && res.RetryAfter != 40*time.Second {
+			t.Errorf("a 429's Retry-After is reported: got %v", res.RetryAfter)
 		}
 	}
 }

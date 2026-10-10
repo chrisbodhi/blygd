@@ -37,6 +37,9 @@ type Reader struct {
 	Recheck int
 	Batch   int
 	Idle    time.Duration
+	// ManualPollFloor is the least time between polls of one origin that a
+	// user may ask for (PollFor). Default one minute.
+	ManualPollFloor time.Duration
 }
 
 func (r *Reader) recheckPerReconcile() int {

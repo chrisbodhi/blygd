@@ -146,7 +146,9 @@ once, so each target finds the endcap and marks its mention gone (§15.7). A wor
   `<a>`);
 - POSTs without following redirects;
 - applies §15.2's schedule: 2xx is sent, 4xx is failed, 5xx/429/network
-  are retried at 15 m, 1 h, 4 h, 12 h, 24 h and then abandoned.
+  are retried at 15 m, 1 h, 4 h, 12 h, 24 h and then abandoned. A 429's
+  `Retry-After` sooner than the next step is honored (never under a
+  minute): the receiver knows when it will listen.
 
 **Workers** use a lease, not a job table. A claim is one
 `UPDATE … WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED)` that pushes
@@ -169,6 +171,13 @@ read; the optional HTTP `Link` header is not.
 `POST …/move {to}` moves the subscription, and only if `to` resolves to
 exactly the identity named, so the user confirms the identity they saw,
 not a URL that redirects somewhere else.
+
+**Polling now.** `POST /api/subscriptions/{id}/poll` polls one origin
+synchronously, within §12.3. It is refused (429, `Retry-After`) while the
+origin backs off after failures (polling never tightens on failure),
+within a minute of its last poll (the mirror is shared, so one tenant
+cannot hammer an origin for everyone), and while another poll of it
+runs. `poll_lease_until` marks a poll in flight.
 
 **The poller** leases due remote origins with the mention workers'
 pattern, and only origins someone subscribes to. One poll of one blyg:

@@ -26,7 +26,12 @@ type Config struct {
 	GeneratorURL string // BLYGD_GENERATOR_URL
 	FragmentCap  int    // BLYGD_FRAGMENT_CAP, default 2000 (§5.3)
 	MediaMax     int    // BLYGD_MEDIA_MAX_BYTES, default 10 MiB
-	Level        int    // BLYGD_LEVEL, default 2
+	// PollFloor is the least seconds between user-asked polls of one origin
+	// (BLYGD_MANUAL_POLL_FLOOR, default 60). Lower it for development only:
+	// the mirror is shared, and the floor is what keeps one tenant from
+	// hammering an origin.
+	PollFloor int
+	Level     int // BLYGD_LEVEL, default 2
 }
 
 // Load reads the environment.
@@ -44,6 +49,9 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	if c.MediaMax, err = intEnv("BLYGD_MEDIA_MAX_BYTES", 10<<20); err != nil {
+		return nil, err
+	}
+	if c.PollFloor, err = intEnv("BLYGD_MANUAL_POLL_FLOOR", 60); err != nil {
 		return nil, err
 	}
 	if c.Level, err = intEnv("BLYGD_LEVEL", 2); err != nil {

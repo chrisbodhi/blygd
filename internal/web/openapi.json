@@ -1706,6 +1706,69 @@
         }
       }
     },
+    "/api/subscriptions/{sid}/poll": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/SubscriptionID"
+        }
+      ],
+      "post": {
+        "operationId": "pollSubscription",
+        "tags": [
+          "reader"
+        ],
+        "summary": "Poll this subscription now.",
+        "description": "Within §12.3's etiquette: refused while the origin is backing off after failures, within a minute of its last poll (the mirror is shared by every subscriber), or while another poll of it runs. A refusal is 429 with Retry-After and retry_at.",
+        "security": [
+          {
+            "bearer": [
+              "reader:write"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Polled; the subscription as it now stands.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Subscription"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "description": "Not now; see Retry-After.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
     "/api/reader/feed": {
       "get": {
         "operationId": "readerFeed",
@@ -2057,6 +2120,11 @@
               "type": "string"
             },
             "description": "URLs tried, on a failed resolution (§12.1 step 6)."
+          },
+          "retry_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When a refused poll may run (429 from poll)."
           }
         },
         "required": [

@@ -296,6 +296,9 @@ CREATE TABLE IF NOT EXISTS remote_origins (
   -- §13.2: an otherwise-live blyg whose items/index.json 404s.
   lossy               boolean NOT NULL DEFAULT false,
   next_poll_at        timestamptz NOT NULL DEFAULT now(),
+  -- Set while a poll holds the origin, cleared when it finishes, so a
+  -- user-asked poll never runs beside a scheduled one.
+  poll_lease_until    timestamptz,
   poll_failures       integer NOT NULL DEFAULT 0,
   last_polled_at      timestamptz,
   last_error          text,

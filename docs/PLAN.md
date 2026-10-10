@@ -119,6 +119,43 @@ Left for later:
   OAuth-style token approval beside paste-a-token (§16.6); an MCP
   transport over the same operations and scopes.
 
+## Interop (2026-10-10)
+
+Checked against the reference client, blygger-studio 0.39.0 (`9f6bab8`).
+Both checks are in the repo and are rerun when the spec or the reference
+moves (`scripts/interop/README.md`):
+
+- **`make parity`**, differential: 56 cases through both implementations'
+  pure functions (§10.2 text content, quote normalization, partial
+  location, §5.6 rule 6 flattening). There are no unexpected differences.
+  The documented ones are our lazy-continuation fix and entity decoding
+  (the reference decodes a fixed subset); neither renderer emits those
+  entities, so the two agree on each other's content.
+- **`make interop`**, live: both studios on localhost, each subscribed to
+  the other, 32 checks in five scenarios. All pass.
+  - import, with hashes, pins and `page`;
+  - quotes of every shape, including a cycle;
+  - stubs;
+  - mentions verified as stub, transclusion and fork;
+  - forks byte-identical to each other's flattening;
+  - withdrawal end to end.
+
+What it changed in blygd:
+
+- `POST /api/subscriptions/{id}/poll`, within §12.3. The first run had to
+  nudge `next_poll_at` by hand.
+- The mention sender honors a 429's `Retry-After` when it is sooner than
+  §15.2's next step (never under a minute). The reference refuses a pair
+  re-sent within 60 s, so a quick withdrawal reached it a schedule step
+  (15 minutes) late.
+
+Observed, not bugs:
+
+- The reference retains a pin past withdrawal only for items in a hopper
+  (§13.4 MAY).
+- It serves pinned version pages, so a cross-origin fork's lineage line
+  could link one when known.
+
 ## Operations
 
 - **API description (done).** `internal/web/openapi.json`, OpenAPI 3.1,

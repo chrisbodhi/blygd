@@ -242,7 +242,7 @@ func (wk *Workers) SendBatch(ctx context.Context) (int, error) {
 				status = "abandoned"
 			} else {
 				status = "pending"
-				next = RetrySchedule[c.attempts-1].Seconds()
+				next = RetryDelay(c.attempts, res.RetryAfter).Seconds()
 			}
 		}
 		if _, err := wk.Pool.Exec(ctx, `UPDATE outbound_mentions SET status = $2,

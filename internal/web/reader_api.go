@@ -1,10 +1,12 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/chrisbodhi/blygd/internal/account"
 	"github.com/chrisbodhi/blygd/internal/reader"
@@ -23,6 +25,7 @@ func (a *API) readerRoutes() []route {
 		{"DELETE /api/subscriptions/{sid}", account.ScopeReaderWrite, a.unsubscribe},
 		{"POST /api/subscriptions/{sid}/resolve", account.ScopeReaderRead, a.reresolve},
 		{"POST /api/subscriptions/{sid}/move", account.ScopeReaderWrite, a.moveSubscription},
+		{"POST /api/subscriptions/{sid}/poll", account.ScopeReaderWrite, a.pollSubscription},
 
 		{"GET /api/reader/feed", account.ScopeReaderRead, a.readerFeed},
 		{"GET /api/reader/items/{sid}/{iid}", account.ScopeReaderRead, a.readerItem},
@@ -282,6 +285,34 @@ func (a *API) moveSubscription(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	writeJSON(w, 200, map[string]any{"subscription": s, "resolution": res, "notes": notes})
+	return nil
+}
+
+// pollSubscription polls one subscription now, within §12.3's etiquette,
+// and returns it as it stands after the poll.
+func (a *API) pollSubscription(w http.ResponseWriter, r *http.Request) error {
+	sid, err := pathInt(r, "sid")
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
+	defer cancel()
+	err = a.Reader.PollFor(ctx, principal(r.Context()).UserID, sid)
+	var soon *reader.TooSoon
+	if errors.As(err, &soon) {
+		secs := int(time.Until(soon.Until).Seconds()) + 1
+		w.Header().Set("Retry-After", strconv.Itoa(max(secs, 1)))
+		writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "too_soon", "message": soon.Reason, "retry_at": soon.Until.UTC()})
+		return nil
+	}
+	if err != nil {
+		return a.readerErr(err)
+	}
+	s, err := a.subscriptionView(r, sid)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, 200, s)
 	return nil
 }
 

@@ -3,6 +3,7 @@ package reader
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -82,48 +83,126 @@ func (r *Reader) PollBatch(ctx context.Context) (int, error) {
 	if batch <= 0 {
 		batch = 5
 	}
-	rows, err := r.Pool.Query(ctx, `UPDATE remote_origins SET next_poll_at = now() + interval '15 minutes'
-		WHERE id IN (
-			SELECT ro.id FROM remote_origins ro
-			WHERE ro.next_poll_at <= now() AND EXISTS (SELECT 1 FROM subscriptions s WHERE s.remote_origin_id = ro.id)
-			ORDER BY ro.next_poll_at LIMIT $1 FOR UPDATE SKIP LOCKED)
-		RETURNING id, kind, identity_url, coalesce(manifest_etag, ''), coalesce(feed_etag, ''), coalesce(feed_last_modified, ''),
-			coalesce(index_etag, ''), coalesce(index_last_modified, ''), coalesce(feed_newest_guid, ''), reconciled_at, poll_failures`, batch)
-	if err != nil {
-		return 0, err
-	}
-	leased, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (remote, error) {
-		var o remote
-		err := row.Scan(&o.id, &o.kind, &o.identity, &o.manifestETag, &o.feedETag, &o.feedLM,
-			&o.indexETag, &o.indexLM, &o.newestGUID, &o.reconciledAt, &o.failures)
-		return o, err
-	})
+	leased, err := r.lease(ctx, `SELECT ro.id FROM remote_origins ro
+			WHERE ro.next_poll_at <= now() AND (ro.poll_lease_until IS NULL OR ro.poll_lease_until < now())
+			AND EXISTS (SELECT 1 FROM subscriptions s WHERE s.remote_origin_id = ro.id)
+			ORDER BY ro.next_poll_at LIMIT $1 FOR UPDATE SKIP LOCKED`, batch)
 	if err != nil {
 		return 0, err
 	}
 	for _, o := range leased {
-		var res pollResult
-		if o.kind == "l0" {
-			res = r.pollL0(ctx, o)
-		} else {
-			res = r.pollBlyg(ctx, o)
-		}
-		if err := r.finish(ctx, o, res); err != nil {
+		if err := r.pollOne(ctx, o); err != nil {
 			return len(leased), err
 		}
 	}
 	return len(leased), nil
 }
 
-// PollNow polls one origin immediately, whatever its schedule. It is for
-// tests and tools; the poller is the normal path.
+// leaseFor is how long a lease holds an origin; finish releases it early.
+const leaseFor = "15 minutes"
+
+// lease claims the origins the subquery selects: one UPDATE pushes
+// next_poll_at forward and holds poll_lease_until, and the network work runs
+// outside any transaction.
+func (r *Reader) lease(ctx context.Context, which string, args ...any) ([]remote, error) {
+	rows, err := r.Pool.Query(ctx, `UPDATE remote_origins
+		SET next_poll_at = now() + interval '`+leaseFor+`', poll_lease_until = now() + interval '`+leaseFor+`'
+		WHERE id IN (`+which+`)
+		RETURNING id, kind, identity_url, coalesce(manifest_etag, ''), coalesce(feed_etag, ''), coalesce(feed_last_modified, ''),
+			coalesce(index_etag, ''), coalesce(index_last_modified, ''), coalesce(feed_newest_guid, ''), reconciled_at, poll_failures`, args...)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (remote, error) {
+		var o remote
+		err := row.Scan(&o.id, &o.kind, &o.identity, &o.manifestETag, &o.feedETag, &o.feedLM,
+			&o.indexETag, &o.indexLM, &o.newestGUID, &o.reconciledAt, &o.failures)
+		return o, err
+	})
+}
+
+func (r *Reader) pollOne(ctx context.Context, o remote) error {
+	var res pollResult
+	if o.kind == "l0" {
+		res = r.pollL0(ctx, o)
+	} else {
+		res = r.pollBlyg(ctx, o)
+	}
+	return r.finish(ctx, o, res)
+}
+
+// PollNow polls one origin immediately, whatever its schedule or backoff.
+// It is for tests and tools; users go through PollFor, which keeps §12.3.
 func (r *Reader) PollNow(ctx context.Context, remoteID int64) error {
-	_, err := r.Pool.Exec(ctx, `UPDATE remote_origins SET next_poll_at = now() WHERE id = $1`, remoteID)
+	leased, err := r.lease(ctx, `SELECT id FROM remote_origins WHERE id = $1 FOR UPDATE`, remoteID)
+	if err != nil || len(leased) == 0 {
+		return err
+	}
+	return r.pollOne(ctx, leased[0])
+}
+
+// TooSoon refuses a user-asked poll, and says when one may run.
+type TooSoon struct {
+	Until  time.Time
+	Reason string
+}
+
+func (e *TooSoon) Error() string { return e.Reason }
+
+// DefaultManualPollFloor is the least time between polls of one origin that
+// a user may ask for: the mirror is shared, so one tenant must not be able
+// to hammer an origin on everyone's behalf.
+const DefaultManualPollFloor = time.Minute
+
+func (r *Reader) manualPollFloor() time.Duration {
+	if r.ManualPollFloor > 0 {
+		return r.ManualPollFloor
+	}
+	return DefaultManualPollFloor
+}
+
+// PollFor polls one of the user's subscriptions now, if etiquette allows
+// (§12.3): never while the origin is backing off after failures (polling
+// must not tighten on failure), never within ManualPollFloor of the last
+// poll, and never beside a poll already running.
+func (r *Reader) PollFor(ctx context.Context, userID, remoteID int64) error {
+	floor := fmt.Sprintf("%d seconds", int(r.manualPollFloor().Seconds()))
+	leased, err := r.lease(ctx, `SELECT ro.id FROM remote_origins ro
+			JOIN subscriptions s ON s.remote_origin_id = ro.id AND s.user_id = $2
+			WHERE ro.id = $1
+			AND (ro.poll_failures = 0 OR ro.next_poll_at <= now())
+			AND (ro.last_polled_at IS NULL OR ro.last_polled_at <= now() - $3::interval)
+			AND (ro.poll_lease_until IS NULL OR ro.poll_lease_until < now())
+			FOR UPDATE OF ro SKIP LOCKED`, remoteID, userID, floor)
 	if err != nil {
 		return err
 	}
-	_, err = r.PollBatch(ctx)
-	return err
+	if len(leased) == 1 {
+		return r.pollOne(ctx, leased[0])
+	}
+	// Say why not.
+	var failures int
+	var next time.Time
+	var last, leaseUntil *time.Time
+	err = r.Pool.QueryRow(ctx, `SELECT ro.poll_failures, ro.next_poll_at, ro.last_polled_at, ro.poll_lease_until
+		FROM remote_origins ro JOIN subscriptions s ON s.remote_origin_id = ro.id AND s.user_id = $2
+		WHERE ro.id = $1`, remoteID, userID).Scan(&failures, &next, &last, &leaseUntil)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	now := r.now()
+	switch {
+	case leaseUntil != nil && leaseUntil.After(now):
+		return &TooSoon{Until: now.Add(10 * time.Second), Reason: "a poll of this origin is already running"}
+	case failures > 0 && next.After(now):
+		return &TooSoon{Until: next, Reason: fmt.Sprintf("the origin is backing off after %d failed polls; polling must not tighten on failure (§12.3)", failures)}
+	case last != nil:
+		return &TooSoon{Until: last.Add(r.manualPollFloor()), Reason: fmt.Sprintf("polled less than %s ago", r.manualPollFloor())}
+	}
+	return &TooSoon{Until: now.Add(10 * time.Second), Reason: "a poll of this origin is already running"}
 }
 
 func strp(s string) *string { return &s }
@@ -521,6 +600,7 @@ func (r *Reader) finish(ctx context.Context, o remote, res pollResult) error {
 		siteDisc = *res.siteDiscrepancy
 	}
 	_, err := r.Pool.Exec(ctx, `UPDATE remote_origins SET
+		poll_lease_until = NULL,
 		next_poll_at = now() + make_interval(secs => $2),
 		poll_failures = $3,
 		last_polled_at = now(),

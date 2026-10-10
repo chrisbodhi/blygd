@@ -32,6 +32,27 @@ type SendResult struct {
 	Status   string // sent, failed, no_endpoint, retry
 	Endpoint string
 	Detail   string
+	// RetryAfter is a 429's Retry-After: the receiver saying when to come
+	// back. Zero when it said nothing.
+	RetryAfter time.Duration
+}
+
+// minRetry is the soonest a refused mention is sent again, whatever the
+// receiver says.
+const minRetry = time.Minute
+
+// RetryDelay is how long to wait before attempt n+1 after attempt n (from
+// 1) was refused or failed. §15.2's schedule, unless the receiver asked for
+// sooner with a 429's Retry-After: a receiver that refuses a pair re-sent
+// within its cooldown (as the reference client does for a stub withdrawn
+// moments after it was sent) should hear about the withdrawal when it said
+// to, not a schedule step later. Never sooner than a minute.
+func RetryDelay(n int, retryAfter time.Duration) time.Duration {
+	d := RetrySchedule[n-1]
+	if retryAfter > 0 && retryAfter < d {
+		d = max(retryAfter, minRetry)
+	}
+	return d
 }
 
 var sendLimits = fetch.Limits{MaxRedirects: 3, Timeout: 10 * time.Second, MaxBody: 1 << 20}
@@ -51,7 +72,9 @@ func Send(ctx context.Context, c *fetch.Client, m Outbound) SendResult {
 	switch {
 	case resp.Status >= 200 && resp.Status < 300:
 		return SendResult{Status: "sent", Endpoint: endpoint, Detail: detail}
-	case resp.Status == 429 || resp.Status >= 500:
+	case resp.Status == 429:
+		return SendResult{Status: "retry", Endpoint: endpoint, Detail: detail, RetryAfter: fetch.RetryAfter(resp.Header, time.Now())}
+	case resp.Status >= 500:
 		return SendResult{Status: "retry", Endpoint: endpoint, Detail: detail}
 	}
 	// 4xx is terminal; so is a redirect, which we do not replay as a POST.

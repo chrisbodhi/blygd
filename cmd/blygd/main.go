@@ -116,7 +116,8 @@ func serve(ctx context.Context, log *slog.Logger, cfg *config.Config, pool *pgxp
 		log.Warn("BLYGD_ALLOW_PRIVATE_FETCH is on: Webmention sources can reach private addresses. Development only.")
 	}
 	receiver := &mention.Receiver{Pool: pool, Limits: mention.DefaultRateLimits}
-	rd := &reader.Reader{Pool: pool, Fetch: &reader.LocalFirst{Studio: st, Remote: fc}, Log: log}
+	rd := &reader.Reader{Pool: pool, Fetch: &reader.LocalFirst{Studio: st, Remote: fc}, Log: log,
+		ManualPollFloor: time.Duration(cfg.PollFloor) * time.Second}
 	st.Imports = rd // §10.2 step 2: imported snapshots reach a publish only through this
 	hoppers := &hopper.Store{Pool: pool}
 	api := &web.API{Pool: pool, Accounts: accts, Studio: st, Hoppers: hoppers, Reader: rd, Log: log}
