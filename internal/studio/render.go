@@ -127,10 +127,15 @@ func (s *Studio) renderItem(ctx context.Context, tx pgx.Tx, o *Origin, id string
 		}
 	}
 
+	responses, err := shownResponses(ctx, tx, id)
+	if err != nil {
+		return err
+	}
 	page, err := blyg.RenderPermalink(pageSite(o), blyg.PageItem{
 		ID: id, Kind: latest.Kind, Version: it.Version, Updated: latest.At, Page: *it.Page,
 		ContentHTML: blyg.PageHTML(latest.ContentHTML), Pins: pins, Withdrawn: it.Withdrawn,
 		ForkedFrom: forkRef(it.ForkedFrom), ForkedFromURL: s.forkLink(ctx, tx, o, it.ForkedFrom),
+		Responses: responses,
 	})
 	if err != nil {
 		return err

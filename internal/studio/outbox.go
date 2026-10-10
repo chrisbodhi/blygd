@@ -136,7 +136,15 @@ func enqueueOutbound(ctx context.Context, tx pgx.Tx, o *Origin, it *Item, v *Ver
 		return errors.New("enqueueOutbound: item has no page")
 	}
 	source := o.BaseURL + *it.Page
+	seen := map[string]bool{}
 	for _, r := range remoteRefs(o.BaseURL, it, v, forkKind) {
+		// One row per target. A stub usually quotes its target too; the
+		// first relation wins (fork, then stub, then transclusion), so the
+		// row says stub. Verification checks every relation anyway (§15.4).
+		if seen[r.key] {
+			continue
+		}
+		seen[r.key] = true
 		var targetVersion any
 		if r.targetVersion > 0 {
 			targetVersion = r.targetVersion

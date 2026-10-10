@@ -451,11 +451,31 @@ CREATE TABLE IF NOT EXISTS inbound_mentions (
   next_attempt_at  timestamptz,
   received_at      timestamptz NOT NULL DEFAULT now(),
   verified_at      timestamptz,
+  source_host      text NOT NULL,   -- for blocks, as the rate limits group sources
+  source_domain    text NOT NULL,
+  -- §15.5: shown on the target's page only once the owner approves it.
+  -- Approval survives only a re-verification that finds the same relation,
+  -- origin, page and author; anything else needs approving again, so an
+  -- approved response cannot be swapped for something else afterwards.
+  approved_at      timestamptz,
   -- §15.3 step 3: a re-sent pair re-verifies rather than duplicating.
-  UNIQUE (origin_id, source_url, target_url)
+  UNIQUE (origin_id, source_url, target_url),
+  CHECK (approved_at IS NULL OR status IN ('verified', 'pending'))
 );
 CREATE INDEX IF NOT EXISTS inbound_mentions_due_idx ON inbound_mentions (next_attempt_at) WHERE status = 'pending';
 CREATE INDEX IF NOT EXISTS inbound_mentions_item_idx ON inbound_mentions (target_item_id);
+
+-- Sources the owner never wants to hear from, by host or by registrable
+-- domain (a harasser can mint subdomains). Claims from them are answered
+-- like any other and dropped: nothing stored, nothing fetched.
+CREATE TABLE IF NOT EXISTS mention_blocks (
+  id          bigserial PRIMARY KEY,
+  origin_id   bigint NOT NULL REFERENCES origins(id),
+  kind        text NOT NULL CHECK (kind IN ('host', 'domain')),
+  value       text NOT NULL CHECK (value ~ '^[a-z0-9.:\[\]-]+$'),
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (origin_id, kind, value)
+);
 
 -- One row per accepted claim, for §15.3 step 2's per-host, per-domain and
 -- global caps. Instance-wide: verification fetches cost the instance, so

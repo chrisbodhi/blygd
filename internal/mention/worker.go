@@ -24,6 +24,10 @@ type Workers struct {
 	Log   *slog.Logger
 	Batch int
 	Idle  time.Duration
+	// OnDisplayChange re-renders an item whose shown responses changed
+	// because a verification withdrew an approval (§15.5). The studio
+	// renders; this package never writes the surface.
+	OnDisplayChange func(ctx context.Context, originID int64, itemID string) error
 }
 
 // verifyRetry is the backoff for a verification the network could not
@@ -137,7 +141,17 @@ func (wk *Workers) recordInbound(ctx context.Context, c inboundClaim, out Outcom
 	if out.Relation != "" {
 		relation = out.Relation
 	}
-	_, err := wk.Pool.Exec(ctx, `UPDATE inbound_mentions SET
+	var dropped bool
+	var originID int64
+	var itemID string
+	err := wk.Pool.QueryRow(ctx, `UPDATE inbound_mentions m SET
+		-- §15.5: approval holds only while what is shown stays the same.
+		approved_at = CASE WHEN $2 = 'verified'
+			AND m.relation IS NOT DISTINCT FROM $3::text
+			AND m.source_origin IS NOT DISTINCT FROM nullif($4, '')
+			AND m.source_page IS NOT DISTINCT FROM nullif($9, '')
+			AND m.source_author IS NOT DISTINCT FROM $8::jsonb
+			THEN m.approved_at END,
 		status = $2,
 		relation = coalesce($3, CASE WHEN $2 = 'gone' THEN relation END),
 		ever_verified = ever_verified OR $2 = 'verified',
@@ -150,10 +164,16 @@ func (wk *Workers) recordInbound(ctx context.Context, c inboundClaim, out Outcom
 		failure = CASE WHEN $2 = 'verified' THEN NULL ELSE $10 END,
 		verified_at = CASE WHEN $2 = 'verified' THEN now() ELSE verified_at END,
 		next_attempt_at = NULL
-		WHERE id = $1`,
+		FROM (SELECT approved_at FROM inbound_mentions WHERE id = $1) old
+		WHERE m.id = $1
+		RETURNING old.approved_at IS NOT NULL AND m.approved_at IS NULL, m.origin_id, m.target_item_id`,
 		c.id, status, relation, out.SourceOrigin, out.SourceID, out.SourceVersion, out.SourceKind,
-		nullJSON(out.SourceAuthor), out.SourcePage, out.Reason)
-	return err
+		nullJSON(out.SourceAuthor), out.SourcePage, out.Reason).Scan(&dropped, &originID, &itemID)
+	if err != nil || !dropped || wk.OnDisplayChange == nil {
+		return err
+	}
+	// An approved response left the page: re-render it now.
+	return wk.OnDisplayChange(ctx, originID, itemID)
 }
 
 func nullJSON(b []byte) any {

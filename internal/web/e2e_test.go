@@ -54,7 +54,7 @@ func newEnv(t *testing.T, limits mention.RateLimits) *env {
 	api := &API{Pool: pool, Accounts: accts, Studio: st, Hoppers: hoppers, Reader: rd, Log: log}
 	surface := &Surface{Studio: st, Receiver: &mention.Receiver{Pool: pool, Limits: limits}, Hoppers: hoppers, Scheme: "http", Log: log}
 	srv.Config.Handler = Router(api, surface, log)
-	return &env{t: t, srv: srv, pool: pool, studio: st, accts: accts, workers: &mention.Workers{Pool: pool, Fetch: fc, Log: log},
+	return &env{t: t, srv: srv, pool: pool, studio: st, accts: accts, workers: &mention.Workers{Pool: pool, Fetch: fc, Log: log, OnDisplayChange: st.RerenderItem},
 		reader: rd, fetch: fc}
 }
 

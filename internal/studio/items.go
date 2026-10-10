@@ -552,10 +552,12 @@ func (s *Studio) Withdraw(ctx context.Context, originID int64, id string, note *
 		if err != nil {
 			return err
 		}
-		// §15.2: a withdrawn stub re-sends its mention once, so the target
-		// finds a document that no longer verifies.
+		// §15.2, §15.7: a withdrawn stub re-sends its mention once, so the
+		// target finds a document that no longer verifies. The same is true
+		// of every reference the item made (a withdrawn thread's quotes stop
+		// verifying too), so all of them are re-sent.
 		if _, err := tx.Exec(ctx, `UPDATE outbound_mentions SET status = 'pending', attempts = 0,
-			next_attempt_at = now(), updated_at = now() WHERE source_item_id = $1 AND relation = 'stub'`, id); err != nil {
+			next_attempt_at = now(), updated_at = now() WHERE source_item_id = $1`, id); err != nil {
 			return err
 		}
 		if err := s.renderItem(ctx, tx, o, id); err != nil {

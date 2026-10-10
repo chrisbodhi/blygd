@@ -1088,8 +1088,214 @@
               ]
             },
             "description": "Filter by status."
+          },
+          {
+            "name": "include_blocked",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true"
+              ]
+            },
+            "description": "Also list mentions from blocked sources."
           }
         ]
+      }
+    },
+    "/api/mentions/{mid}/approval": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/MentionID"
+        }
+      ],
+      "put": {
+        "operationId": "approveMention",
+        "tags": [
+          "mentions"
+        ],
+        "summary": "Show a verified mention on its target's page (§15.5).",
+        "security": [
+          {
+            "bearer": [
+              "mentions:write"
+            ]
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Shown."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "description": "Publishing a response is curation, never automatic, so this also needs origin:write. What shows: a verb, the source's author name, its host and a link; no words from the source."
+      },
+      "delete": {
+        "operationId": "hideMention",
+        "tags": [
+          "mentions"
+        ],
+        "summary": "Take a mention off its target's page.",
+        "security": [
+          {
+            "bearer": [
+              "mentions:write"
+            ]
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Hidden."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/mention-blocks": {
+      "get": {
+        "operationId": "listMentionBlocks",
+        "tags": [
+          "mentions"
+        ],
+        "summary": "List blocked sources.",
+        "security": [
+          {
+            "bearer": [
+              "mentions:read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      },
+      "post": {
+        "operationId": "blockMentionSource",
+        "tags": [
+          "mentions"
+        ],
+        "summary": "Block a host or a whole registrable domain.",
+        "security": [
+          {
+            "bearer": [
+              "mentions:write"
+            ]
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Blocked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Block"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "description": "Claims from a blocked source are answered like any other and dropped: nothing stored, nothing fetched. Mentions already received from it lose their approval at once.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BlockCreate"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mention-blocks/{bid}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/BlockID"
+        }
+      ],
+      "delete": {
+        "operationId": "unblockMentionSource",
+        "tags": [
+          "mentions"
+        ],
+        "summary": "Remove a block. Withdrawn approvals stay withdrawn.",
+        "security": [
+          {
+            "bearer": [
+              "mentions:write"
+            ]
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Done."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
       }
     },
     "/api/outbound": {
@@ -1912,6 +2118,7 @@
           "hoppers:read",
           "hoppers:write",
           "mentions:read",
+          "mentions:write",
           "origin:write",
           "tokens:write",
           "reader:read",
@@ -2871,6 +3078,21 @@
               "null"
             ],
             "format": "date-time"
+          },
+          "source_host": {
+            "type": "string"
+          },
+          "approved_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Shown on the target's page since then (§15.5). Cleared when a re-verification finds the relation, origin, page or author changed, or the mention stops verifying."
+          },
+          "blocked": {
+            "type": "boolean",
+            "description": "The source is blocked. Such mentions are listed only with include_blocked=true."
           }
         },
         "required": [
@@ -2881,7 +3103,10 @@
           "status",
           "relation",
           "received_at",
-          "verified_at"
+          "verified_at",
+          "source_host",
+          "approved_at",
+          "blocked"
         ],
         "additionalProperties": false
       },
@@ -3578,6 +3803,72 @@
             "description": "Show the list at {origin}h/{slug}/ (§13.5): excerpts with attribution and links, served live, never part of the protocol surface. Going public freezes the slug for good. Needs origin:write as well."
           }
         }
+      },
+      "Block": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "host",
+              "domain"
+            ]
+          },
+          "value": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "value",
+          "created_at"
+        ]
+      },
+      "BlockList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "blocks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Block"
+            }
+          }
+        },
+        "required": [
+          "blocks"
+        ]
+      },
+      "BlockCreate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "host",
+              "domain"
+            ],
+            "description": "domain blocks the registrable domain and every subdomain of it."
+          },
+          "value": {
+            "type": "string",
+            "description": "A host, a domain, or a URL to take one from."
+          }
+        },
+        "required": [
+          "kind",
+          "value"
+        ]
       }
     },
     "responses": {
@@ -3726,6 +4017,24 @@
           "pattern": "^[0-9a-f]{32}\\.(png|jpg|gif|webp)$"
         },
         "description": "The file name under media/."
+      },
+      "MentionID": {
+        "name": "mid",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "BlockID": {
+        "name": "bid",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "integer",
+          "minimum": 1
+        }
       }
     }
   }

@@ -232,6 +232,21 @@ func TestThreadsImported(t *testing.T) {
 	if p := problems(t, bob.publish(t, th, 422)); !strings.Contains(p, "withdrawn by its origin") {
 		t.Errorf("withdrawn import: %s", p)
 	}
+
+	// Withdrawing a thread re-sends its quote mentions, so each target
+	// finds the endcap and marks its mention gone (§15.7).
+	expect(t, bob.api("POST", "/items/"+th+"/withdraw", nil), 200)
+	if _, err := e.workers.SendBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.workers.VerifyBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range alice.api("GET", "/mentions", nil).json(t)["mentions"].([]any) {
+		if s := m.(map[string]any)["status"]; s != "gone" {
+			t.Errorf("a withdrawn thread's quote mention is %v, want gone", s)
+		}
+	}
 }
 
 func TestStubs(t *testing.T) {
@@ -267,6 +282,10 @@ func TestStubs(t *testing.T) {
 	if stub.Origin != alice.origin || stub.ID != f || stub.Version != 2 || (*d.Transclusions)[0].Version != 2 {
 		t.Fatalf("stub_of: %s / %s", d.StubOf, refsJSON(t, d))
 	}
+	// A stub that quotes its target is one outbox row, recorded as a stub.
+	if out := bob.api("GET", "/outbound", nil).json(t)["outbound"].([]any); len(out) != 1 || out[0].(map[string]any)["relation"] != "stub" {
+		t.Errorf("outbox for a quoting stub: %v", out)
+	}
 	// cited is frozen at creation: it still reads v1's words.
 	if !strings.HasPrefix(compact(t, d.StubOf), `{"origin":`) || stub.Cited.Excerpt != "A claim worth answering." || stub.Cited.Retrieved == "" {
 		t.Errorf("cited: %v", stub.Cited)
@@ -293,6 +312,7 @@ func TestStubs(t *testing.T) {
 	if strings.Join(rel, ",") != "stub/verified" {
 		t.Errorf("mentions: %v", rel)
 	}
+
 	expect(t, bob.api("POST", "/items/"+st+"/withdraw", nil), 200)
 	if d = bob.itemDoc(t, st); d.StubOf != nil {
 		t.Errorf("endcap keeps stub_of: %s", d.StubOf)

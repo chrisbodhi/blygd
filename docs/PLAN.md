@@ -108,7 +108,9 @@ Left for later:
   publicity, attribution and origin links, no protocol surface. *(Done:
   served live, excerpts only. Not yet linked from the feed page, which is
   stored surface and must not read the overlay.)*
-- **Per-item display** of verified mentions (§15.5), opt-in.
+- **Per-item display** of verified mentions (§15.5), opt-in. *(Done:
+  per-mention approval, no swap after approval, host and domain blocks.
+  See DESIGN.md "Responses and harassment".)*
 - **Static export:** tar `surface_files`, omitting the manifest
   `webmention` key (§15.7).
 - **Custom domains** with automatic TLS (certmagic). `base_url` already

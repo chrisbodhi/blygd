@@ -33,6 +33,9 @@ const (
 	ScopeHoppersRead   = "hoppers:read"
 	ScopeHoppersWrite  = "hoppers:write"
 	ScopeMentionsRead  = "mentions:read"
+	// Moderating mentions: hiding and blocking. Approving one for display
+	// also needs origin:write, because it publishes (§15.5).
+	ScopeMentionsWrite = "mentions:write"
 	ScopeOriginWrite   = "origin:write"
 	ScopeTokensWrite   = "tokens:write"
 	// The reader. Subscribing is private (§11: there is no protocol
@@ -45,7 +48,7 @@ const (
 // AllScopes lists every grantable scope except "*".
 var AllScopes = []string{
 	ScopeItemsRead, ScopeItemsWrite, ScopeItemsPublish, ScopeItemsWithdraw, ScopeItemsPin,
-	ScopeHoppersRead, ScopeHoppersWrite, ScopeMentionsRead, ScopeOriginWrite, ScopeTokensWrite,
+	ScopeHoppersRead, ScopeHoppersWrite, ScopeMentionsRead, ScopeMentionsWrite, ScopeOriginWrite, ScopeTokensWrite,
 	ScopeReaderRead, ScopeReaderWrite,
 }
 

@@ -29,3 +29,19 @@ func TestStudioNeverQueriesTheMirror(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeBlock(t *testing.T) {
+	for _, c := range []struct{ kind, in, want string }{
+		{"host", "https://Sub.Example.co.uk/x", "sub.example.co.uk"},
+		{"domain", "https://a.b.example.co.uk/x", "example.co.uk"},
+		{"domain", "evil.example", "evil.example"},
+		{"domain", "co.uk", ""},
+		{"host", "", ""},
+		{"user", "x.example", ""},
+	} {
+		got, err := normalizeBlock(c.kind, c.in)
+		if (c.want == "") != (err != nil) || got != c.want {
+			t.Errorf("normalizeBlock(%q, %q) = %q, %v; want %q", c.kind, c.in, got, err, c.want)
+		}
+	}
+}

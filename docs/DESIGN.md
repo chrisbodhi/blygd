@@ -81,6 +81,8 @@ schema (triggers in `schema.sql`), not only in Go, and each has a test.
 | Media bytes never change | §5.4 | content-addressed path + trigger `media_guard` |
 | Media any published version references is kept forever | §8 rules 2 and 4 | `version_media` foreign key (RESTRICT) + trigger `version_media_guard` |
 | Media only drafts use is never served | §4 | the surface serves media only when `version_media` lists it |
+| A response shows only while approved and verified | §15.5 | CHECK `approved_at IS NULL OR status IN ('verified', 'pending')`; render filter |
+| An approval does not survive a changed response | §15.5 | verifier clears `approved_at` unless relation, origin, page and author match |
 | A public hopper's slug never changes | §13.5 (reference `slug_frozen`) | CHECK `NOT public OR slug_frozen` + trigger `hoppers_guard` |
 | Public hoppers are never protocol surface | §13.5 | served live, never in `surface_files`; structural test in `internal/hopper` |
 | Pinned version pages stay 200 forever | §8.4 rule 1 | `surface_files.permanent` (re-renderable, not write-once) |
@@ -134,8 +136,10 @@ counts only if it names a version pinned here.
 
 **Sending.** Publish writes outbox rows in the same transaction, one per
 (source item, reference target), carrying the target version. A republish
-re-queues only new or changed references. Withdrawing a stub re-queues it
-once. A worker then:
+re-queues only new or changed references; a target named twice (a stub
+that quotes its target) is one row, recorded by its first relation: fork,
+stub, transclusion. Withdrawing an item re-sends every mention it made,
+once, so each target finds the endcap and marks its mention gone (§15.7). A worker then:
 
 - discovers the endpoint: manifest `webmention` key first, then W3C
   discovery (Link header via HEAD, then GET, then the first `<link>` or
@@ -320,6 +324,35 @@ declared type must match the sniffed bytes.
   Uploads that only drafts use 404 on the surface and may be deleted.
 - Served with `immutable` caching, `nosniff`, CORS, and a
   `default-src 'none'; sandbox` CSP.
+
+## Responses and harassment (Phase 4)
+
+§15.5 lets a publisher show verified mentions on an item's page as
+curation. Structural verification stops *fake* mentions, not unwelcome
+ones: a harasser who really publishes a stub of your item verifies like
+anyone else. So the defaults assume a response may be hostile.
+
+- **Approval is the gate.** A verified mention shows only after
+  `PUT /api/mentions/{id}/approval`. That publishes, so it needs
+  `origin:write` beside `mentions:write`. Hiding needs only
+  `mentions:write`.
+- **No swap after approval.** A re-sent mention re-verifies, and approval
+  survives only if relation, source origin, page and author are unchanged.
+  Otherwise, or if it goes `failed`/`gone`, approval is cleared, and the
+  worker's `OnDisplayChange` hook re-renders the page at once.
+- **Little to show.** An entry is a verb ("responded", "quoted this",
+  "forked this"), the source's author name (as asserted, cut to 80
+  characters), its host, and a `nofollow ugc` link. No words from the
+  source, which is never stored.
+- **Blocks** by host or by registrable domain (harassers mint
+  subdomains). A blocked source's claim gets the same `202` as any other
+  and is dropped: nothing stored, nothing fetched, so the block is not
+  revealed. Mentions already received lose their approval and leave the
+  default list (`?include_blocked=true` shows them). Unblocking restores
+  nothing.
+- Responses live in the stored permalink page: `inbound_mentions` is not
+  the import mirror, and every change re-renders inside a transaction.
+  Withdrawn items keep their responses (§15.7).
 
 ## Public hoppers (Phase 4)
 

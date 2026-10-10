@@ -24,6 +24,17 @@ type PageItem struct {
 	// ForkedFromURL is where the lineage line links: the pinned version's
 	// page where the publisher knows one is served, else its pinned file.
 	ForkedFromURL string
+	// Responses are approved, verified mentions (§15.5): curation by the
+	// owner, never automatic.
+	Responses []PageResponse
+}
+
+// PageResponse is one shown response: no words from the source.
+type PageResponse struct {
+	Verb   string // responded, quoted this, forked this
+	Author string // the source's own author.name, as asserted (§5.5)
+	Host   string
+	URL    string
 }
 
 // PinnedItem is what a pinned version page shows (§8.4).
@@ -121,6 +132,14 @@ var permalinkTmpl = template.Must(template.New("permalink").Funcs(pageFuncs).Par
 </article>
 {{- with .Item.ForkedFrom}}
 <p class="meta">Forked from <a href="{{$.Item.ForkedFromURL}}">{{.Origin}} · {{.ID}} v{{.Version}}</a></p>
+{{- end}}
+{{- if .Item.Responses}}
+<section class="responses"><h2 class="meta">Responses</h2>
+<ul class="meta">
+{{- range .Item.Responses}}
+<li>{{if .Author}}{{.Author}}, at {{end}}<a href="{{.URL}}" rel="nofollow ugc">{{.Host}}</a>, {{.Verb}}</li>
+{{- end}}
+</ul></section>
 {{- end}}
 <p class="meta">v{{.Item.Version}} · {{time .Item.Updated}}
 {{- if .Item.Pins}} · pinned:{{range .Item.Pins}} <a href="{{$.Site.Origin}}{{pinnedPage $.Item.Page .}}">v{{.}}</a>{{end}}{{end}}</p>

@@ -65,7 +65,7 @@ scope, named in the document's security requirement:
 | `items:read` / `items:write` | reading and editing drafts and items, uploading media |
 | `items:publish` / `items:withdraw` / `items:pin` | the public acts, each separately; pins are irrevocable |
 | `hoppers:read` / `hoppers:write` | private hoppers |
-| `mentions:read` | inbound and outbound Webmentions |
+| `mentions:read` / `mentions:write` | inbound and outbound Webmentions; hiding responses and blocking sources (showing one also needs `origin:write`) |
 | `reader:read` / `reader:write` | subscriptions, the reading feed, read marks |
 | `origin:write` | origin settings, publishing a blogroll entry, making a hopper public |
 | `tokens:write` | listing, minting (a subset of your own scopes) and revoking tokens |

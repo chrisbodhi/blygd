@@ -79,6 +79,11 @@ func (a *API) routes() []route {
 		{"DELETE /api/media/{file}", account.ScopeItemsWrite, a.deleteMedia},
 
 		{"GET /api/mentions", account.ScopeMentionsRead, a.listMentions},
+		{"PUT /api/mentions/{mid}/approval", account.ScopeMentionsWrite, a.approveMention},
+		{"DELETE /api/mentions/{mid}/approval", account.ScopeMentionsWrite, a.hideMention},
+		{"GET /api/mention-blocks", account.ScopeMentionsRead, a.listBlocks},
+		{"POST /api/mention-blocks", account.ScopeMentionsWrite, a.blockSource},
+		{"DELETE /api/mention-blocks/{bid}", account.ScopeMentionsWrite, a.unblock},
 		{"GET /api/outbound", account.ScopeMentionsRead, a.listOutbound},
 	}
 	rs = append(rs, a.readerRoutes()...)
@@ -667,6 +672,9 @@ type mentionView struct {
 	Failure       *string         `json:"failure"`
 	ReceivedAt    time.Time       `json:"received_at"`
 	VerifiedAt    *time.Time      `json:"verified_at"`
+	SourceHost    string          `json:"source_host"`
+	ApprovedAt    *time.Time      `json:"approved_at"` // shown on the target's page (§15.5)
+	Blocked       bool            `json:"blocked"`
 }
 
 func (a *API) listMentions(w http.ResponseWriter, r *http.Request) error {
@@ -678,10 +686,16 @@ func (a *API) listMentions(w http.ResponseWriter, r *http.Request) error {
 	if status != "" && !slices.Contains([]string{"pending", "verified", "failed", "gone"}, status) {
 		return badRequest("unknown status")
 	}
-	rows, err := a.Pool.Query(r.Context(), `SELECT id, target_item_id, source_url, target_url, status, relation,
-		source_origin, source_item_id, source_version, source_kind, source_author, source_page, failure, received_at, verified_at
-		FROM inbound_mentions WHERE origin_id = $1 AND ($2 = '' OR status = $2)
-		ORDER BY received_at DESC LIMIT 200`, o.ID, status)
+	// Mentions from blocked sources stay out of view unless asked for.
+	withBlocked := r.URL.Query().Get("include_blocked") == "true"
+	rows, err := a.Pool.Query(r.Context(), `SELECT * FROM (SELECT m.id, m.target_item_id, m.source_url, m.target_url, m.status, m.relation,
+		m.source_origin, m.source_item_id, m.source_version, m.source_kind, m.source_author, m.source_page, m.failure, m.received_at, m.verified_at,
+		m.source_host, m.approved_at,
+		EXISTS (SELECT 1 FROM mention_blocks b WHERE b.origin_id = m.origin_id
+			AND ((b.kind = 'host' AND b.value = m.source_host) OR (b.kind = 'domain' AND b.value = m.source_domain))) AS blocked
+		FROM inbound_mentions m WHERE m.origin_id = $1 AND ($2 = '' OR m.status = $2)) x
+		WHERE $3 OR NOT x.blocked
+		ORDER BY x.received_at DESC LIMIT 200`, o.ID, status, withBlocked)
 	if err != nil {
 		return err
 	}
@@ -693,6 +707,86 @@ func (a *API) listMentions(w http.ResponseWriter, r *http.Request) error {
 		ms = []mentionView{}
 	}
 	writeJSON(w, 200, map[string]any{"mentions": ms})
+	return nil
+}
+
+// approveMention shows a verified mention on its target's page. That
+// publishes, so it also needs origin:write (§15.5).
+func (a *API) approveMention(w http.ResponseWriter, r *http.Request) error {
+	if !principal(r.Context()).Can(account.ScopeOriginWrite) {
+		return &httpError{403, "forbidden", "showing a response publicly needs scope " + account.ScopeOriginWrite}
+	}
+	return a.setApproval(w, r, true)
+}
+
+// hideMention takes a response off the page. Narrowing what is public needs
+// no more than moderation.
+func (a *API) hideMention(w http.ResponseWriter, r *http.Request) error {
+	return a.setApproval(w, r, false)
+}
+
+func (a *API) setApproval(w http.ResponseWriter, r *http.Request, approve bool) error {
+	mid, err := pathInt(r, "mid")
+	if err != nil {
+		return err
+	}
+	o, err := a.origin(r)
+	if err != nil {
+		return err
+	}
+	if err := a.Studio.SetMentionApproval(r.Context(), o.ID, mid, approve); err != nil {
+		return err
+	}
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+func (a *API) listBlocks(w http.ResponseWriter, r *http.Request) error {
+	o, err := a.origin(r)
+	if err != nil {
+		return err
+	}
+	bs, err := a.Studio.ListBlocks(r.Context(), o.ID)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, 200, map[string]any{"blocks": bs})
+	return nil
+}
+
+func (a *API) blockSource(w http.ResponseWriter, r *http.Request) error {
+	var in struct {
+		Kind  string `json:"kind"`
+		Value string `json:"value"`
+	}
+	if err := decode(r, &in); err != nil {
+		return err
+	}
+	o, err := a.origin(r)
+	if err != nil {
+		return err
+	}
+	b, err := a.Studio.BlockSource(r.Context(), o.ID, in.Kind, in.Value)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, 201, b)
+	return nil
+}
+
+func (a *API) unblock(w http.ResponseWriter, r *http.Request) error {
+	bid, err := pathInt(r, "bid")
+	if err != nil {
+		return err
+	}
+	o, err := a.origin(r)
+	if err != nil {
+		return err
+	}
+	if err := a.Studio.Unblock(r.Context(), o.ID, bid); err != nil {
+		return err
+	}
+	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
 
