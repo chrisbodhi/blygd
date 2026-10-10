@@ -2,7 +2,8 @@
 // one binary over Postgres. `serve` also runs the mention workers and the
 // reader's poller.
 //
-//	blygd serve                              run the server
+//	blygd serve                              run the server (migrates first, unless BLYGD_MIGRATE_ON_START=false)
+//	blygd migrate [status]                   apply pending schema migrations, or report them
 //	blygd user add <handle> [title]          create a user, their origin and an owner token
 //	blygd token mint <handle> <name> <scope>…  mint a scoped token (paste-a-token path, §16.6)
 //	blygd rebuild <handle>                   re-render an origin's surface
@@ -41,13 +42,14 @@ func main() {
 	}
 }
 
-const usage = `usage:
+var usage = `usage:
   blygd serve
+  blygd migrate [status]
   blygd user add <handle> [title]
   blygd token mint <handle> <name> <scope>...
   blygd rebuild <handle>
 
-scopes: ` + "*, " + "items:read items:write items:publish items:withdraw items:pin hoppers:read hoppers:write mentions:read origin:write tokens:write reader:read reader:write"
+scopes: * ` + strings.Join(account.AllScopes, " ")
 
 func run(log *slog.Logger, args []string) error {
 	if len(args) == 0 {
@@ -65,6 +67,12 @@ func run(log *slog.Logger, args []string) error {
 		return err
 	}
 	defer pool.Close()
+	if args[0] == "migrate" {
+		return migrateCmd(ctx, pool, args[1:])
+	}
+	if err := ensureSchema(ctx, log, cfg, pool); err != nil {
+		return err
+	}
 
 	fc := &fetch.Client{UserAgent: cfg.Generator() + " (+" + cfg.GeneratorURL + ")", AllowPrivate: cfg.AllowPrivate}
 	st := &studio.Studio{Pool: pool, Generator: cfg.Generator(), GeneratorURL: cfg.GeneratorURL,
@@ -109,6 +117,59 @@ func run(log *slog.Logger, args []string) error {
 		return st.Rebuild(ctx, o.ID)
 	}
 	return errors.New(usage)
+}
+
+// migrateCmd is `blygd migrate`: apply pending migrations, or with
+// "status", report the database's version and the binary's.
+func migrateCmd(ctx context.Context, pool *pgxpool.Pool, args []string) error {
+	switch {
+	case len(args) == 1 && args[0] == "status":
+		current, latest, err := db.Status(ctx, pool)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("database at migration %d; this binary has %d\n", current, latest)
+		if current < latest {
+			fmt.Printf("%d pending: run blygd migrate\n", latest-current)
+		}
+		return nil
+	case len(args) == 0:
+		from, to, err := db.Migrate(ctx, pool)
+		if err != nil {
+			return err
+		}
+		if from == to {
+			fmt.Printf("up to date at migration %d\n", to)
+		} else {
+			fmt.Printf("migrated from %d to %d\n", from, to)
+		}
+		return nil
+	}
+	return errors.New(usage)
+}
+
+// ensureSchema migrates before any other command, or, with
+// BLYGD_MIGRATE_ON_START=false, refuses to run on an out-of-date schema so
+// that schema changes stay a deliberate act (`blygd migrate`).
+func ensureSchema(ctx context.Context, log *slog.Logger, cfg *config.Config, pool *pgxpool.Pool) error {
+	if cfg.MigrateOnStart {
+		from, to, err := db.Migrate(ctx, pool)
+		if err != nil {
+			return err
+		}
+		if from != to {
+			log.Info("migrated", "from", from, "to", to)
+		}
+		return nil
+	}
+	current, latest, err := db.Status(ctx, pool)
+	if err != nil {
+		return err
+	}
+	if current != latest {
+		return fmt.Errorf("database is at migration %d and this binary expects %d: run blygd migrate", current, latest)
+	}
+	return nil
 }
 
 func serve(ctx context.Context, log *slog.Logger, cfg *config.Config, pool *pgxpool.Pool, st *studio.Studio, accts *account.Accounts, fc *fetch.Client) error {

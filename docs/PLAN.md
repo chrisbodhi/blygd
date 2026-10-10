@@ -167,11 +167,13 @@ Observed, not bugs:
   schema for its status: required members, undocumented members, and
   types. Every operation is exercised.
 
-- **Migrations.** There are none yet: the schema is applied idempotently
-  at startup, and while pre-release a schema change means recreating the
-  dev database. Adopt a migration tool (tern or goose) before the first
-  deploy holding data you care about, starting from `schema.sql` as
-  migration 0001.
+- **Migrations (done).** tern, embedded. `001_initial.sql` is the schema
+  as of 2026-10-10. `blygd serve` (and every command) migrates first;
+  `BLYGD_MIGRATE_ON_START=false` makes `blygd migrate` the only way, and
+  an out-of-date schema is then refused. Two cases are refused: a
+  database newer than the binary, and one built before migrations
+  (recreate it, once). Shipped migrations are append-only, enforced by
+  `migrations.sum`.
 - **Deploy.** One binary under systemd, Caddy in front for TLS until
   custom domains move TLS in-process, nightly `pg_dump`. Set
   `BLYGD_TRUST_PROXY=true` behind Caddy.

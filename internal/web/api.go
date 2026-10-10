@@ -167,7 +167,7 @@ func (a *API) handleErr(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.As(err, &pgErr) && pgErr.Code == "23505":
 		writeError(w, 409, "conflict", "already exists")
 	case errors.As(err, &pgErr) && pgErr.Code == "P0001":
-		// An invariant trigger refused the change (schema.sql).
+		// An invariant trigger refused the change (internal/db/migrations).
 		writeError(w, 409, "conflict", pgErr.Message)
 	default:
 		a.internal(w, r, err)

@@ -32,17 +32,22 @@ type Config struct {
 	// hammering an origin.
 	PollFloor int
 	Level     int // BLYGD_LEVEL, default 2
+	// MigrateOnStart applies pending migrations before any command
+	// (BLYGD_MIGRATE_ON_START, default true). Off, an out-of-date schema is
+	// refused and `blygd migrate` is the only way forward.
+	MigrateOnStart bool
 }
 
 // Load reads the environment.
 func Load() (*Config, error) {
 	c := &Config{
-		DatabaseURL:  os.Getenv("BLYGD_DATABASE_URL"),
-		Listen:       envOr("BLYGD_LISTEN", ":8080"),
-		PublicURL:    os.Getenv("BLYGD_PUBLIC_URL"),
-		TrustProxy:   os.Getenv("BLYGD_TRUST_PROXY") == "true",
-		AllowPrivate: os.Getenv("BLYGD_ALLOW_PRIVATE_FETCH") == "true",
-		GeneratorURL: envOr("BLYGD_GENERATOR_URL", "https://github.com/chrisbodhi/blygd"),
+		DatabaseURL:    os.Getenv("BLYGD_DATABASE_URL"),
+		Listen:         envOr("BLYGD_LISTEN", ":8080"),
+		PublicURL:      os.Getenv("BLYGD_PUBLIC_URL"),
+		TrustProxy:     os.Getenv("BLYGD_TRUST_PROXY") == "true",
+		AllowPrivate:   os.Getenv("BLYGD_ALLOW_PRIVATE_FETCH") == "true",
+		GeneratorURL:   envOr("BLYGD_GENERATOR_URL", "https://github.com/chrisbodhi/blygd"),
+		MigrateOnStart: os.Getenv("BLYGD_MIGRATE_ON_START") != "false",
 	}
 	var err error
 	if c.FragmentCap, err = intEnv("BLYGD_FRAGMENT_CAP", 2000); err != nil {

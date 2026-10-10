@@ -15,7 +15,7 @@ work. Media, public hoppers and custom domains (Phase 4) are next.
 
 ## Run it
 
-Requirements: Go 1.24+ and Postgres 18.
+Requirements: Go 1.25+ and Postgres 18.
 
 ```sh
 go mod tidy    # once, to fill go.sum
@@ -27,6 +27,13 @@ export BLYGD_PUBLIC_URL='http://localhost:8080/'
 go run ./cmd/blygd user add chris "New Schematic"   # prints your origin and an owner token
 go run ./cmd/blygd serve
 ```
+
+Every command applies pending schema migrations first (tern, embedded in
+the binary). `blygd migrate status` reports where a database stands, and
+`blygd migrate` applies migrations explicitly. Set
+`BLYGD_MIGRATE_ON_START=false` to make that the only way. A database
+created before migrations existed (before 2026-10-10) is refused: drop
+and recreate it once.
 
 Publish a fragment:
 
@@ -49,6 +56,7 @@ curl -s localhost:8080/chris/items/$ID.json
 | `BLYGD_TRUST_PROXY` | `false` | Honor `X-Forwarded-Proto` (set behind Caddy or nginx) |
 | `BLYGD_FRAGMENT_CAP` | `2000` | Characters (§5.3) |
 | `BLYGD_LEVEL` | `2` | Informative manifest claim (§3.2) |
+| `BLYGD_MIGRATE_ON_START` | `true` | Apply pending migrations before any command; `false` leaves it to `blygd migrate` |
 | `BLYGD_MANUAL_POLL_FLOOR` | `60` | Seconds between user-asked polls of one origin; lower only for development |
 | `BLYGD_MEDIA_MAX_BYTES` | `10485760` | Largest accepted upload (PNG, JPEG, GIF, WebP) |
 | `BLYGD_GENERATOR_URL` | this repo | Manifest `generator_url` |

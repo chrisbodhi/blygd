@@ -64,7 +64,8 @@ thousands of items; past that, the index is the one to make incremental.
 ## Invariants and where they are enforced
 
 The protocol makes several things permanent. Each is enforced in the
-schema (triggers in `schema.sql`), not only in Go, and each has a test.
+schema (triggers in `internal/db/migrations/`), not only in Go, and each
+has a test.
 
 | Invariant | Spec | Enforced by |
 |---|---|---|

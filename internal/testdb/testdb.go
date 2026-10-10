@@ -1,5 +1,4 @@
-// Package testdb gives each test a fresh Postgres database with the schema
-// applied. Tests that need it skip unless BLYGD_TEST_DATABASE_URL is set to
+// Package testdb gives each test a fresh Postgres database, migrated. Tests that need it skip unless BLYGD_TEST_DATABASE_URL is set to
 // a database the test user may CREATE DATABASE from (see the Makefile).
 package testdb
 
@@ -16,9 +15,20 @@ import (
 	"github.com/chrisbodhi/blygd/internal/db"
 )
 
-// New returns a pool on a new, empty, schema-applied database that is
-// dropped when the test ends.
+// New returns a pool on a new, migrated database that is dropped when the
+// test ends.
 func New(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	pool := NewEmpty(t)
+	if _, _, err := db.Migrate(context.Background(), pool); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	return pool
+}
+
+// NewEmpty returns a pool on a new database with nothing in it, dropped
+// when the test ends.
+func NewEmpty(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	admin := os.Getenv("BLYGD_TEST_DATABASE_URL")
 	if admin == "" {
@@ -54,8 +64,5 @@ func New(t *testing.T) *pgxpool.Pool {
 			c.Close(context.Background())
 		}
 	})
-	if err := db.Apply(ctx, pool); err != nil {
-		t.Fatalf("apply schema: %v", err)
-	}
 	return pool
 }

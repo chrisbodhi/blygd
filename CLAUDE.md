@@ -44,8 +44,8 @@ on the command line or in the environment. Each test gets a fresh database.
   packages check this.
 - **Render inside the transaction.** Any change to plane 1 re-renders its
   surface files in the same transaction. The HTTP layer never renders.
-- **Permanent things stay permanent.** Never weaken the triggers in
-  `schema.sql`. If a change needs one relaxed, stop and ask.
+- **Permanent things stay permanent.** Never weaken the schema's triggers
+  (`internal/db/migrations/`). If a change needs one relaxed, stop and ask.
 - **No network inside a transaction.** Fetch first, then open the
   transaction (see `Publish` and its fork-pin check).
 - **All outbound HTTP goes through `internal/fetch`.** Never use
@@ -58,8 +58,12 @@ on the command line or in the environment. Each test gets a fresh database.
 - **The API is described.** Any change to an `/api/` route, its scope, or
   a request or response shape edits `internal/web/openapi.json` in the
   same change. `openapi_test.go` and the e2e suite fail until it does.
-- No migrations yet. Schema changes edit `schema.sql` and assume a fresh
-  dev database (PLAN.md, Operations).
+- **Migrations are append-only.** A schema change is a new numbered file
+  in `internal/db/migrations/` (tern, run at startup or by
+  `blygd migrate`). Never edit one that has shipped: databases already
+  ran it. Record each new file in `migrations.sum`
+  (`shasum -a 256` in that directory), or the test fails. No `{{` in a
+  migration, because tern parses them as Go templates.
 
 ## Layout
 
@@ -67,7 +71,7 @@ on the command line or in the environment. Each test gets a fresh database.
 cmd/blygd            CLI: serve, user add, token mint, rebuild
 internal/blyg        protocol: wire types, ids, hashing, markdown, feed, pages,
                      thread grammar and composition, fork flattening (pure)
-internal/db          pool + embedded schema.sql
+internal/db          pool + embedded tern migrations (migrations/, migrations.sum)
 internal/studio      plane 1: item lifecycle, pins, outbox, render-on-publish
 internal/mention     §15: receiver, verifier, sender, lease workers
 internal/reader      §12–13: resolution, importer, poller, reading overlay

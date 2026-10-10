@@ -1,8 +1,10 @@
--- blygd schema — Postgres 18.
+-- blygd migration 001: the schema as of the first migrated release.
 --
--- Applied idempotently at startup. There is deliberately no migration tool
--- yet: while blygd is pre-release, changing a table means recreating the dev
--- database. See docs/PLAN.md ("Migrations").
+-- Migrations are append-only. Once a migration has shipped it is never
+-- edited (migrations.sum and its test enforce that); a change to the schema
+-- is a new numbered file. tern runs each file once, in a transaction, at
+-- startup (or with `blygd migrate`). Files are Go text/templates to tern,
+-- so never write a double opening brace in one.
 --
 -- Three planes (docs/DESIGN.md):
 --   1. own origins   — what this instance publishes (authoritative)
