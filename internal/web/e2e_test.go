@@ -18,6 +18,7 @@ import (
 
 	"github.com/chrisbodhi/blygd/internal/account"
 	"github.com/chrisbodhi/blygd/internal/blyg"
+	"github.com/chrisbodhi/blygd/internal/events"
 	"github.com/chrisbodhi/blygd/internal/fetch"
 	"github.com/chrisbodhi/blygd/internal/hopper"
 	"github.com/chrisbodhi/blygd/internal/mention"
@@ -36,6 +37,9 @@ type env struct {
 	workers *mention.Workers
 	reader  *reader.Reader
 	fetch   *fetch.Client
+	api     *API
+	surface *Surface
+	hub     *events.Hub
 }
 
 func newEnv(t *testing.T, limits mention.RateLimits) *env {
@@ -51,11 +55,15 @@ func newEnv(t *testing.T, limits mention.RateLimits) *env {
 	rd := &reader.Reader{Pool: pool, Fetch: &reader.LocalFirst{Studio: st, Remote: fc}, Log: log, ReconcileEvery: 1000 * time.Hour}
 	st.Imports = rd
 	hoppers := &hopper.Store{Pool: pool}
-	api := &API{Pool: pool, Accounts: accts, Studio: st, Hoppers: hoppers, Reader: rd, Log: log}
+	hub := &events.Hub{Pool: pool, Log: log}
+	hubCtx, stopHub := context.WithCancel(context.Background())
+	t.Cleanup(stopHub)
+	go hub.Run(hubCtx)
+	api := &API{Pool: pool, Accounts: accts, Studio: st, Hoppers: hoppers, Reader: rd, Events: hub, Log: log}
 	surface := &Surface{Studio: st, Receiver: &mention.Receiver{Pool: pool, Limits: limits}, Hoppers: hoppers, Scheme: "http", Log: log}
 	srv.Config.Handler = Router(api, surface, log)
 	return &env{t: t, srv: srv, pool: pool, studio: st, accts: accts, workers: &mention.Workers{Pool: pool, Fetch: fc, Log: log, OnDisplayChange: st.RerenderItem},
-		reader: rd, fetch: fc}
+		reader: rd, fetch: fc, api: api, surface: surface, hub: hub}
 }
 
 type user struct {

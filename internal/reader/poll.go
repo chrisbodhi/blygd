@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/chrisbodhi/blygd/internal/blyg"
+	"github.com/chrisbodhi/blygd/internal/events"
 	"github.com/chrisbodhi/blygd/internal/fetch"
 )
 
@@ -128,7 +129,27 @@ func (r *Reader) pollOne(ctx context.Context, o remote) error {
 	} else {
 		res = r.pollBlyg(ctx, o)
 	}
-	return r.finish(ctx, o, res)
+	if err := r.finish(ctx, o, res); err != nil {
+		return err
+	}
+	r.notifyImport(ctx, o, res)
+	return nil
+}
+
+// notifyImport tells every subscriber's open studio that a poll finished:
+// how many live items the mirror now holds, and whether a backfill has more
+// to fetch (the next batch follows in a minute). Progress is never stored;
+// a client that missed it sees the counts on its next fetch.
+func (r *Reader) notifyImport(ctx context.Context, o remote, res pollResult) {
+	var items int
+	_ = r.Pool.QueryRow(ctx, `SELECT count(*) FROM imported_items WHERE remote_origin_id = $1 AND state = 'current'`, o.id).Scan(&items)
+	data := map[string]any{"subscription_id": o.id, "items": items, "more": res.more && !res.failed}
+	if res.failed {
+		data["error"] = res.err
+	}
+	if err := events.Notify(ctx, r.Pool, "import", 0, o.id, data); err != nil && r.Log != nil {
+		r.Log.Warn("events: notify", "type", "import", "err", err)
+	}
 }
 
 // PollNow polls one origin immediately, whatever its schedule or backoff.

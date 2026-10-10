@@ -28,6 +28,11 @@ go run ./cmd/blygd user add chris "New Schematic"   # prints your origin and an 
 go run ./cmd/blygd serve
 ```
 
+Then open `/studio/` in a browser (on the same host, e.g.
+`http://localhost:8080/studio/`) and paste the owner token. It is a plain,
+phone-friendly client for writing, publishing, reading and handling
+mentions. The token stays in that browser.
+
 Every command applies pending schema migrations first (tern, embedded in
 the binary). `blygd migrate status` reports where a database stands, and
 `blygd migrate` applies migrations explicitly. Set

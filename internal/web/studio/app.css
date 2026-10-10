@@ -1,0 +1,60 @@
+:root {
+  --bg: #fbfaf7; --fg: #1d1c1a; --muted: #6b6862; --line: #e2dfd8; --card: #fff;
+  --accent: #2f5d50; --accent-fg: #fff; --danger: #a23b2a; --warn-bg: #fff4d6;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #161615; --fg: #ecebe7; --muted: #a09d96; --line: #2f2e2b; --card: #1f1f1d;
+    --accent: #6fae9a; --accent-fg: #0d1512; --danger: #e07a68; --warn-bg: #3a3220; }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--fg);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { position: sticky; top: 0; z-index: 2; background: var(--bg); border-bottom: 1px solid var(--line);
+  padding-top: env(safe-area-inset-top); }
+nav { display: flex; max-width: 42rem; margin: 0 auto; }
+nav a { flex: 1; text-align: center; padding: .8rem .25rem; color: var(--muted); text-decoration: none; font-weight: 600; }
+nav a.on { color: var(--fg); box-shadow: inset 0 -3px 0 var(--accent); }
+nav a.dot::after { content: ""; display: inline-block; width: .45rem; height: .45rem; margin-left: .3rem;
+  border-radius: 50%; background: var(--accent); vertical-align: .15rem; }
+#updates { display: block; width: 100%; border: 0; border-radius: 0; min-height: 2.5rem;
+  background: var(--accent); color: var(--accent-fg); }
+.importing { border-left: 3px solid var(--accent); padding: .4rem .75rem; margin: .5rem 0; color: var(--muted); }
+main { max-width: 42rem; margin: 0 auto; padding: 1rem 1rem calc(4rem + env(safe-area-inset-bottom)); }
+h1 { font-size: 1.3rem; margin: .25rem 0 1rem; }
+h2 { font-size: 1.05rem; margin: 1.5rem 0 .5rem; }
+.muted { color: var(--muted); }
+.small { font-size: .85rem; }
+a { color: var(--accent); }
+label { display: block; font-weight: 600; margin: .75rem 0 .25rem; }
+input[type=text], input[type=url], input[type=password], textarea, select {
+  width: 100%; font: inherit; color: inherit; background: var(--card);
+  border: 1px solid var(--line); border-radius: .5rem; padding: .65rem .75rem; }
+textarea { min-height: 12rem; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 15px; }
+button { font: inherit; font-weight: 600; border: 1px solid var(--line); background: var(--card); color: var(--fg);
+  border-radius: .5rem; padding: .6rem .9rem; min-height: 2.75rem; cursor: pointer; }
+button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+button.danger { color: var(--danger); }
+button:disabled { opacity: .5; }
+.row { display: flex; gap: .5rem; flex-wrap: wrap; margin: .75rem 0; align-items: center; }
+.row > button { flex: 1 1 auto; }
+.chips { display: flex; gap: .4rem; flex-wrap: wrap; margin: .5rem 0 1rem; }
+.chips button { min-height: 2.25rem; padding: .3rem .8rem; border-radius: 999px; font-weight: 500; }
+.chips button.on { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: .75rem; padding: .85rem 1rem; margin: .6rem 0; }
+.card.tap { cursor: pointer; }
+.card .meta { color: var(--muted); font-size: .8rem; margin-top: .35rem; }
+.card .text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.badge { display: inline-block; font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  padding: .1rem .45rem; border-radius: .3rem; border: 1px solid var(--line); color: var(--muted); margin-right: .35rem; }
+.badge.draft { color: var(--accent); border-color: var(--accent); }
+.badge.unread { color: var(--accent-fg); background: var(--accent); border-color: var(--accent); }
+.problems { background: var(--warn-bg); border-radius: .5rem; padding: .6rem .9rem; margin: .75rem 0; }
+.problems li { margin: .2rem 0; overflow-wrap: anywhere; }
+.seg { display: flex; border: 1px solid var(--line); border-radius: .5rem; overflow: hidden; }
+.seg button { flex: 1; border: 0; border-radius: 0; }
+.seg button.on { background: var(--fg); color: var(--bg); }
+#toast { position: fixed; left: 1rem; right: 1rem; bottom: calc(1rem + env(safe-area-inset-bottom)); max-width: 40rem; margin: 0 auto;
+  background: var(--fg); color: var(--bg); padding: .75rem 1rem; border-radius: .6rem; z-index: 3; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .9em; overflow-wrap: anywhere; }

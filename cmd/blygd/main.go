@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -26,6 +27,7 @@ import (
 	"github.com/chrisbodhi/blygd/internal/account"
 	"github.com/chrisbodhi/blygd/internal/config"
 	"github.com/chrisbodhi/blygd/internal/db"
+	"github.com/chrisbodhi/blygd/internal/events"
 	"github.com/chrisbodhi/blygd/internal/fetch"
 	"github.com/chrisbodhi/blygd/internal/hopper"
 	"github.com/chrisbodhi/blygd/internal/mention"
@@ -181,7 +183,9 @@ func serve(ctx context.Context, log *slog.Logger, cfg *config.Config, pool *pgxp
 		ManualPollFloor: time.Duration(cfg.PollFloor) * time.Second}
 	st.Imports = rd // §10.2 step 2: imported snapshots reach a publish only through this
 	hoppers := &hopper.Store{Pool: pool}
-	api := &web.API{Pool: pool, Accounts: accts, Studio: st, Hoppers: hoppers, Reader: rd, Log: log}
+	hub := &events.Hub{Pool: pool, Log: log}
+	go hub.Run(ctx)
+	api := &web.API{Pool: pool, Accounts: accts, Studio: st, Hoppers: hoppers, Reader: rd, Events: hub, Log: log}
 	surface := &web.Surface{Studio: st, Receiver: receiver, Hoppers: hoppers, Scheme: cfg.Scheme(), TrustProxy: cfg.TrustProxy, Log: log}
 
 	workers := &mention.Workers{Pool: pool, Fetch: fc, Log: log, OnDisplayChange: st.RerenderItem}
@@ -195,6 +199,9 @@ func serve(ctx context.Context, log *slog.Logger, cfg *config.Config, pool *pgxp
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
 		IdleTimeout:       120 * time.Second,
+		// Requests share the process's context, so open event streams end
+		// when a shutdown begins instead of holding it for its full timeout.
+		BaseContext: func(net.Listener) context.Context { return ctx },
 	}
 	errc := make(chan error, 1)
 	go func() {

@@ -156,6 +156,13 @@ Observed, not bugs:
 - It serves pinned version pages, so a cross-origin fork's lineage line
   could link one when known.
 
+## Live hints (done, 2026-10-10)
+
+`GET /api/events` (SSE over `LISTEN/NOTIFY`, DESIGN.md "Live hints"),
+and the studio follows it: backfill progress in place, a dot on tabs
+with news, and a refresh bar instead of re-rendering under the reader's
+thumb.
+
 ## Operations
 
 - **API description (done).** `internal/web/openapi.json`, OpenAPI 3.1,

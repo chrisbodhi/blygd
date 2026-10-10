@@ -78,7 +78,7 @@ internal/reader      §12–13: resolution, importer, poller, reading overlay
 internal/fetch       bounded, SSRF-guarded HTTP client
 internal/account     users, scoped tokens
 internal/hopper      hopper CRUD over references; public hopper view (§13.5, live)
-internal/web         HTTP: origin surface, /api, router; end-to-end tests
+internal/web         HTTP: origin surface, /api, /studio (embedded plain client), router; end-to-end tests
 internal/testdb      per-test databases
 internal/testblyg    a fake static blyg for import tests
 ```

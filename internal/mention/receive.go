@@ -14,6 +14,7 @@ import (
 	"golang.org/x/net/publicsuffix"
 
 	"github.com/chrisbodhi/blygd/internal/blyg"
+	"github.com/chrisbodhi/blygd/internal/events"
 	"github.com/chrisbodhi/blygd/internal/studio"
 )
 
@@ -136,13 +137,19 @@ func (rc *Receiver) accept(ctx context.Context, o *studio.Origin, rawSource, raw
 		// Step 3: accept → 202 and verify asynchronously. A re-sent pair
 		// re-verifies rather than duplicating; what it recorded stays until
 		// the new verification replaces it.
-		if _, err := tx.Exec(ctx, `INSERT INTO inbound_mentions
+		var mid int64
+		if err := tx.QueryRow(ctx, `INSERT INTO inbound_mentions
 			(origin_id, target_item_id, source_url, target_url, status, next_attempt_at, source_host, source_domain)
 			VALUES ($1, $2, $3, $4, 'pending', now(), $5, $6)
 			ON CONFLICT (origin_id, source_url, target_url) DO UPDATE SET
 				status = 'pending', attempts = 0, next_attempt_at = now(), received_at = now(),
-				target_item_id = EXCLUDED.target_item_id`,
-			o.ID, itemID, source, target, host, domain); err != nil {
+				target_item_id = EXCLUDED.target_item_id
+			RETURNING id`,
+			o.ID, itemID, source, target, host, domain).Scan(&mid); err != nil {
+			return err
+		}
+		// Sent on commit: the owner's open studios hear a mention arrived.
+		if err := events.Notify(ctx, tx, "mention", o.ID, 0, map[string]any{"id": mid, "status": "pending"}); err != nil {
 			return err
 		}
 		status, msg = 202, "Accepted; verification is asynchronous."

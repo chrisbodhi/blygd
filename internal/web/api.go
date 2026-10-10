@@ -17,6 +17,7 @@ import (
 
 	"github.com/chrisbodhi/blygd/internal/account"
 	"github.com/chrisbodhi/blygd/internal/blyg"
+	"github.com/chrisbodhi/blygd/internal/events"
 	"github.com/chrisbodhi/blygd/internal/hopper"
 	"github.com/chrisbodhi/blygd/internal/reader"
 	"github.com/chrisbodhi/blygd/internal/studio"
@@ -31,7 +32,10 @@ type API struct {
 	Studio   *studio.Studio
 	Hoppers  *hopper.Store
 	Reader   *reader.Reader
+	Events   *events.Hub // GET /api/events; nil means unavailable
 	Log      *slog.Logger
+
+	streams streamCount
 }
 
 type principalKey struct{}
@@ -54,6 +58,7 @@ type route struct {
 func (a *API) routes() []route {
 	rs := []route{
 		{"GET /api/me", "", a.me},
+		{"GET /api/events", "", a.streamEvents},
 		{"GET /api/origin", account.ScopeItemsRead, a.getOrigin},
 		{"PATCH /api/origin", account.ScopeOriginWrite, a.patchOrigin},
 

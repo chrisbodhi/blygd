@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/chrisbodhi/blygd/internal/events"
 	"github.com/chrisbodhi/blygd/internal/fetch"
 )
 
@@ -169,8 +170,12 @@ func (wk *Workers) recordInbound(ctx context.Context, c inboundClaim, out Outcom
 		RETURNING old.approved_at IS NOT NULL AND m.approved_at IS NULL, m.origin_id, m.target_item_id`,
 		c.id, status, relation, out.SourceOrigin, out.SourceID, out.SourceVersion, out.SourceKind,
 		nullJSON(out.SourceAuthor), out.SourcePage, out.Reason).Scan(&dropped, &originID, &itemID)
-	if err != nil || !dropped || wk.OnDisplayChange == nil {
+	if err != nil {
 		return err
+	}
+	wk.notify(ctx, "mention", originID, map[string]any{"id": c.id, "status": status, "relation": out.Relation})
+	if !dropped || wk.OnDisplayChange == nil {
+		return nil
 	}
 	// An approved response left the page: re-render it now.
 	return wk.OnDisplayChange(ctx, originID, itemID)
@@ -188,6 +193,7 @@ type outboundClaim struct {
 	m        Outbound
 	targetID string
 	attempts int
+	originID int64
 }
 
 // importedPage returns the target's page as the import mirror holds it
@@ -216,13 +222,13 @@ func (wk *Workers) SendBatch(ctx context.Context) (int, error) {
 			SELECT id FROM outbound_mentions
 			WHERE status = 'pending' AND next_attempt_at <= now()
 			ORDER BY next_attempt_at LIMIT $1 FOR UPDATE SKIP LOCKED)
-		RETURNING id, source_url, target_url, coalesce(target_origin, ''), coalesce(target_id, ''), attempts`, wk.batch())
+		RETURNING id, source_url, target_url, coalesce(target_origin, ''), coalesce(target_id, ''), attempts, origin_id`, wk.batch())
 	if err != nil {
 		return 0, err
 	}
 	claims, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (outboundClaim, error) {
 		var c outboundClaim
-		err := r.Scan(&c.id, &c.m.SourceURL, &c.m.TargetURL, &c.m.TargetOrigin, &c.targetID, &c.attempts)
+		err := r.Scan(&c.id, &c.m.SourceURL, &c.m.TargetURL, &c.m.TargetOrigin, &c.targetID, &c.attempts, &c.originID)
 		return c, err
 	})
 	if err != nil {
@@ -251,8 +257,17 @@ func (wk *Workers) SendBatch(ctx context.Context) (int, error) {
 			WHERE id = $1`, c.id, status, next, res.Endpoint, res.Detail); err != nil {
 			return len(claims), err
 		}
+		wk.notify(ctx, "outbound", c.originID, map[string]any{"id": c.id, "status": status, "last_result": res.Detail})
 	}
 	return len(claims), nil
+}
+
+// notify sends a hint to the origin owner's open studios. Delivery is not
+// the worker's business, so a failure is only logged.
+func (wk *Workers) notify(ctx context.Context, typ string, originID int64, data any) {
+	if err := events.Notify(ctx, wk.Pool, typ, originID, 0, data); err != nil && wk.Log != nil {
+		wk.Log.Warn("events: notify", "type", typ, "err", err)
+	}
 }
 
 func (wk *Workers) pruneClaims(ctx context.Context) (int, error) {

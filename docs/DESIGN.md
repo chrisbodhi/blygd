@@ -421,6 +421,45 @@ mint scopes it holds. `blygd user add` mints the owner's `*` token; that
 is the paste-a-token path §16.6 requires beside any future OAuth-style
 flow.
 
+## Live hints (`GET /api/events`)
+
+A Server-Sent Events stream of "something changed" hints, per user. A
+hint says what changed, never the state, so a client re-fetches what it
+shows, and a dropped connection (a phone asleep) loses nothing: on
+reconnect, re-fetch.
+
+- **Sources:** the poller after each batch (`import`: `items`, `more`,
+  `error`); the receiver and verifier (`mention`); the sender
+  (`outbound`). Progress is never stored: it is transient, and the
+  counts are in the API.
+- **Transport:** Postgres `LISTEN/NOTIFY` on `blygd_events`, so any
+  process can send and every process's streams hear. `internal/events`
+  has one hijacked listening connection and a fan-out hub. A slow
+  subscriber drops hints rather than slowing others.
+- **Per stream:** events are filtered by scope and ownership (imports
+  of the user's subscriptions with `reader:read`; their origin's
+  mentions and sends with `mentions:read`). The server's write deadline
+  is lifted for the stream, there is a heartbeat every 25 s, and at most
+  8 streams per user. Requests share the process context, so a shutdown
+  ends streams at once.
+- Browsers read it with `fetch()`, because `EventSource` cannot send the
+  `Authorization` header.
+
+## The studio
+
+`/studio/` is a deliberately plain client, embedded in the binary: one
+HTML page, CSS and vanilla JS, with no build step. It talks only to
+`/api/` with a pasted token, kept in the browser's `localStorage`.
+
+- Its CSP allows scripts and styles from itself only, connections to
+  this host only, and no framing.
+- It never parses a string into markup, so imported content is only ever
+  read as text. `studio_test.go` fails on any use of `innerHTML` or its
+  kin.
+- The token shares an origin with the public pages. That is safe only
+  because those pages sanitize every `content_html` they show. A real
+  client should live on its own origin (Phase 4's OAuth-style approval).
+
 ## HTML safety
 
 - **Our own content:** the markdown renderer escapes raw HTML (the

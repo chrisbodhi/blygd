@@ -93,6 +93,56 @@
         }
       }
     },
+    "/api/events": {
+      "get": {
+        "operationId": "streamEvents",
+        "tags": [
+          "meta"
+        ],
+        "summary": "A Server-Sent Events stream of change hints for this user.",
+        "description": "Each event names what changed, never the state: re-fetch what you show. Events, by type:\n\n- `import` (needs reader:read): a poll of one of your subscriptions finished. `{subscription_id, items, more, error?}`, where `more` means a backfill continues with the next batch in about a minute.\n- `mention` (needs mentions:read): an inbound mention to your origin arrived or changed. `{id, status, relation?}`.\n- `outbound` (needs mentions:read): one of your outbound mentions was attempted. `{id, status, last_result}`.\n\nA heartbeat comment arrives every 25 s. Events missed while disconnected are not replayed; fetch state on reconnect. Browsers should read this with fetch(), which can send the Authorization header; EventSource cannot. At most 8 streams per user.",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The stream, until the client disconnects.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many open streams for this user.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Events are not running.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
     "/api/origin": {
       "get": {
         "operationId": "getOrigin",

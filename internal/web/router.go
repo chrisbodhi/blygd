@@ -17,6 +17,8 @@ func Router(api *API, surface *Surface, log *slog.Logger) http.Handler {
 		}
 		w.Write([]byte("ok\n")) //nolint:errcheck
 	})
+	mux.Handle("GET /studio/", studioHandler())
+	mux.Handle("GET /studio", http.RedirectHandler("/studio/", http.StatusMovedPermanently))
 	mux.Handle("/", surface)
 	return logRequests(mux, log)
 }
@@ -25,6 +27,10 @@ type statusWriter struct {
 	http.ResponseWriter
 	status int
 }
+
+// Unwrap lets http.ResponseController reach the real writer, to flush an
+// event stream and lift its write deadline.
+func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 func (w *statusWriter) WriteHeader(code int) {
 	w.status = code

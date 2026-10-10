@@ -1,0 +1,498 @@
+// blygd studio: a deliberately plain client for phones and laptops. It talks
+// only to /api/ on this host, with a pasted bearer token kept in this
+// browser's localStorage. Everything shown is built as DOM nodes with text
+// in them, never parsed from a string: imported content is someone else's
+// HTML (§14), and here it is only ever read as plain text
+// (studio_test.go enforces it).
+"use strict";
+
+const main = document.getElementById("main");
+const tabs = document.getElementById("tabs");
+const toastEl = document.getElementById("toast");
+const updatesEl = document.getElementById("updates");
+const TOKEN_KEY = "blygd.token";
+
+// ── small helpers ─────────────────────────────────────────────────────────
+
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else if (k === "class") el.className = v;
+    else el.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat()) {
+    if (kid == null || kid === false) continue;
+    el.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
+  }
+  return el;
+}
+
+function show(...nodes) {
+  main.replaceChildren(...nodes.flat().filter((n) => n != null && n !== false));
+  window.scrollTo(0, 0);
+}
+
+let toastTimer;
+function toast(msg) {
+  toastEl.textContent = msg;
+  toastEl.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (toastEl.hidden = true), 3500);
+}
+
+// Plain text from someone's HTML. A DOMParser document is inert: no
+// scripts run and nothing loads, and only textContent is read.
+function textOf(html) {
+  if (!html) return "";
+  return new DOMParser().parseFromString(html, "text/html").body.textContent.replace(/\s+/g, " ").trim();
+}
+
+function clip(s, n) {
+  s = s || "";
+  return s.length > n ? s.slice(0, n - 1) + "…" : s;
+}
+
+function when(t) {
+  if (!t) return "";
+  const d = new Date(t);
+  const mins = Math.round((Date.now() - d) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} min ago`;
+  if (mins < 1440) return `${Math.round(mins / 60)} h ago`;
+  return d.toLocaleDateString();
+}
+
+// ── API ───────────────────────────────────────────────────────────────────
+
+class APIError extends Error {
+  constructor(status, body) {
+    super((body && body.message) || `HTTP ${status}`);
+    this.status = status;
+    this.body = body || {};
+  }
+}
+
+async function api(method, path, body) {
+  const res = await fetch("/api" + path, {
+    method,
+    headers: Object.assign(
+      { Authorization: "Bearer " + localStorage.getItem(TOKEN_KEY) },
+      body === undefined ? {} : { "Content-Type": "application/json" },
+    ),
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (res.status === 401) {
+    localStorage.removeItem(TOKEN_KEY);
+    route();
+    throw new APIError(401, { message: "signed out: the token was refused" });
+  }
+  const text = await res.text();
+  const json = text ? JSON.parse(text) : null;
+  if (!res.ok) throw new APIError(res.status, json);
+  return json;
+}
+
+// Runs an action, showing what went wrong instead of throwing.
+async function attempt(fn, okMsg) {
+  try {
+    const r = await fn();
+    if (okMsg) toast(okMsg);
+    return r;
+  } catch (e) {
+    toast(e.message);
+    return undefined;
+  }
+}
+
+let me = null;
+
+// ── routing ───────────────────────────────────────────────────────────────
+
+const views = { write: viewEditor, items: viewItems, item: viewEditor, reader: viewReader, mentions: viewMentions };
+
+async function route() {
+  if (!localStorage.getItem(TOKEN_KEY)) {
+    tabs.hidden = true;
+    return viewSignIn();
+  }
+  if (!me) {
+    try {
+      me = await api("GET", "/me");
+    } catch (e) {
+      if (e.status !== 401) show(h("p", {}, "Could not reach blygd: " + e.message));
+      return;
+    }
+  }
+  tabs.hidden = false;
+  startStream();
+  const [name, arg] = (location.hash.slice(1) || "items").split("/");
+  current = name === "item" ? "items" : name;
+  updatesEl.hidden = true;
+  tabs.querySelector(`a[href="#${current}"]`)?.classList.remove("dot");
+  for (const a of tabs.querySelectorAll("a")) a.classList.toggle("on", a.getAttribute("href") === "#" + (name === "item" ? "items" : name));
+  show(h("p", { class: "muted" }, "Loading…"));
+  await (views[name] || viewItems)(arg);
+}
+
+window.addEventListener("hashchange", route);
+updatesEl.addEventListener("click", route);
+
+// ── live hints (GET /api/events) ──────────────────────────────────────────
+// Server-Sent Events, read with fetch() so the token goes in the header.
+// An event only says what changed: the studio re-fetches when the person
+// asks (the bar), never under their thumb. Missed events are not replayed,
+// so a reconnect just offers a refresh.
+
+let current = "";
+let streaming = false;
+let retryDelay = 1000;
+let wake = null; // resolves the reconnect wait early when the page returns
+const importing = {}; // subscription id → {items, more, error}
+const subTitles = {}; // subscription id → title, from the last list
+
+async function startStream() {
+  if (streaming) return;
+  streaming = true;
+  while (localStorage.getItem(TOKEN_KEY)) {
+    let connected = false;
+    try {
+      const res = await fetch("/api/events", { headers: { Authorization: "Bearer " + localStorage.getItem(TOKEN_KEY) } });
+      if (!res.ok || !res.body) throw new Error("HTTP " + res.status);
+      connected = true;
+      retryDelay = 1000;
+      await readEvents(res.body);
+    } catch {
+      // network gone, phone asleep, server restarting: wait and retry
+    }
+    if (connected) offerRefresh(current); // events may have been missed
+    await new Promise((resolve) => {
+      wake = resolve;
+      setTimeout(resolve, retryDelay);
+    });
+    wake = null;
+    retryDelay = Math.min(retryDelay * 2, 30000);
+  }
+  streaming = false;
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && wake) {
+    retryDelay = 1000;
+    wake();
+  }
+});
+
+async function readEvents(body) {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) return;
+    buf += decoder.decode(value, { stream: true });
+    let end;
+    while ((end = buf.indexOf("\n\n")) >= 0) {
+      const block = buf.slice(0, end);
+      buf = buf.slice(end + 2);
+      let type = "", data = "";
+      for (const line of block.split("\n")) {
+        if (line.startsWith("event: ")) type = line.slice(7);
+        else if (line.startsWith("data: ")) data += line.slice(6);
+      }
+      if (type) {
+        try {
+          onEvent(type, JSON.parse(data));
+        } catch {
+          // a hint we cannot read is a hint we can skip
+        }
+      }
+    }
+  }
+}
+
+function onEvent(type, d) {
+  if (type === "import") {
+    if (d.more) importing[d.subscription_id] = d;
+    else delete importing[d.subscription_id];
+    renderImporting();
+    if (!d.more) offerRefresh("reader");
+  } else if (type === "mention") {
+    offerRefresh("mentions");
+  } else if (type === "outbound" && d.status !== "sent") {
+    toast(`A mention could not be sent yet: ${d.last_result || d.status}`);
+  }
+}
+
+// offerRefresh marks a tab as having news, and offers a refresh when it is
+// the one being looked at.
+function offerRefresh(view) {
+  if (!view) return;
+  if (view === current) updatesEl.hidden = false;
+  else tabs.querySelector(`a[href="#${view}"]`)?.classList.add("dot");
+}
+
+function renderImporting() {
+  const el = document.getElementById("importing");
+  if (!el) return;
+  el.replaceChildren(...Object.values(importing).map((d) =>
+    h("div", { class: "importing" }, `Importing ${subTitles[d.subscription_id] || "a subscription"}: ${d.items} so far, more in about a minute…`)));
+}
+
+
+// ── sign in ───────────────────────────────────────────────────────────────
+
+function viewSignIn() {
+  const input = h("input", { id: "token", name: "token", type: "password", autocomplete: "off", placeholder: "blygd_…" });
+  show(
+    h("h1", {}, "blygd studio"),
+    h("p", { class: "muted" }, "Paste an API token. It stays in this browser only."),
+    h("form", {
+      onsubmit: async (ev) => {
+        ev.preventDefault();
+        localStorage.setItem(TOKEN_KEY, input.value.trim());
+        me = null;
+        location.hash = "#items";
+        route();
+      },
+    }, h("label", { for: "token" }, "Token"), input, h("div", { class: "row" }, h("button", { class: "primary" }, "Sign in"))),
+  );
+}
+
+// ── items ─────────────────────────────────────────────────────────────────
+
+let itemFilter = "";
+
+async function viewItems() {
+  const r = await attempt(() => api("GET", "/items" + (itemFilter ? "?state=" + itemFilter : "")));
+  if (!r) return;
+  const chip = (state, label) =>
+    h("button", { class: itemFilter === state ? "on" : "", onclick: () => { itemFilter = state; route(); } }, label);
+  show(
+    h("h1", {}, "Your items"),
+    h("p", { class: "muted small" }, me.origin),
+    h("div", { class: "chips" }, chip("", "All"), chip("draft", "Drafts"), chip("published", "Published"), chip("withdrawn", "Withdrawn")),
+    h("div", { class: "row" }, h("button", { class: "primary", onclick: () => (location.hash = "#write") }, "New fragment"),
+      h("button", { onclick: () => newDraft({ kind: "thread", content_md: "" }) }, "New thread")),
+    r.items.length ? r.items.map(itemCard) : h("p", { class: "muted" }, "Nothing here yet."),
+  );
+}
+
+function itemCard(it) {
+  return h("div", { class: "card tap", onclick: () => (location.hash = "#item/" + it.id) },
+    h("div", {}, h("span", { class: "badge " + it.state }, it.state), h("span", { class: "badge" }, it.kind),
+      it.version ? h("span", { class: "badge" }, "v" + it.version) : null),
+    h("div", { class: "text" }, clip(it.draft_md, 240) || h("span", { class: "muted" }, "(empty)")),
+    h("div", { class: "meta" }, "edited " + when(it.draft_updated_at)));
+}
+
+async function newDraft(body) {
+  const it = await attempt(() => api("POST", "/items", body));
+  if (it) location.hash = "#item/" + it.id;
+}
+
+// The editor: a new fragment when there is no id, else an existing item.
+async function viewEditor(id) {
+  let it = { kind: "fragment", draft_md: "", draft_note: null, state: "draft", version: 0 };
+  if (id) {
+    it = await attempt(() => api("GET", "/items/" + id));
+    if (!it) return;
+  }
+  let kind = it.kind;
+  const placeholder = () => (kind === "thread"
+    ? "Long-form markdown. Quote with a line of ![[id]]; link with [[id]]." : "Say one thing.");
+  const text = h("textarea", { id: "md", name: "md", placeholder: placeholder() });
+  text.value = it.draft_md;
+  const note = h("input", { id: "note", name: "note", type: "text", placeholder: "What changed (optional)" });
+  const title = h("h1", {}, id ? (it.version ? `${it.kind} · v${it.version}${it.withdrawn ? " · withdrawn" : ""}` : `Draft ${it.kind}`) : "New");
+  note.value = it.draft_note || "";
+  const count = h("span", { class: "muted small" });
+  const problems = h("div");
+  const updateCount = () => (count.textContent = kind === "fragment" ? `${text.value.length} / 2000` : `${text.value.length} characters`);
+  text.addEventListener("input", updateCount);
+  updateCount();
+
+  const kindSeg = !id ? h("div", { class: "seg" }, ["fragment", "thread"].map((k) =>
+    h("button", { type: "button", class: k === kind ? "on" : "", onclick: (ev) => {
+      kind = k;
+      for (const b of ev.target.parentNode.children) b.classList.toggle("on", b === ev.target);
+      text.placeholder = placeholder();
+      updateCount();
+    } }, k))) : null;
+
+  async function save() {
+    if (!id) {
+      const created = await api("POST", "/items", { kind, content_md: text.value });
+      id = created.id;
+      history.replaceState(null, "", "#item/" + id);
+      title.textContent = `Draft ${kind}`;
+      if (kindSeg) kindSeg.remove(); // the kind is fixed once the item exists
+    }
+    await api("PATCH", "/items/" + id, { content_md: text.value, note: note.value });
+  }
+
+  async function publish() {
+    problems.replaceChildren();
+    try {
+      await save();
+      const r = await api("POST", `/items/${id}/publish`, note.value ? { note: note.value } : undefined);
+      toast(`Published v${r.version.version}`);
+      if (r.warnings && r.warnings.length) {
+        problems.replaceChildren(h("div", { class: "problems" }, h("strong", {}, "Published, with warnings"),
+          h("ul", {}, r.warnings.map((w) => h("li", {}, w)))));
+      } else {
+        location.hash = "#item/" + id;
+        route();
+      }
+    } catch (e) {
+      if (e.body.problems) {
+        problems.replaceChildren(h("div", { class: "problems" }, h("strong", {}, "Not published"),
+          h("ul", {}, e.body.problems.map((p) => h("li", {}, h("code", {}, p.at), " ", p.reason)))));
+      } else toast(e.message);
+    }
+  }
+
+  const latest = it.versions && it.versions.length ? it.versions[it.versions.length - 1] : null;
+  const actions = h("div", { class: "row" },
+    h("button", { onclick: () => attempt(save, "Saved") }, "Save draft"),
+    h("button", { class: "primary", onclick: publish }, it.version ? "Publish changes" : "Publish"));
+  const more = id && it.version ? h("div", { class: "row" },
+    it.url ? h("a", { href: it.url, target: "_blank", rel: "noopener" }, "Open public page ↗") : null,
+    latest && latest.kind !== "withdrawn" && !latest.pinned_at
+      ? h("button", { onclick: async () => {
+          if (!confirm(`Pin v${latest.version}? A pin is permanent: that version stays public forever.`)) return;
+          if (await attempt(() => api("POST", `/items/${id}/versions/${latest.version}/pin`), `Pinned v${latest.version}`)) route();
+        } }, `Pin v${latest.version}`) : null,
+    !it.withdrawn ? h("button", { class: "danger", onclick: async () => {
+      if (!confirm("Withdraw this item? Its content leaves the public surface; pinned versions stay.")) return;
+      if (await attempt(() => api("POST", `/items/${id}/withdraw`), "Withdrawn")) route();
+    } }, "Withdraw") : null) : null;
+  const del = id && !it.version ? h("div", { class: "row" }, h("button", { class: "danger", onclick: async () => {
+    if (!confirm("Delete this draft?")) return;
+    if (await attempt(() => api("DELETE", "/items/" + id), "Deleted")) location.hash = "#items";
+  } }, "Delete draft")) : null;
+
+  show(
+    title,
+    kindSeg,
+    it.stub_of ? h("p", { class: "muted small" }, "A response to ", h("code", {}, it.stub_of.url || it.stub_of.id)) : null,
+    h("label", { for: "md" }, "Markdown"), text, h("div", {}, count),
+    h("label", { for: "note" }, "Note"), note,
+    problems, actions, more, del,
+    id ? h("p", { class: "muted small" }, "id ", h("code", {}, id)) : null,
+  );
+}
+
+// ── reader ────────────────────────────────────────────────────────────────
+
+let readerSub = 0;
+let unreadOnly = true;
+
+async function viewReader() {
+  const [subs, feed] = await Promise.all([
+    attempt(() => api("GET", "/subscriptions")),
+    attempt(() => api("GET", "/reader/feed?limit=50" + (unreadOnly ? "&unread=true" : "") + (readerSub ? "&subscription=" + readerSub : ""))),
+  ]);
+  if (!subs || !feed) return;
+  const list = subs.subscriptions || [];
+  for (const s of list) subTitles[s.id] = s.display_title || s.title || s.origin;
+  const url = h("input", { name: "url", type: "url", placeholder: "https://someone's blyg or feed", autocapitalize: "off", "aria-label": "Address to subscribe to" });
+  show(
+    h("h1", {}, "Reader"),
+    h("form", { onsubmit: async (ev) => {
+      ev.preventDefault();
+      try {
+        const r = await api("POST", "/subscriptions", { url: url.value.trim() });
+        toast("Subscribed to " + (r.subscription.title || r.subscription.origin));
+        route();
+      } catch (e) {
+        toast(e.body.trail ? `${e.message} (tried ${e.body.trail.length} URLs)` : e.message);
+      }
+    } }, h("div", { class: "row" }, url, h("button", { class: "primary" }, "Subscribe"))),
+    h("div", { id: "importing" }),
+    h("div", { class: "chips" },
+      h("button", { class: readerSub === 0 ? "on" : "", onclick: () => { readerSub = 0; route(); } }, "All"),
+      list.map((s) => h("button", { class: readerSub === s.id ? "on" : "", onclick: () => { readerSub = s.id; route(); } },
+        `${s.display_title || s.title || s.origin}${s.unread ? ` (${s.unread})` : ""}`)),
+      h("button", { class: unreadOnly ? "on" : "", onclick: () => { unreadOnly = !unreadOnly; route(); } }, "Unread only")),
+    readerSub ? subscriptionTools(list.find((s) => s.id === readerSub)) : null,
+    feed.items && feed.items.length ? feed.items.map(readerCard) : h("p", { class: "muted" }, list.length ? "Nothing unread." : "Subscribe to someone to start reading."),
+  );
+  renderImporting();
+}
+
+function subscriptionTools(s) {
+  if (!s) return null;
+  return h("div", { class: "card" },
+    h("div", {}, h("strong", {}, s.title || s.origin)),
+    h("div", { class: "meta" }, s.origin),
+    h("div", { class: "meta" }, `${s.items} items · polled ${when(s.last_polled_at) || "never"}`, s.last_error ? ` · ${s.last_error}` : ""),
+    h("div", { class: "row" },
+      h("button", { onclick: async () => { if (await attempt(() => api("POST", `/subscriptions/${s.id}/poll`), "Polled")) route(); } }, "Poll now"),
+      h("button", { class: "danger", onclick: async () => {
+        if (!confirm("Unsubscribe?")) return;
+        if (await attempt(() => api("DELETE", "/subscriptions/" + s.id), "Unsubscribed")) { readerSub = 0; route(); }
+      } }, "Unsubscribe")));
+}
+
+function readerCard(it) {
+  const doc = it.doc || {};
+  const body = it.l0 ? (doc.title ? doc.title + " — " : "") + (doc.summary_text || "") : textOf(doc.content_html);
+  const author = doc.author && doc.author.name;
+  const full = h("div", { class: "text" }, clip(body, 400));
+  let expanded = false;
+  return h("div", { class: "card" },
+    h("div", {}, !it.read ? h("span", { class: "badge unread" }, "new") : null,
+      h("span", { class: "badge" }, it.l0 ? "rss" : it.kind), it.discrepancy ? h("span", { class: "badge" }, "changed") : null),
+    h("div", { class: "tap", onclick: async () => {
+      expanded = !expanded;
+      full.textContent = expanded ? body : clip(body, 400);
+      if (!it.read) {
+        it.read = true;
+        await attempt(() => api("PUT", `/reader/items/${it.subscription_id}/${encodeURIComponent(it.item_id)}/read`));
+      }
+    } }, full),
+    h("div", { class: "meta" }, [author, it.source, when(it.sort_at)].filter(Boolean).join(" · ")),
+    h("div", { class: "row" },
+      it.page ? h("a", { href: it.page, target: "_blank", rel: "noopener noreferrer" }, "Open ↗") : null,
+      !it.l0 && it.state === "current" ? h("button", { onclick: () => newDraft({ kind: "thread", content_md: `![[${it.item_id}]]\n\n` }) }, "Quote") : null,
+      !it.l0 && it.state === "current" ? h("button", { onclick: () => newDraft({ stub_of: { id: it.item_id, origin: it.origin } }) }, "Respond") : null,
+      it.l0 && it.page ? h("button", { onclick: () => newDraft({ stub_of: { url: it.page, cited: { source: it.source, excerpt: clip(doc.title || body, 200) } } }) }, "Respond") : null));
+}
+
+// ── mentions ──────────────────────────────────────────────────────────────
+
+const verbs = { stub: "responded to", transclusion: "quoted", fork: "forked" };
+
+async function viewMentions() {
+  const r = await attempt(() => api("GET", "/mentions"));
+  if (!r) return;
+  show(
+    h("h1", {}, "Mentions"),
+    h("p", { class: "muted small" }, "Verified responses show on your pages only after you approve them."),
+    r.mentions.length ? r.mentions.map(mentionCard) : h("p", { class: "muted" }, "No mentions yet."),
+  );
+}
+
+function mentionCard(m) {
+  const who = (m.source_author && m.source_author.name) || m.source_host;
+  const link = m.source_page || m.source_url;
+  return h("div", { class: "card" },
+    h("div", {}, h("span", { class: "badge" }, m.status), m.approved_at ? h("span", { class: "badge unread" }, "shown") : null),
+    h("div", {}, `${who} ${verbs[m.relation] || "mentioned"} `, h("code", {}, m.target_item_id.slice(0, 8))),
+    h("div", { class: "meta" }, h("a", { href: link, target: "_blank", rel: "noopener noreferrer nofollow" }, clip(link, 80)), " · ", when(m.received_at)),
+    h("div", { class: "row" },
+      m.status === "verified" && !m.approved_at ? h("button", { class: "primary", onclick: async () => {
+        if (await attempt(() => api("PUT", `/mentions/${m.id}/approval`), "Shown on your page")) route();
+      } }, "Show") : null,
+      m.approved_at ? h("button", { onclick: async () => {
+        if (await attempt(() => api("DELETE", `/mentions/${m.id}/approval`), "Hidden")) route();
+      } }, "Hide") : null,
+      h("button", { class: "danger", onclick: async () => {
+        if (!confirm(`Block ${m.source_host}? Nothing from it will reach you again.`)) return;
+        if (await attempt(() => api("POST", "/mention-blocks", { kind: "host", value: m.source_host }), "Blocked")) route();
+      } }, "Block")));
+}
+
+route();
