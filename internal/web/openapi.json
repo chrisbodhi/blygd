@@ -3,7 +3,7 @@
   "info": {
     "title": "blygd API",
     "version": "0.3.0",
-    "description": "The write and reading API of blygd, a Blygger studio (protocol 0.3). It is studio-private, not protocol (§16.6): the public surface is each origin's static files. Spec references (§) are to blygger-spec docs/protocol-v0.3.md.\n\nEvery HTML string that came from another origin is returned verbatim; clients MUST sanitize it before rendering (§14). Responses that carry imported bytes include a notice saying so.\n\nAuthenticate with a bearer token. Each operation's security requirement names the one scope it needs; the owner token `*` holds every scope."
+    "description": "The write and reading API of blygd, a Blygger studio (protocol 0.3). It is studio-private, not protocol (§16.6): the public surface is each origin's static files. Spec references (§) are to blygger-spec docs/protocol-v0.3.md.\n\nEvery HTML string that came from another origin is returned verbatim; clients MUST sanitize it before rendering (§14). Responses that carry imported bytes include a notice saying so.\n\nAuthenticate with a bearer token. Each operation's security requirement names the one scope it needs; the owner token `*` holds every scope.\n\nRequests are budgeted per token and per user (a user's budget is twice a token's, across all their tokens). Each operation's `x-blygd-cost` names its class: `default` (120 a minute, bursts of 60), `fetch` (12 a minute; the call fetches from other hosts), `export` (2 a minute), `upload` (30 a minute, bursts of 20) and `stream` (no per-request budget; at most 8 open streams). Over budget is a 429 with `Retry-After`. An address that fails authentication too often is refused for a while, whatever token it then sends."
   },
   "servers": [
     {
@@ -76,6 +76,7 @@
             "bearer": []
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "200": {
             "description": "OK",
@@ -89,6 +90,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         }
       }
@@ -106,6 +110,7 @@
             "bearer": []
           }
         ],
+        "x-blygd-cost": "stream",
         "responses": {
           "200": {
             "description": "The stream, until the client disconnects.",
@@ -157,6 +162,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "200": {
             "description": "OK",
@@ -173,6 +179,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         }
       },
@@ -189,6 +198,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "upload",
         "responses": {
           "200": {
             "description": "OK",
@@ -211,6 +221,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         },
         "requestBody": {
@@ -240,6 +253,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "export",
         "responses": {
           "200": {
             "description": "The archive, as `blyg-YYYYMMDD.tar.gz`.",
@@ -257,6 +271,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         }
       }
@@ -275,6 +292,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "200": {
             "description": "OK",
@@ -297,6 +315,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         },
         "parameters": [
@@ -340,6 +361,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "fetch",
         "responses": {
           "201": {
             "description": "Created.",
@@ -362,6 +384,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         },
         "description": "A fork without content_md fetches the pinned source (or reads it, if it is your own) and flattens it into the draft (§5.6 rule 6).",
@@ -396,6 +421,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "200": {
             "description": "OK",
@@ -415,6 +441,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         }
       },
@@ -431,6 +460,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "200": {
             "description": "OK",
@@ -456,6 +486,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         },
         "description": "Nothing changes on the wire until the next publish.",
@@ -483,6 +516,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "204": {
             "description": "Done."
@@ -498,6 +532,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         }
       }
@@ -521,6 +558,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "fetch",
         "responses": {
           "200": {
             "description": "OK",
@@ -549,6 +587,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         },
         "description": "Directives and [[id]] links resolve now: own items first, then your subscriptions' imports (§10.2). Every unresolvable one is listed in a 422's problems. 409 when nothing changed.",
@@ -583,6 +624,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "200": {
             "description": "OK",
@@ -608,6 +650,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         },
         "requestBody": {
@@ -644,6 +689,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "200": {
             "description": "OK",
@@ -672,6 +718,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         }
       }
@@ -690,6 +739,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "200": {
             "description": "OK",
@@ -706,6 +756,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         }
       },
@@ -722,6 +775,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "201": {
             "description": "Created.",
@@ -744,6 +798,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         },
         "requestBody": {
@@ -777,6 +834,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "200": {
             "description": "OK",
@@ -799,6 +857,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         }
       },
@@ -815,6 +876,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "200": {
             "description": "OK",
@@ -840,6 +902,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         },
         "requestBody": {
@@ -866,6 +931,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "204": {
             "description": "Done."
@@ -881,6 +947,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         }
       }
@@ -904,6 +973,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "201": {
             "description": "Created.",
@@ -929,6 +999,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         },
         "requestBody": {
@@ -965,6 +1038,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "204": {
             "description": "Done."
@@ -980,6 +1054,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         }
       }
@@ -998,6 +1075,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "200": {
             "description": "OK",
@@ -1014,6 +1092,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         }
       },
@@ -1030,6 +1111,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "upload",
         "responses": {
           "201": {
             "description": "Stored, or already stored: the same bytes are the same object.",
@@ -1052,6 +1134,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         },
         "description": "The declared type must match the bytes. Reference it from markdown as media/… ; publish checks every reference exists, and lists them in the item's media array.",
@@ -1105,6 +1190,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "204": {
             "description": "Done."
@@ -1120,6 +1206,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         }
       }
@@ -1138,6 +1227,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "200": {
             "description": "OK",
@@ -1157,6 +1247,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         },
         "parameters": [
@@ -1209,6 +1302,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "204": {
             "description": "Shown."
@@ -1227,6 +1321,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         },
         "description": "Publishing a response is curation, never automatic, so this also needs origin:write. What shows: a verb, the source's author name, its host and a link; no words from the source."
@@ -1244,6 +1341,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "204": {
             "description": "Hidden."
@@ -1259,6 +1357,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         }
       }
@@ -1277,6 +1378,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "200": {
             "description": "OK",
@@ -1293,6 +1395,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         }
       },
@@ -1309,6 +1414,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "201": {
             "description": "Blocked.",
@@ -1331,6 +1437,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         },
         "description": "Claims from a blocked source are answered like any other and dropped: nothing stored, nothing fetched. Mentions already received from it lose their approval at once.",
@@ -1365,6 +1474,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "204": {
             "description": "Done."
@@ -1380,6 +1490,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         }
       }
@@ -1398,6 +1511,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "200": {
             "description": "OK",
@@ -1414,6 +1528,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         }
       }
@@ -1432,6 +1549,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "200": {
             "description": "OK",
@@ -1448,6 +1566,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         }
       },
@@ -1464,6 +1585,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "fetch",
         "responses": {
           "201": {
             "description": "Created.",
@@ -1496,6 +1618,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         },
         "requestBody": {
@@ -1538,6 +1663,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "200": {
             "description": "OK",
@@ -1560,6 +1686,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         }
       },
@@ -1576,6 +1705,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "200": {
             "description": "OK",
@@ -1598,6 +1728,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         },
         "description": "in_blogroll also needs origin:write (§11).",
@@ -1625,6 +1758,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "204": {
             "description": "Done."
@@ -1640,6 +1774,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         }
       }
@@ -1663,6 +1800,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "fetch",
         "responses": {
           "200": {
             "description": "OK",
@@ -1695,6 +1833,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         },
         "requestBody": {
@@ -1734,6 +1875,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "fetch",
         "responses": {
           "200": {
             "description": "OK",
@@ -1769,6 +1911,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         },
         "requestBody": {
@@ -1812,6 +1957,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "fetch",
         "responses": {
           "200": {
             "description": "Polled; the subscription as it now stands.",
@@ -1869,6 +2015,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "200": {
             "description": "OK",
@@ -1888,6 +2035,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         },
         "parameters": [
@@ -1958,6 +2108,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "200": {
             "description": "OK",
@@ -1980,6 +2131,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         }
       }
@@ -2006,6 +2160,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "204": {
             "description": "Done."
@@ -2021,6 +2176,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         }
       },
@@ -2037,6 +2195,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "204": {
             "description": "Done."
@@ -2052,6 +2211,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         }
       }
@@ -2070,6 +2232,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "200": {
             "description": "OK",
@@ -2086,6 +2249,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         }
       },
@@ -2102,6 +2268,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "201": {
             "description": "Created.",
@@ -2121,6 +2288,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         },
         "requestBody": {
@@ -2154,6 +2324,7 @@
             ]
           }
         ],
+        "x-blygd-cost": "default",
         "responses": {
           "204": {
             "description": "Done."
@@ -2169,6 +2340,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         }
       }
@@ -4096,6 +4270,24 @@
       },
       "TooLarge": {
         "description": "Over the upload cap (BLYGD_MEDIA_MAX_BYTES).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "TooManyRequests": {
+        "description": "Over a request budget. Wait for Retry-After seconds. Budgets are per token and per user, by the operation's x-blygd-cost class; an address with too many failed authentications is refused too.",
+        "headers": {
+          "Retry-After": {
+            "description": "Seconds until a request of this class is allowed.",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        },
         "content": {
           "application/json": {
             "schema": {

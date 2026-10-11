@@ -20,8 +20,12 @@ type Config struct {
 	Listen      string // BLYGD_LISTEN, default :8080
 	// PublicURL is where origins mount: https://host/ gives
 	// https://host/{handle}/. BLYGD_PUBLIC_URL (required).
-	PublicURL    string
-	TrustProxy   bool   // BLYGD_TRUST_PROXY: honor X-Forwarded-Proto
+	PublicURL string
+	// TrustProxy honors X-Forwarded-Proto, and charges request budgets to
+	// the last X-Forwarded-For address (BLYGD_TRUST_PROXY). Set it only
+	// behind a proxy that appends that header, or anyone can pick the
+	// address they are charged to.
+	TrustProxy   bool
 	AllowPrivate bool   // BLYGD_ALLOW_PRIVATE_FETCH: dev only
 	GeneratorURL string // BLYGD_GENERATOR_URL
 	FragmentCap  int    // BLYGD_FRAGMENT_CAP, default 2000 (§5.3)
@@ -36,6 +40,9 @@ type Config struct {
 	// (BLYGD_MIGRATE_ON_START, default true). Off, an out-of-date schema is
 	// refused and `blygd migrate` is the only way forward.
 	MigrateOnStart bool
+	// RateLimits turns the request budgets on (BLYGD_RATE_LIMITS, default
+	// true). Off is for test harnesses only (scripts/interop).
+	RateLimits bool
 }
 
 // Load reads the environment.
@@ -48,6 +55,7 @@ func Load() (*Config, error) {
 		AllowPrivate:   os.Getenv("BLYGD_ALLOW_PRIVATE_FETCH") == "true",
 		GeneratorURL:   envOr("BLYGD_GENERATOR_URL", "https://github.com/chrisbodhi/blygd"),
 		MigrateOnStart: os.Getenv("BLYGD_MIGRATE_ON_START") != "false",
+		RateLimits:     os.Getenv("BLYGD_RATE_LIMITS") != "false",
 	}
 	var err error
 	if c.FragmentCap, err = intEnv("BLYGD_FRAGMENT_CAP", 2000); err != nil {

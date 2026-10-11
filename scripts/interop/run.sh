@@ -46,6 +46,7 @@ export BLYGD_PUBLIC_URL="http://127.0.0.1:$BLYGD_PORT/"
 export BLYGD_LISTEN="127.0.0.1:$BLYGD_PORT"
 export BLYGD_ALLOW_PRIVATE_FETCH=true   # both studios are on localhost
 export BLYGD_MANUAL_POLL_FLOOR=2        # development only: keep the run short
+export BLYGD_RATE_LIMITS=false          # the checks run faster than any budget allows
 TOKEN="$("$WORK/blygd" user add alice "Alice on blygd" | sed -n 's/^owner token (shown once): //p')"
 "$WORK/blygd" serve >"$WORK/blygd.log" 2>&1 &
 pids+=($!)

@@ -92,6 +92,20 @@ func (r *Reader) GetSubscription(ctx context.Context, userID, ownOriginID, remot
 // Subscribe resolves a URL (§12.1, network first) and then records the
 // subscription. Many users share one remote origin row, and so one poll.
 func (r *Reader) Subscribe(ctx context.Context, userID int64, input string) (int64, *Resolution, error) {
+	// Checked before resolving, so a refused subscribe costs no fetch. Two
+	// racing subscribes can pass it together; the cap is a budget, not an
+	// invariant.
+	max := r.MaxSubscriptions
+	if max <= 0 {
+		max = 1000
+	}
+	var n int
+	if err := r.Pool.QueryRow(ctx, `SELECT count(*) FROM subscriptions WHERE user_id = $1`, userID).Scan(&n); err != nil {
+		return 0, nil, err
+	}
+	if n >= max {
+		return 0, nil, fmt.Errorf("%w: %d subscriptions", ErrTooManySubscriptions, max)
+	}
 	res, err := Resolve(ctx, r.Fetch, input)
 	if err != nil {
 		return 0, nil, err
@@ -159,6 +173,9 @@ func (r *Reader) attach(ctx context.Context, userID int64, res *Resolution, from
 // ErrSameIdentity means a move was asked for to where the subscription
 // already is.
 var ErrSameIdentity = errors.New("same identity")
+
+// ErrTooManySubscriptions: the user is at Reader.MaxSubscriptions.
+var ErrTooManySubscriptions = errors.New("subscription limit reached")
 
 // Reresolve re-runs resolution for a subscription (§12.2: readers MAY, when
 // surfaces 404 persistently). It changes nothing: adopting a new origin is

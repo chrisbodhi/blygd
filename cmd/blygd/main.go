@@ -201,6 +201,11 @@ func serve(ctx context.Context, log *slog.Logger, cfg *config.Config, pool *pgxp
 	hub := &events.Hub{Pool: pool, Log: log}
 	go hub.Run(ctx)
 	api := &web.API{Pool: pool, Accounts: accts, Studio: st, Hoppers: hoppers, Reader: rd, Events: hub, Log: log}
+	if cfg.RateLimits {
+		api.Limits = web.NewLimits(cfg.TrustProxy)
+	} else {
+		log.Warn("BLYGD_RATE_LIMITS is off: no request budgets. Test harnesses only.")
+	}
 	surface := &web.Surface{Studio: st, Receiver: receiver, Hoppers: hoppers, Scheme: cfg.Scheme(), TrustProxy: cfg.TrustProxy, Log: log}
 
 	workers := &mention.Workers{Pool: pool, Fetch: fc, Log: log, OnDisplayChange: st.RerenderItem}

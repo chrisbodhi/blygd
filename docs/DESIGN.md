@@ -455,6 +455,40 @@ and the description is readable without a token. The reference links
 OAuth endpoints (`authorization_endpoint`, `oauth-metadata`) instead;
 blygd will add those when it has an approval flow.
 
+## Request budgets
+
+In-memory token buckets (`internal/limit`), so budgets are per process;
+blygd runs one. `BLYGD_RATE_LIMITS=false` turns them off for harnesses.
+
+- **API, per token and per user.** Each route has a cost class
+  (`routeCosts`, stated as `x-blygd-cost` on every operation in
+  openapi.json, and the two are compared by a test): `default` 120 a
+  minute in bursts of 60, `fetch` 12 (subscribe, resolve, move, poll,
+  create an item, publish: each can fetch other hosts), `export` 2,
+  `upload` 30 in bursts of 20 (media, and `PATCH /api/origin`, which
+  re-renders every item), and `stream`, which has no per-request budget
+  but at most 8 open streams. A user's budget is twice a token's, across
+  all their tokens, so one runaway tool cannot starve the owner and many
+  tokens cannot multiply a user. Over budget is 429 with `Retry-After`.
+- **Failed authentication, per address.** 30 at once, then 10 a minute.
+  Past that the address is refused before its token is looked up, good
+  token or not.
+- **Everything public, per address.** Origin files, hopper pages, the
+  studio and llms.txt share 600 a minute in bursts of 300; webmention posts
+  have 30 a minute on top of §15.3's per-source caps. `/healthz` is free.
+- **Addresses.** The peer, or with `BLYGD_TRUST_PROXY` the last
+  `X-Forwarded-For` entry, which is the one the proxy saw. IPv6 is charged
+  per /64. Each limiter holds at most 100,000 keys: refilled buckets are
+  swept first, and if every bucket is in debt a new address goes through
+  unbudgeted rather than evict someone mid-penalty.
+- **Outbound.** A user may hold 1,000 subscriptions
+  (`Reader.MaxSubscriptions`), checked before resolving, so a refused
+  subscribe fetches nothing. With the `fetch` budget and the poll-now
+  floor, no token can steer blygd at a third party faster than that.
+- **Visibility.** The request log carries the client address on every
+  line and the token id when there was one, so 401s, 403s and 429s count
+  per token and per address.
+
 ## Live hints (`GET /api/events`)
 
 A Server-Sent Events stream of "something changed" hints, per user. A

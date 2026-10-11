@@ -34,6 +34,7 @@ type API struct {
 	Reader   *reader.Reader
 	Events   *events.Hub // GET /api/events; nil means unavailable
 	Log      *slog.Logger
+	Limits   *Limits // request budgets; nil means none
 
 	streams streamCount
 }
@@ -103,7 +104,7 @@ func (a *API) routes() []route {
 func (a *API) Handler() http.Handler {
 	mux := http.NewServeMux()
 	for _, r := range a.routes() {
-		mux.Handle(r.pattern, a.guard(r.scope, r.fn))
+		mux.Handle(r.pattern, a.guard(r))
 	}
 	// The API description is public: it says what exists, never what a
 	// user has (docs/PLAN.md, Operations).
@@ -125,11 +126,22 @@ func (e *httpError) Error() string { return e.msg }
 
 func badRequest(msg string) error { return &httpError{http.StatusBadRequest, "invalid", msg} }
 
-func (a *API) guard(scope string, fn func(http.ResponseWriter, *http.Request) error) http.Handler {
+// guard authenticates, checks the route's scope, and charges the route's
+// cost class to the token and its user. An address that keeps failing to
+// authenticate is refused before its tokens are looked up.
+func (a *API) guard(rt route) http.Handler {
+	scope, cost := rt.scope, routeCost(rt.pattern)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
+		addr := a.Limits.addr(r)
+		if blocked, wait := a.Limits.authBlocked(addr); blocked {
+			retryAfter(w, wait)
+			writeError(w, http.StatusTooManyRequests, "rate_limited", "too many failed authentications from this address")
+			return
+		}
 		p, err := a.Accounts.Authenticate(r.Context(), r.Header.Get("Authorization"))
 		if errors.Is(err, account.ErrUnauthorized) {
+			a.Limits.authFailed(addr)
 			w.Header().Set("WWW-Authenticate", `Bearer realm="blygd"`)
 			writeError(w, http.StatusUnauthorized, "unauthorized", err.Error())
 			return
@@ -138,12 +150,18 @@ func (a *API) guard(scope string, fn func(http.ResponseWriter, *http.Request) er
 			a.internal(w, r, err)
 			return
 		}
+		noteToken(r.Context(), p.TokenID)
 		if scope != "" && !p.Can(scope) {
 			writeError(w, http.StatusForbidden, "forbidden", "token lacks scope "+scope)
 			return
 		}
+		if ok, wait := a.Limits.spend(cost, p.TokenID, p.UserID); !ok {
+			retryAfter(w, wait)
+			writeError(w, http.StatusTooManyRequests, "rate_limited", "over the "+cost+" request budget")
+			return
+		}
 		r = r.WithContext(context.WithValue(r.Context(), principalKey{}, p))
-		if err := fn(w, r); err != nil {
+		if err := rt.fn(w, r); err != nil {
 			a.handleErr(w, r, err)
 		}
 	})

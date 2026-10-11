@@ -58,7 +58,7 @@ curl -s localhost:8080/chris/items/$ID.json
 | `BLYGD_DATABASE_URL` | (required) | Postgres connection URL |
 | `BLYGD_PUBLIC_URL` | (required) | Where origins mount: `https://host/` gives `https://host/{handle}/` |
 | `BLYGD_LISTEN` | `:8080` | |
-| `BLYGD_TRUST_PROXY` | `false` | Honor `X-Forwarded-Proto` (set behind Caddy or nginx) |
+| `BLYGD_TRUST_PROXY` | `false` | Honor `X-Forwarded-Proto`, and charge budgets to the last `X-Forwarded-For` address. Set it only behind Caddy or nginx, never when clients reach blygd directly |
 | `BLYGD_FRAGMENT_CAP` | `2000` | Characters (§5.3) |
 | `BLYGD_LEVEL` | `2` | Informative manifest claim (§3.2) |
 | `BLYGD_MIGRATE_ON_START` | `true` | Apply pending migrations before any command; `false` leaves it to `blygd migrate` |
@@ -66,6 +66,7 @@ curl -s localhost:8080/chris/items/$ID.json
 | `BLYGD_MEDIA_MAX_BYTES` | `10485760` | Largest accepted upload (PNG, JPEG, GIF, WebP) |
 | `BLYGD_GENERATOR_URL` | this repo | Manifest `generator_url` |
 | `BLYGD_ALLOW_PRIVATE_FETCH` | `false` | Development only: lets fetches reach private addresses |
+| `BLYGD_RATE_LIMITS` | `true` | Request budgets (docs/DESIGN.md); `false` for test harnesses only |
 
 ## API
 

@@ -28,6 +28,10 @@ type Reader struct {
 	// ReconcileEvery is how often an index diff runs without suspicion
 	// (§13.2: readers SHOULD reconcile periodically). Default 24 hours.
 	ReconcileEvery time.Duration
+	// MaxSubscriptions caps one user's subscriptions, so a user (or a tool
+	// holding their token) cannot steer the poller at the whole web.
+	// Default 1000.
+	MaxSubscriptions int
 	// MaxFetches bounds the item and pin documents one poll of one origin
 	// may fetch. A first subscribe to a large blyg finishes over several
 	// polls instead of in one burst. Default 200.

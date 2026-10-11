@@ -54,6 +54,8 @@ func (a *API) readerErr(err error) error {
 		return &httpError{404, "not_found", "not found"}
 	case errors.Is(err, reader.ErrSameIdentity):
 		return &httpError{409, "conflict", err.Error()}
+	case errors.Is(err, reader.ErrTooManySubscriptions):
+		return &httpError{409, "conflict", err.Error()}
 	}
 	return err
 }
@@ -95,7 +97,7 @@ func (a *API) subscribe(w http.ResponseWriter, r *http.Request) error {
 		return nil
 	}
 	if err != nil {
-		return err
+		return a.readerErr(err)
 	}
 	s, err := a.subscriptionView(r, sid)
 	if err != nil {

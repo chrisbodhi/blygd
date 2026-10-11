@@ -243,6 +243,13 @@ thumb.
   - A pass over every route for what it costs and who can call it, run
     again whenever the MCP transport lands, since agents call tools
     eagerly.
+
+  *(Done, 2026-10-11, except where noted: budgets per token and user by
+  cost class, failed-auth and public budgets per address, a subscription
+  cap, address and token in the request log, and the cost of every route
+  in openapi.json. See DESIGN.md "Request budgets". Open: budgets are per
+  process, a full limiter lets new addresses through without saying so in
+  the logs, and the route review is due again with MCP.)*
 - **Observability.** Request logs exist. Add queue-depth gauges for the
   mention tables, and the poller, before the first public tenant. The
   poller records `last_error`, `poll_failures` and `lossy` per remote

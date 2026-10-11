@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -35,7 +36,25 @@ func Router(api *API, surface *Surface, log *slog.Logger) http.Handler {
 		w.Write(llmsTxt) //nolint:errcheck
 	})
 	mux.Handle("/", surface)
-	return logRequests(mux, log)
+	return logRequests(publicBudget(mux, api.Limits), api.Limits, log)
+}
+
+// publicBudget charges requests outside /api/ to their address: origin
+// files, hopper pages, the studio's files and webmention posts. /api/
+// charges tokens instead (API.guard), and /healthz is free for probes.
+func publicBudget(next http.Handler, l *Limits) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/healthz" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if ok, wait := l.public(r); !ok {
+			retryAfter(w, wait)
+			http.Error(w, "too many requests", http.StatusTooManyRequests)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 type statusWriter struct {
@@ -52,11 +71,20 @@ func (w *statusWriter) WriteHeader(code int) {
 	w.ResponseWriter.WriteHeader(code)
 }
 
-func logRequests(next http.Handler, log *slog.Logger) http.Handler {
+// logRequests logs every request with its client address, and the token
+// that made it when there was one, so 401s, 403s and 429s can be counted
+// per token and per address.
+func logRequests(next http.Handler, l *Limits, log *slog.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		sw := &statusWriter{ResponseWriter: w, status: 200}
+		r, ri := withReqInfo(r)
 		next.ServeHTTP(sw, r)
-		log.Info("request", "method", r.Method, "host", r.Host, "path", r.URL.Path, "status", sw.status, "ms", time.Since(start).Milliseconds())
+		attrs := []any{"method", r.Method, "host", r.Host, "path", r.URL.Path, "status", sw.status,
+			"ms", time.Since(start).Milliseconds(), "addr", l.addr(r)}
+		if ri.tokenID != 0 {
+			attrs = append(attrs, "token", ri.tokenID)
+		}
+		log.Info("request", attrs...)
 	})
 }
