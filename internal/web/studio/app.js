@@ -476,6 +476,16 @@ async function viewEditor(id) {
 
 let readerSub = 0;
 let unreadOnly = true;
+// Unread counts on the Reader's subscription chips, kept current as cards
+// are marked: sid -> { n, el, label }.
+let unreadChips = {};
+
+function bumpUnread(sid, delta) {
+  const c = unreadChips[sid];
+  if (!c) return;
+  c.n = Math.max(0, c.n + delta);
+  c.el.textContent = c.n ? `${c.label} (${c.n})` : c.label;
+}
 
 async function viewReader() {
   const [subs, feed] = await Promise.all([
@@ -485,6 +495,14 @@ async function viewReader() {
   if (!subs || !feed) return;
   const list = subs.subscriptions || [];
   for (const s of list) subTitles[s.id] = s.display_title || s.title || s.origin;
+  unreadChips = {};
+  const subChip = (s) => {
+    const label = s.display_title || s.title || s.origin;
+    const el = h("button", { class: readerSub === s.id ? "on" : "", onclick: () => { readerSub = s.id; route(); } });
+    unreadChips[s.id] = { n: s.unread || 0, el, label };
+    bumpUnread(s.id, 0);
+    return el;
+  };
   const url = h("input", { name: "url", type: "url", placeholder: "https://someone's blyg or feed", autocapitalize: "off", "aria-label": "Address to subscribe to" });
   show(
     h("h1", {}, "Reader"),
@@ -501,8 +519,7 @@ async function viewReader() {
     h("div", { id: "importing" }),
     h("div", { class: "chips" },
       h("button", { class: readerSub === 0 ? "on" : "", onclick: () => { readerSub = 0; route(); } }, "All"),
-      list.map((s) => h("button", { class: readerSub === s.id ? "on" : "", onclick: () => { readerSub = s.id; route(); } },
-        `${s.display_title || s.title || s.origin}${s.unread ? ` (${s.unread})` : ""}`)),
+      list.map(subChip),
       h("button", { class: unreadOnly ? "on" : "", onclick: () => { unreadOnly = !unreadOnly; route(); } }, "Unread only")),
     readerSub ? subscriptionTools(list.find((s) => s.id === readerSub)) : null,
     feed.items && feed.items.length ? feed.items.map(readerCard) : h("p", { class: "muted" }, list.length ? "Nothing unread." : "Subscribe to someone to start reading."),
@@ -524,29 +541,52 @@ function subscriptionTools(s) {
       } }, "Unsubscribe")));
 }
 
+// Any tap on a card marks it read: its text, a link in it, or Open. The
+// badge, the chip count and the toggle change at once and are put back if
+// the server refuses. A card stays put until the next refresh, even under
+// "Unread only", so nothing moves under the reader's thumb.
 function readerCard(it) {
   const doc = it.doc || {};
   const body = it.l0 ? (doc.title ? doc.title + " — " : "") + (doc.summary_text || "") : textOf(doc.content_html);
   const author = doc.author && doc.author.name;
   const full = h("div", { class: "rich clipped" }, it.l0 ? h("p", {}, linkify(body)) : richOf(doc.content_html));
   overflowWatch.observe(full);
+  const badge = h("span", { class: "badge unread" }, "new");
+  const toggle = h("button", { onclick: () => setRead(!it.read) });
+  const paint = () => {
+    badge.hidden = it.read;
+    toggle.textContent = it.read ? "Mark unread" : "Mark read";
+  };
+  const setRead = async (read) => {
+    if (it.read === read) return;
+    it.read = read;
+    bumpUnread(it.subscription_id, read ? -1 : 1);
+    paint();
+    const path = `/reader/items/${it.subscription_id}/${encodeURIComponent(it.item_id)}/read`;
+    try {
+      await api(read ? "PUT" : "DELETE", path); // 204: no body, so not attempt()
+    } catch (e) {
+      toast(e.message);
+      it.read = !read;
+      bumpUnread(it.subscription_id, read ? 1 : -1);
+      paint();
+    }
+  };
+  paint();
   return h("div", { class: "card" },
-    h("div", {}, !it.read ? h("span", { class: "badge unread" }, "new") : null,
+    h("div", {}, badge,
       h("span", { class: "badge" }, it.l0 ? "rss" : it.kind), it.discrepancy ? h("span", { class: "badge" }, "changed") : null),
-    h("div", { class: "tap", onclick: async (e) => {
-      if (e.target.closest("a")) return;
-      full.classList.toggle("clipped");
-      if (!it.read) {
-        it.read = true;
-        await attempt(() => api("PUT", `/reader/items/${it.subscription_id}/${encodeURIComponent(it.item_id)}/read`));
-      }
+    h("div", { class: "tap", onclick: (e) => {
+      if (!e.target.closest("a")) full.classList.toggle("clipped");
+      setRead(true);
     } }, full),
     h("div", { class: "meta" }, [author, it.source, when(it.sort_at)].filter(Boolean).join(" · ")),
     h("div", { class: "row" },
-      it.page ? h("a", { href: it.page, target: "_blank", rel: "noopener noreferrer" }, "Open ↗") : null,
+      it.page ? h("a", { href: it.page, target: "_blank", rel: "noopener noreferrer", onclick: () => setRead(true) }, "Open ↗") : null,
       !it.l0 && it.state === "current" ? h("button", { onclick: () => newDraft({ kind: "thread", content_md: `![[${it.item_id}]]\n\n` }) }, "Quote") : null,
       !it.l0 && it.state === "current" ? h("button", { onclick: () => newDraft({ stub_of: { id: it.item_id, origin: it.origin } }) }, "Respond") : null,
-      it.l0 && it.page ? h("button", { onclick: () => newDraft({ stub_of: { url: it.page, cited: { source: it.source, excerpt: clip(doc.title || body, 200) } } }) }, "Respond") : null));
+      it.l0 && it.page ? h("button", { onclick: () => newDraft({ stub_of: { url: it.page, cited: { source: it.source, excerpt: clip(doc.title || body, 200) } } }) }, "Respond") : null,
+      toggle));
 }
 
 // ── mentions ──────────────────────────────────────────────────────────────
