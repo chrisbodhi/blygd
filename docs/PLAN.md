@@ -116,7 +116,39 @@ Left for later:
   `GET /api/origin/export`, with published media and no
   `rel="webmention"` either. Valid only at the origin's `base_url`.)*
 - **Custom domains** with automatic TLS (certmagic). `base_url` already
-  carries the full URL.
+  carries the full URL. The threat is impersonation: a user setting
+  `base_url` to an address they do not control (`https://blyg.google.com/`).
+  On the open web the protocol already defeats it, because identity is
+  where a document was fetched from (§12.2; §15.4 rule 2): readers and
+  mention receivers fetch from the real host, and ACME will not issue for
+  it. That holds only if blygd keeps up its side:
+  - **Verify before use.** A custom `base_url` takes effect only once
+    control is proven: a DNS TXT record for a host, or a token served at
+    the new base URL's path, which also covers a path on a host the user
+    owns (`https://newschematic.org/blyg/`). Until then the origin keeps
+    its handle URL.
+  - **Per path, not per host.** The identity is the full base URL (§4,
+    §12.2), and two blygs on one host are ordinary (§13.5): verifying
+    `newschematic.org/blyg/` grants nothing at `newschematic.org/other/`.
+  - **Recheck.** Domains lapse and DNS moves. Recheck control on a
+    schedule, and stop serving the origin under a host it no longer
+    controls.
+  - **Route by host only.** A custom origin is served only when the
+    request's host and path match its `base_url`: no `/{handle}/`
+    fallback, and no other path to its pages.
+  - **Close the local shortcut.** `reader.LocalFirst` answers this
+    instance's origins from the database without the network, trusting
+    `base_url` instead of DNS. That is safe today only because every
+    origin's host is `BLYGD_PUBLIC_URL`'s. It must treat an origin as
+    local only when its host is the instance's own or its custom
+    `base_url` is verified, and go through the network otherwise. Without
+    this, another tenant subscribing to `https://blyg.google.com/` would
+    read the impostor's items, and so would quotes and snapshots. Test it:
+    an unverified `base_url` must not be read locally.
+  - An export is just files, and anyone can hand-write a manifest
+    claiming any site. It speaks for an origin only where DNS serves it,
+    which is why the checks above live in serving and reading, not in
+    rendering.
 - **Studio discovery** via an HTML `rel` link on a studio page;
   OAuth-style token approval beside paste-a-token (§16.6); an MCP
   transport over the same operations and scopes. *(Discovery done:
