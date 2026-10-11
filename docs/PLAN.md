@@ -117,7 +117,9 @@ Left for later:
   carries the full URL.
 - **Studio discovery** via an HTML `rel` link on a studio page;
   OAuth-style token approval beside paste-a-token (§16.6); an MCP
-  transport over the same operations and scopes.
+  transport over the same operations and scopes. *(Discovery done:
+  `rel="service-desc"` to the OpenAPI document. Approval and MCP open;
+  the reference's shape is in its `docs/client-access.md`.)*
 
 ## Interop (2026-10-10)
 

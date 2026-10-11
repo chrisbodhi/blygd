@@ -53,4 +53,22 @@ func TestStudioNeverWritesHTML(t *testing.T) {
 	}
 }
 
+// §16.6: a tool finds the write surface through an HTML rel link on the
+// studio's page, and the link leads to the API description, readable
+// before the tool holds a token.
+func TestStudioPageLinksTheWriteSurface(t *testing.T) {
+	h := Router(&API{}, &Surface{}, discardLog())
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/studio/", nil))
+	m := regexp.MustCompile(`<link rel="service-desc" type="application/openapi\+json" href="([^"]+)">`).FindStringSubmatch(rec.Body.String())
+	if m == nil {
+		t.Fatalf("studio page has no service-desc link:\n%s", rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", m[1], nil))
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"openapi": "3.1.0"`) {
+		t.Errorf("service-desc %s: %d %.80q", m[1], rec.Code, rec.Body.String())
+	}
+}
+
 func discardLog() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }

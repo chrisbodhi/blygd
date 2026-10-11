@@ -421,6 +421,13 @@ mint scopes it holds. `blygd user add` mints the owner's `*` token; that
 is the paste-a-token path §16.6 requires beside any future OAuth-style
 flow.
 
+Tools discover the write surface from the studio page (§16.6), never the
+manifest: `/studio/` carries `<link rel="service-desc"
+type="application/openapi+json" href="/api/openapi.json">` (RFC 8631),
+and the description is readable without a token. The reference links
+OAuth endpoints (`authorization_endpoint`, `oauth-metadata`) instead;
+blygd will add those when it has an approval flow.
+
 ## Live hints (`GET /api/events`)
 
 A Server-Sent Events stream of "something changed" hints, per user. A
