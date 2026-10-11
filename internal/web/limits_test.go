@@ -78,6 +78,32 @@ func (u *user) apiFrom(addr, method, path string) resp {
 	return u.e.do(method, u.e.srv.URL+"/api"+path, u.token, nil, "X-Forwarded-For", "198.51.100.1, "+addr)
 }
 
+func TestClientAddr(t *testing.T) {
+	for in, want := range map[string]string{
+		"203.0.113.5:1234":            "203.0.113.5",
+		"[2001:db8:1:2:3:4:5:6]:1234": "2001:db8:1:2::/64",
+		"[::1]:1234":                  "::1",                // loopback, whole
+		"[fd7a:115c:a1e0::1a]:1234":   "fd7a:115c:a1e0::1a", // a tailnet device, whole
+		"[fe80::1]:1234":              "fe80::1",            // link-local, whole
+	} {
+		r, _ := http.NewRequest("GET", "/", nil)
+		r.RemoteAddr = in
+		if got := clientAddr(r, false); got != want {
+			t.Errorf("%s: %s, want %s", in, got, want)
+		}
+	}
+	r, _ := http.NewRequest("GET", "/", nil)
+	r.RemoteAddr = "10.0.0.2:5555"
+	r.Header.Add("X-Forwarded-For", "192.0.2.66")
+	r.Header.Add("X-Forwarded-For", "198.51.100.1, 203.0.113.9")
+	if got := clientAddr(r, false); got != "10.0.0.2" {
+		t.Errorf("untrusted proxy header was honored: %s", got)
+	}
+	if got := clientAddr(r, true); got != "203.0.113.9" {
+		t.Errorf("trusted: %s, want the last entry the proxy appended", got)
+	}
+}
+
 func TestTokenAndUserBudgets(t *testing.T) {
 	e := newEnv(t, mention.DefaultRateLimits)
 	alice := e.user("alice")

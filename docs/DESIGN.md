@@ -477,8 +477,9 @@ blygd runs one. `BLYGD_RATE_LIMITS=false` turns them off for harnesses.
   studio and llms.txt share 600 a minute in bursts of 300; webmention posts
   have 30 a minute on top of §15.3's per-source caps. `/healthz` is free.
 - **Addresses.** The peer, or with `BLYGD_TRUST_PROXY` the last
-  `X-Forwarded-For` entry, which is the one the proxy saw. IPv6 is charged
-  per /64. Each limiter holds at most 100,000 keys: refilled buckets are
+  `X-Forwarded-For` entry, which is the one the proxy saw. Public IPv6 is
+  charged per /64; loopback and private addresses are kept whole, since a
+  tailnet puts every device in one /64. Each limiter holds at most 100,000 keys: refilled buckets are
   swept first, and if every bucket is in debt a new address goes through
   unbudgeted rather than evict someone mid-penalty.
 - **Outbound.** A user may hold 1,000 subscriptions

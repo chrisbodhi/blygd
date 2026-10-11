@@ -101,8 +101,9 @@ func (l *Limits) SetNow(now func() time.Time) {
 }
 
 // clientAddr is the address a budget is charged to: the peer, or behind a
-// trusted proxy the address it saw. IPv6 is taken per /64, the block one
-// subscriber usually holds.
+// trusted proxy the address it saw. Public IPv6 is taken per /64, the
+// block one subscriber usually holds; loopback and private addresses
+// (a tailnet puts every device in one /64) are kept whole.
 func clientAddr(r *http.Request, trustProxy bool) string {
 	host := r.RemoteAddr
 	if trustProxy {
@@ -118,7 +119,7 @@ func clientAddr(r *http.Request, trustProxy bool) string {
 	if ip == nil {
 		return host
 	}
-	if ip.To4() == nil {
+	if ip.To4() == nil && ip.IsGlobalUnicast() && !ip.IsPrivate() {
 		return ip.Mask(net.CIDRMask(64, 128)).String() + "/64"
 	}
 	return ip.String()
