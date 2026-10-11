@@ -225,6 +225,42 @@
         }
       }
     },
+    "/api/origin/export": {
+      "get": {
+        "operationId": "exportOrigin",
+        "tags": [
+          "origin"
+        ],
+        "summary": "The origin as a static deployment: a gzipped tar.",
+        "description": "Every surface file at its origin-relative path, with directory pages (the feed page, permalink pages, pinned version pages) as `index.html`, plus every media file a published version references. Serve it at the origin's base URL: every URL inside is absolute against it. A static deployment advertises no Webmention endpoint (§15.1, §15.7), so the export is rendered with mentions off: no manifest `webmention` key and no `rel=\"webmention\"` links, whatever the origin's setting. Pins are their stored bytes. Nothing is written. Drafts, hopper pages and the webmention endpoint are not part of it.",
+        "security": [
+          {
+            "bearer": [
+              "items:read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The archive, as `blyg-YYYYMMDD.tar.gz`.",
+            "content": {
+              "application/gzip": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
     "/api/items": {
       "get": {
         "operationId": "listItems",

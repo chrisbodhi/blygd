@@ -388,6 +388,27 @@ hopper is that, at `{origin}h/{slug}/`.
   time a hopper goes public, its slug freezes for good, through renames
   and going private again.
 
+## Static export (Phase 4)
+
+`blygd export <handle>` and `GET /api/origin/export` (scope `items:read`:
+it is all public) write an origin as a gzipped tar a plain static host can
+serve: every surface file at its origin-relative path, directory pages as
+`index.html`, and the media a published version references.
+
+- **No endpoint.** A static deployment advertises none (§15.1, §15.7), so
+  the export re-renders the origin with `accept_mentions` off into memory:
+  no manifest `webmention` key, no `rel="webmention"` link. The renders
+  write through `surfaceOut`; the database writer is the usual one.
+- **Pins are their stored bytes**, as `putFile` keeps them: write-once.
+- **Writes nothing.** One read-only, repeatable-read transaction, so the
+  stored pins and the fresh renders are one snapshot.
+- **Served at the base URL only.** Every URL inside is absolute against
+  the origin's `base_url`; a copy served elsewhere points back here. To
+  publish at another URL, the origin's `base_url` must be that URL.
+- Not included: drafts, public hopper pages (served live) and the
+  webmention endpoint. Exporting sends no mentions (§15.7 permits it, does
+  not require it).
+
 ## Outbound fetching
 
 Every outbound request goes through `internal/fetch`. Every URL it touches

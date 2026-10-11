@@ -23,6 +23,27 @@ const (
 	TypeOPML = "text/x-opml; charset=utf-8"
 )
 
+// surfaceOut receives what a render produces. The database is the usual
+// destination (dbOut); Export renders into memory instead.
+type surfaceOut interface {
+	put(ctx context.Context, path, ctype string, body []byte, permanent, immutable bool) error
+	remove(ctx context.Context, path string) error
+}
+
+// dbOut writes an origin's surface files in the render's transaction.
+type dbOut struct {
+	tx       pgx.Tx
+	originID int64
+}
+
+func (d dbOut) put(ctx context.Context, path, ctype string, body []byte, permanent, immutable bool) error {
+	return putFile(ctx, d.tx, d.originID, path, ctype, body, permanent, immutable)
+}
+
+func (d dbOut) remove(ctx context.Context, path string) error {
+	return deleteFile(ctx, d.tx, d.originID, path)
+}
+
 // putFile writes one surface file. Pins are write-once: the first render is
 // the promise, and a later render (say, after a code change in field order)
 // must not alter promised bytes, so they insert-or-ignore.
@@ -51,6 +72,10 @@ func putFile(ctx context.Context, tx pgx.Tx, originID int64, path, ctype string,
 
 // renderAll re-renders every item and the aggregates.
 func (s *Studio) renderAll(ctx context.Context, tx pgx.Tx, o *Origin) error {
+	return s.renderAllTo(ctx, tx, dbOut{tx, o.ID}, o)
+}
+
+func (s *Studio) renderAllTo(ctx context.Context, tx pgx.Tx, out surfaceOut, o *Origin) error {
 	rows, err := tx.Query(ctx, `SELECT id FROM items WHERE origin_id = $1 AND version > 0`, o.ID)
 	if err != nil {
 		return err
@@ -60,16 +85,20 @@ func (s *Studio) renderAll(ctx context.Context, tx pgx.Tx, o *Origin) error {
 		return err
 	}
 	for _, id := range ids {
-		if err := s.renderItem(ctx, tx, o, id); err != nil {
+		if err := s.renderItemTo(ctx, tx, out, o, id); err != nil {
 			return err
 		}
 	}
-	return s.renderAggregates(ctx, tx, o)
+	return s.renderAggregatesTo(ctx, tx, out, o)
 }
 
 // renderItem writes items/{id}.json, every pin of the item, and its
 // permalink page.
 func (s *Studio) renderItem(ctx context.Context, tx pgx.Tx, o *Origin, id string) error {
+	return s.renderItemTo(ctx, tx, dbOut{tx, o.ID}, o, id)
+}
+
+func (s *Studio) renderItemTo(ctx context.Context, tx pgx.Tx, out surfaceOut, o *Origin, id string) error {
 	it, err := scanItem(tx.QueryRow(ctx, `SELECT `+itemCols+` FROM items WHERE origin_id = $1 AND id = $2`, o.ID, id))
 	if err != nil {
 		return err
@@ -94,7 +123,7 @@ func (s *Studio) renderItem(ctx context.Context, tx pgx.Tx, o *Origin, id string
 	if err != nil {
 		return err
 	}
-	if err := putFile(ctx, tx, o.ID, "items/"+id+".json", TypeJSON, body, true, false); err != nil {
+	if err := out.put(ctx, "items/"+id+".json", TypeJSON, body, true, false); err != nil {
 		return err
 	}
 
@@ -108,7 +137,7 @@ func (s *Studio) renderItem(ctx context.Context, tx pgx.Tx, o *Origin, id string
 		if err != nil {
 			return err
 		}
-		if err := putFile(ctx, tx, o.ID, fmt.Sprintf("items/%s/v%d.json", id, v.Version), TypeJSON, pb, true, true); err != nil {
+		if err := out.put(ctx, fmt.Sprintf("items/%s/v%d.json", id, v.Version), TypeJSON, pb, true, true); err != nil {
 			return err
 		}
 		// §8.4: the pin's human twin. Permanent like the JSON, but not
@@ -122,7 +151,7 @@ func (s *Studio) renderItem(ctx context.Context, tx pgx.Tx, o *Origin, id string
 		if err != nil {
 			return err
 		}
-		if err := putFile(ctx, tx, o.ID, blyg.PinnedPage(*it.Page, v.Version), TypeHTML, pp, true, false); err != nil {
+		if err := out.put(ctx, blyg.PinnedPage(*it.Page, v.Version), TypeHTML, pp, true, false); err != nil {
 			return err
 		}
 	}
@@ -141,7 +170,7 @@ func (s *Studio) renderItem(ctx context.Context, tx pgx.Tx, o *Origin, id string
 		return err
 	}
 	// §5.8: an endcap's page is 200 forever, like its document.
-	return putFile(ctx, tx, o.ID, *it.Page, TypeHTML, page, true, false)
+	return out.put(ctx, *it.Page, TypeHTML, page, true, false)
 }
 
 func pageSite(o *Origin) blyg.PageSite {
@@ -263,6 +292,10 @@ func pinDoc(o *Origin, it *Item, v *Version) *blyg.PinDoc {
 // renderAggregates writes items/index.json, feed.xml, blyg.json and the
 // feed page — everything derived from the whole origin.
 func (s *Studio) renderAggregates(ctx context.Context, tx pgx.Tx, o *Origin) error {
+	return s.renderAggregatesTo(ctx, tx, dbOut{tx, o.ID}, o)
+}
+
+func (s *Studio) renderAggregatesTo(ctx context.Context, tx pgx.Tx, out surfaceOut, o *Origin) error {
 	// ── archive index (§6.2): every published item, withdrawn included.
 	rows, err := tx.Query(ctx, `SELECT i.id, v.kind, i.first_published_at, i.published_at, i.version
 		FROM items i JOIN item_versions v ON v.item_id = i.id AND v.version = i.version
@@ -295,7 +328,7 @@ func (s *Studio) renderAggregates(ctx context.Context, tx pgx.Tx, o *Origin) err
 	if err != nil {
 		return err
 	}
-	if err := putFile(ctx, tx, o.ID, "items/index.json", TypeJSON, body, false, false); err != nil {
+	if err := out.put(ctx, "items/index.json", TypeJSON, body, false, false); err != nil {
 		return err
 	}
 
@@ -337,7 +370,7 @@ func (s *Studio) renderAggregates(ctx context.Context, tx pgx.Tx, o *Origin) err
 	feed := blyg.RenderFeed(blyg.FeedChannel{
 		Origin: o.BaseURL, Title: title, Description: o.Description, Level: s.Level, BuiltAt: latest,
 	}, entries)
-	if err := putFile(ctx, tx, o.ID, "feed.xml", TypeRSS, feed, false, false); err != nil {
+	if err := out.put(ctx, "feed.xml", TypeRSS, feed, false, false); err != nil {
 		return err
 	}
 
@@ -348,10 +381,10 @@ func (s *Studio) renderAggregates(ctx context.Context, tx pgx.Tx, o *Origin) err
 		return err
 	}
 	if len(roll) > 0 {
-		if err := putFile(ctx, tx, o.ID, "blogroll.opml", TypeOPML, blyg.RenderOPML(title+" — blogroll", roll), false, false); err != nil {
+		if err := out.put(ctx, "blogroll.opml", TypeOPML, blyg.RenderOPML(title+" — blogroll", roll), false, false); err != nil {
 			return err
 		}
-	} else if err := deleteFile(ctx, tx, o.ID, "blogroll.opml"); err != nil {
+	} else if err := out.remove(ctx, "blogroll.opml"); err != nil {
 		return err
 	}
 
@@ -375,7 +408,7 @@ func (s *Studio) renderAggregates(ctx context.Context, tx pgx.Tx, o *Origin) err
 	if err != nil {
 		return err
 	}
-	if err := putFile(ctx, tx, o.ID, "blyg.json", TypeJSON, mb, false, false); err != nil {
+	if err := out.put(ctx, "blyg.json", TypeJSON, mb, false, false); err != nil {
 		return err
 	}
 
@@ -408,7 +441,7 @@ func (s *Studio) renderAggregates(ctx context.Context, tx pgx.Tx, o *Origin) err
 	if err != nil {
 		return err
 	}
-	return putFile(ctx, tx, o.ID, "", TypeHTML, fp, false, false)
+	return out.put(ctx, "", TypeHTML, fp, false, false)
 }
 
 // SurfaceFile is one stored surface file.

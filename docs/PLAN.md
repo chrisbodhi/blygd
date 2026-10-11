@@ -112,7 +112,9 @@ Left for later:
   per-mention approval, no swap after approval, host and domain blocks.
   See DESIGN.md "Responses and harassment".)*
 - **Static export:** tar `surface_files`, omitting the manifest
-  `webmention` key (§15.7).
+  `webmention` key (§15.7). *(Done: `blygd export` and
+  `GET /api/origin/export`, with published media and no
+  `rel="webmention"` either. Valid only at the origin's `base_url`.)*
 - **Custom domains** with automatic TLS (certmagic). `base_url` already
   carries the full URL.
 - **Studio discovery** via an HTML `rel` link on a studio page;

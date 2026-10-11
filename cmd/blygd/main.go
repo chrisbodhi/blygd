@@ -7,6 +7,7 @@
 //	blygd user add <handle> [title]          create a user, their origin and an owner token
 //	blygd token mint <handle> <name> <scope>…  mint a scoped token (paste-a-token path, §16.6)
 //	blygd rebuild <handle>                   re-render an origin's surface
+//	blygd export <handle> > site.tar.gz      write an origin's static export (§15.7)
 package main
 
 import (
@@ -50,6 +51,7 @@ var usage = `usage:
   blygd user add <handle> [title]
   blygd token mint <handle> <name> <scope>...
   blygd rebuild <handle>
+  blygd export <handle> > site.tar.gz
 
 scopes: * ` + strings.Join(account.AllScopes, " ")
 
@@ -117,6 +119,19 @@ func run(log *slog.Logger, args []string) error {
 			return err
 		}
 		return st.Rebuild(ctx, o.ID)
+	case len(args) == 2 && args[0] == "export":
+		uid, err := accts.UserByHandle(ctx, args[1])
+		if err != nil {
+			return fmt.Errorf("no user %q", args[1])
+		}
+		o, err := st.OriginForOwner(ctx, uid)
+		if err != nil {
+			return err
+		}
+		if fi, err := os.Stdout.Stat(); err == nil && fi.Mode()&os.ModeCharDevice != 0 {
+			return errors.New("export writes a gzipped tar to stdout: redirect it to a file")
+		}
+		return st.Export(ctx, o.ID, os.Stdout)
 	}
 	return errors.New(usage)
 }

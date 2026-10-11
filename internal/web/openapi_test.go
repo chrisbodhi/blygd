@@ -3,6 +3,7 @@ package web
 import (
 	"encoding/json"
 	"fmt"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -149,8 +150,9 @@ func TestOpenAPIIsServedWithoutAToken(t *testing.T) {
 // not every keyword: required members present, no undocumented members
 // where additionalProperties is false, arrays, oneOf, and JSON types. The
 // e2e tests call it on every API response, so a renamed or added field
-// fails until the document follows.
-func checkResponse(t *testing.T, method, path string, status int, body []byte) {
+// fails until the document follows. A body that is not JSON must carry a
+// media type the document lists for that status.
+func checkResponse(t *testing.T, method, path string, status int, ctype string, body []byte) {
 	t.Helper()
 	if path == openAPIPath {
 		return
@@ -179,6 +181,13 @@ func checkResponse(t *testing.T, method, path string, status int, body []byte) {
 	content, _ := resp["content"].(map[string]any)
 	if content == nil {
 		t.Errorf("openapi: %s %s %d documents no body, got %s", method, pattern, status, body)
+		return
+	}
+	mt, _, _ := mime.ParseMediaType(ctype)
+	if mt != "application/json" {
+		if content[mt] == nil {
+			t.Errorf("openapi: %s %s %d: %q is not a documented media type", method, pattern, status, ctype)
+		}
 		return
 	}
 	schema := content["application/json"].(map[string]any)["schema"].(map[string]any)

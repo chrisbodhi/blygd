@@ -61,6 +61,7 @@ func (a *API) routes() []route {
 		{"GET /api/events", "", a.streamEvents},
 		{"GET /api/origin", account.ScopeItemsRead, a.getOrigin},
 		{"PATCH /api/origin", account.ScopeOriginWrite, a.patchOrigin},
+		{"GET /api/origin/export", account.ScopeItemsRead, a.exportOrigin},
 
 		{"GET /api/items", account.ScopeItemsRead, a.listItems},
 		{"POST /api/items", account.ScopeItemsWrite, a.createItem},
@@ -252,6 +253,45 @@ func (a *API) getOrigin(w http.ResponseWriter, r *http.Request) error {
 	}
 	writeJSON(w, 200, viewOrigin(o))
 	return nil
+}
+
+// exportOrigin streams the origin's static export (studio.Export). It is
+// all public already, so reading items is enough. Headers go out with the
+// first byte, so a failure before then is an ordinary error response; a
+// failure after it aborts the connection rather than end a truncated
+// archive cleanly.
+func (a *API) exportOrigin(w http.ResponseWriter, r *http.Request) error {
+	o, err := a.origin(r)
+	if err != nil {
+		return err
+	}
+	lw := &lazyHeaders{w: w, set: func(h http.Header) {
+		h.Set("Content-Type", "application/gzip")
+		h.Set("Content-Disposition", `attachment; filename="blyg-`+time.Now().UTC().Format("20060102")+`.tar.gz"`)
+	}}
+	if err := a.Studio.Export(r.Context(), o.ID, lw); err != nil {
+		if !lw.started {
+			return err
+		}
+		a.Log.Error("export", "origin", o.BaseURL, "err", err)
+		panic(http.ErrAbortHandler)
+	}
+	return nil
+}
+
+// lazyHeaders sets response headers on the first write.
+type lazyHeaders struct {
+	w       http.ResponseWriter
+	set     func(http.Header)
+	started bool
+}
+
+func (l *lazyHeaders) Write(p []byte) (int, error) {
+	if !l.started {
+		l.started = true
+		l.set(l.w.Header())
+	}
+	return l.w.Write(p)
 }
 
 func (a *API) patchOrigin(w http.ResponseWriter, r *http.Request) error {
