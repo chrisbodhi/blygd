@@ -286,6 +286,9 @@ type itemView struct {
 	State    string            `json:"state"`
 	URL      string            `json:"url,omitempty"`
 	Versions []*studio.Version `json:"versions,omitempty"`
+	// Listings only.
+	ContentHTML        string `json:"content_html,omitempty"`
+	UnpublishedChanges bool   `json:"unpublished_changes,omitempty"`
 }
 
 func viewItem(o *studio.Origin, it *studio.Item, vs []*studio.Version) itemView {
@@ -307,8 +310,10 @@ func (a *API) listItems(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	out := make([]itemView, 0, len(items))
-	for _, it := range items {
-		out = append(out, viewItem(o, it, nil))
+	for _, li := range items {
+		v := viewItem(o, li.Item, nil)
+		v.ContentHTML, v.UnpublishedChanges = li.ContentHTML, li.UnpublishedChanges
+		out = append(out, v)
 	}
 	writeJSON(w, 200, map[string]any{"items": out})
 	return nil

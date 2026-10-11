@@ -210,6 +210,27 @@ func TestGeneratedSpans(t *testing.T) {
 	}
 }
 
+// WireMD is what Compose would put on the wire, without resolving
+// anything; the studio compares it with a published version.
+func TestWireMDMatchesCompose(t *testing.T) {
+	for _, md := range []string{
+		"Plain *words*.",
+		"Intro [TK]impyrt claude-x=pasted words[/TK] end.\n\n[TK]summarize ![[" + ownID + "]][=]A **block**.[/TK]\n\nTail.",
+		"a [TK]impyrt=b\n\nc[/TK] d",
+		"`[TK]x[/TK]`",
+	} {
+		got, ok := WireMD(md)
+		if out := compose(t, md, false, GenMeta{}, GenMeta{Model: "m-1"}); !ok || got != out.ContentMD {
+			t.Errorf("%q: WireMD %q (ok %v), Compose %q", md, got, ok, out.ContentMD)
+		}
+	}
+	for _, md := range []string{"x [TK]never closed", "[TK]write something[/TK]"} {
+		if _, ok := WireMD(md); ok {
+			t.Errorf("%q: WireMD ok for a draft that cannot publish", md)
+		}
+	}
+}
+
 func TestGeneratedSpanAcrossParagraphsStaysNested(t *testing.T) {
 	out := compose(t, "a [TK]impyrt=b\n\nc[/TK] d", false)
 	clean(t, out)

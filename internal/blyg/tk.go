@@ -119,6 +119,23 @@ type genSpan struct {
 	scope      int
 }
 
+// WireMD is the content_md a draft publishes as: its [TK] grammar removed,
+// each scope's output kept (§5.7). ok is false when the scopes do not
+// parse, or one has no output yet, so the draft cannot publish as it is.
+func WireMD(draft string) (md string, ok bool) {
+	scopes, errs := parseScopes(draft)
+	if len(errs) > 0 {
+		return "", false
+	}
+	for _, s := range scopes {
+		if !s.hasOutput {
+			return "", false
+		}
+	}
+	md, _ = stripScopes(draft, scopes)
+	return md, true
+}
+
 // stripScopes removes every scope's grammar and keeps its output in place:
 // the wire content_md (§5.7: no authoring grammar reaches the wire).
 func stripScopes(md string, scopes []tkScope) (string, []genSpan) {

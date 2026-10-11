@@ -47,9 +47,10 @@ func (it *Item) State() string {
 
 const itemCols = `id, origin_id, authored_kind, draft_md, draft_note, version, withdrawn, page, forked_from, draft_stub_of, draft_generation, first_published_at, published_at, created_at, draft_updated_at`
 
-func scanItem(row pgx.Row) (*Item, error) {
+// scanItem scans itemCols, then any extra columns into extra.
+func scanItem(row pgx.Row, extra ...any) (*Item, error) {
 	var it Item
-	err := row.Scan(&it.ID, &it.OriginID, &it.Kind, &it.DraftMD, &it.DraftNote, &it.Version, &it.Withdrawn, &it.Page, &it.ForkedFrom, &it.StubOf, &it.Generation, &it.FirstPublishedAt, &it.PublishedAt, &it.CreatedAt, &it.DraftUpdatedAt)
+	err := row.Scan(append([]any{&it.ID, &it.OriginID, &it.Kind, &it.DraftMD, &it.DraftNote, &it.Version, &it.Withdrawn, &it.Page, &it.ForkedFrom, &it.StubOf, &it.Generation, &it.FirstPublishedAt, &it.PublishedAt, &it.CreatedAt, &it.DraftUpdatedAt}, extra...)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, notFound("item not found")
 	}
@@ -118,9 +119,20 @@ func (s *Studio) GetItem(ctx context.Context, originID int64, id string) (*Item,
 	return it, vs, err
 }
 
+// ListedItem is an item in a listing, with what its current version shows.
+type ListedItem struct {
+	*Item
+	// ContentHTML is the current version's content_html: empty for a draft
+	// never published, and for a withdrawal.
+	ContentHTML string
+	// UnpublishedChanges: a published item's draft would publish as
+	// different content_md from its current version's.
+	UnpublishedChanges bool
+}
+
 // ListItems lists an origin's items, newest activity first. state filters
 // to draft, published or withdrawn; empty means all.
-func (s *Studio) ListItems(ctx context.Context, originID int64, state string, limit int) ([]*Item, error) {
+func (s *Studio) ListItems(ctx context.Context, originID int64, state string, limit int) ([]*ListedItem, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
@@ -136,19 +148,29 @@ func (s *Studio) ListItems(ctx context.Context, originID int64, state string, li
 	default:
 		return nil, invalid("unknown state %q", state)
 	}
-	rows, err := s.Pool.Query(ctx, `SELECT `+itemCols+` FROM items WHERE origin_id = $1`+cond+
+	rows, err := s.Pool.Query(ctx, `SELECT `+itemCols+`, coalesce(v.html, ''), coalesce(v.md, '')
+		FROM items LEFT JOIN LATERAL (SELECT content_html AS html, content_md AS md FROM item_versions
+			WHERE item_id = items.id AND item_versions.version = items.version) v ON true
+		WHERE origin_id = $1`+cond+
 		` ORDER BY greatest(published_at, draft_updated_at) DESC, id LIMIT $2`, originID, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []*Item
+	var out []*ListedItem
 	for rows.Next() {
-		it, err := scanItem(rows)
+		var li ListedItem
+		var publishedMD string
+		var err error
+		li.Item, err = scanItem(rows, &li.ContentHTML, &publishedMD)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, it)
+		if li.State() == "published" {
+			md, ok := blyg.WireMD(li.DraftMD)
+			li.UnpublishedChanges = !ok || md != publishedMD
+		}
+		out = append(out, &li)
 	}
 	return out, rows.Err()
 }

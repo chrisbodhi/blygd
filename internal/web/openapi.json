@@ -2692,6 +2692,14 @@
               "$ref": "#/components/schemas/Version"
             },
             "description": "Every published version, on GET /api/items/{id}."
+          },
+          "content_html": {
+            "type": "string",
+            "description": "The current version's content_html, on GET /api/items only. Absent for a draft never published and for a withdrawn item. It bakes other origins' bytes (§10.2): sanitize before rendering (§14)."
+          },
+          "unpublished_changes": {
+            "type": "boolean",
+            "description": "On GET /api/items only: present and true when a published item's draft differs from its current version, so publishing would change it."
           }
         },
         "required": [

@@ -356,11 +356,22 @@ async function viewItems() {
   );
 }
 
+// A card shows what readers see: the current version as rendered. A draft
+// never published, or a withdrawal, has nothing rendered and shows its
+// markdown. Tapping opens the editor; a link opens the link.
 function itemCard(it) {
-  return h("div", { class: "card tap", onclick: () => (location.hash = "#item/" + it.id) },
+  let text;
+  if (it.content_html) {
+    text = h("div", { class: "rich clipped" }, richOf(it.content_html));
+    overflowWatch.observe(text);
+  } else {
+    text = h("div", { class: "text" }, clip(it.draft_md, 240) || h("span", { class: "muted" }, "(empty)"));
+  }
+  return h("div", { class: "card tap", onclick: (e) => { if (!e.target.closest("a")) location.hash = "#item/" + it.id; } },
     h("div", {}, h("span", { class: "badge " + it.state }, it.state), h("span", { class: "badge" }, it.kind),
-      it.version ? h("span", { class: "badge" }, "v" + it.version) : null),
-    h("div", { class: "text" }, clip(it.draft_md, 240) || h("span", { class: "muted" }, "(empty)")),
+      it.version ? h("span", { class: "badge" }, "v" + it.version) : null,
+      it.unpublished_changes ? h("span", { class: "badge draft" }, "edited") : null),
+    text,
     h("div", { class: "meta" }, "edited " + when(it.draft_updated_at)));
 }
 
