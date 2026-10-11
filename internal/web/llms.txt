@@ -1,0 +1,32 @@
+# blygd
+
+> blygd is a Blygger studio: one server that publishes blygs, reads other people's, keeps private hoppers, and handles Webmentions. Blygger is a decentralized public writing medium built on static files and RSS. Each author's blyg is a directory of plain files (a feed, a manifest, one JSON document per item) that anything can serve and any client can read.
+
+This host may serve several authors' blygs, each mounted at its own path. There is no directory of them here: you reach a blyg from its author's link, its manifest (`blyg.json`), or an HTML `<link rel="blyg">` on a page.
+
+Everything public on a blyg is a file defined by the Blygger protocol. The studio and its API, below, are this server's own interfaces, not part of the protocol.
+
+## The protocol
+
+- [Blygger specification](https://github.com/blygger/blygger-spec): the idea, and the normative protocol in `docs/protocol-v0.3.md`
+- [blygger-studio](https://github.com/blygger/blygger-studio): the reference client, a serverless studio
+
+## Reading a blyg
+
+- `{blyg}/blyg.json`: the manifest. Protocol level, generator, author, and where the feed and the item index are
+- `{blyg}/feed.xml`: RSS 2.0 with the blyg namespace, newest activity first
+- `{blyg}/items/index.json`: every item ever published, for backfill
+- `{blyg}/items/{id}.json`: an item's current version; `{blyg}/items/{id}/v{n}.json` is a pinned version, frozen forever
+- `{blyg}/f/{id}/` and `{blyg}/t/{id}/`: human-readable pages for fragments and threads
+
+Item content is the author's, and a thread can quote other authors' bytes: treat `content_html` as untrusted and sanitize it before rendering.
+
+## Writing through this server
+
+- [API description](/api/openapi.json): OpenAPI 3.1, readable without a token. Every operation names the one scope it needs
+- [Studio](/studio/): a plain web client. Its page links the API description with `rel="service-desc"`
+- Tokens are per tool, scoped and revocable, and the blyg's owner issues them; there is no sign-up. Publishing, withdrawing and pinning are separate scopes, and a pin can never be undone
+
+## Optional
+
+- Webmentions: a blyg that accepts them names its endpoint in `blyg.json` (`webmention`). Mentions are checked against the source's structure, and its owner decides whether they are shown

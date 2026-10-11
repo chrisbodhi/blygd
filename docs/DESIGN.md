@@ -107,6 +107,12 @@ has a test.
 - The API is **host-rooted** at `/api/`, never inside an origin: a studio
   and its API are client internals, not protocol (§15.1, §16.6). Handles
   that would collide with host-rooted routes are reserved.
+- `/llms.txt` (llmstxt.org) is host-rooted too: a static, embedded
+  description of the service and where to read more (the spec, the
+  reference client, `/api/openapi.json`, `/studio/`). It names no origin
+  and lists no users, so it says nothing about who publishes here. No
+  handle can contain a dot, and no surface file is called `llms.txt`, so
+  it shadows nothing, even at a future root-mounted custom domain.
 
 ## Webmentions (§15)
 

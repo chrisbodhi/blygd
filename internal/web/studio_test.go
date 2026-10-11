@@ -71,4 +71,29 @@ func TestStudioPageLinksTheWriteSurface(t *testing.T) {
 	}
 }
 
+// llms.txt is served at the host root, points at the API description
+// and the spec, and every host-relative link in it resolves.
+func TestLLMSTxt(t *testing.T) {
+	h := Router(&API{}, &Surface{}, discardLog())
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/llms.txt", nil))
+	body := rec.Body.String()
+	if rec.Code != 200 || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/plain") || !strings.HasPrefix(body, "# blygd\n\n> ") {
+		t.Fatalf("llms.txt: %d %q %.80q", rec.Code, rec.Header().Get("Content-Type"), body)
+	}
+	for _, want := range []string{"(/api/openapi.json)", "(/studio/)", "https://github.com/blygger/blygger-spec"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("llms.txt lacks %s", want)
+		}
+	}
+	// Every host-relative link resolves on this server.
+	for _, m := range regexp.MustCompile(`\]\((/[^)]*)\)`).FindAllStringSubmatch(body, -1) {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", m[1], nil))
+		if rec.Code != 200 {
+			t.Errorf("llms.txt links %s: %d", m[1], rec.Code)
+		}
+	}
+}
+
 func discardLog() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }

@@ -1,10 +1,19 @@
 package web
 
 import (
+	_ "embed"
 	"log/slog"
 	"net/http"
 	"time"
 )
+
+// llmsTxt says what this service is and where to read more (llmstxt.org).
+// It lives at the host root beside /api/ and /studio/: it describes the
+// service, never one origin, and lists no users. Handles cannot contain a
+// dot, so no origin can claim the path.
+//
+//go:embed llms.txt
+var llmsTxt []byte
 
 // Router joins the host-rooted API with the origin surfaces.
 func Router(api *API, surface *Surface, log *slog.Logger) http.Handler {
@@ -19,6 +28,12 @@ func Router(api *API, surface *Surface, log *slog.Logger) http.Handler {
 	})
 	mux.Handle("GET /studio/", studioHandler())
 	mux.Handle("GET /studio", http.RedirectHandler("/studio/", http.StatusMovedPermanently))
+	mux.HandleFunc("GET /llms.txt", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Write(llmsTxt) //nolint:errcheck
+	})
 	mux.Handle("/", surface)
 	return logRequests(mux, log)
 }
