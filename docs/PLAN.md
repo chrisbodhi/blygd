@@ -188,6 +188,29 @@ thumb.
 - **Deploy.** One binary under systemd, Caddy in front for TLS until
   custom domains move TLS in-process, nightly `pg_dump`. Set
   `BLYGD_TRUST_PROXY=true` behind Caddy.
+- **Security posture: malicious and overeager requests.** Today's limits
+  are local: mention receipt per host, domain and globally (§15.3), 8
+  event streams per user, a 1 MiB JSON body cap, the media cap, server
+  timeouts, and bounded outbound fetches. The API itself has no request
+  rate limit, so one token (a buggy script, an agent in a loop) or one
+  stranger can spend as much as it likes. Before the first public tenant:
+  - **Per-token and per-user API budgets**, with 429 and `Retry-After`,
+    and stricter ones for the expensive routes: export (renders the whole
+    origin in memory; a large one can also outrun the 60 s write
+    timeout), rebuild, subscribe and poll-now (each turns one request
+    into several outbound fetches), and media upload.
+  - **Per-address limits on the unauthenticated surface:** origin files,
+    live hopper pages, the webmention endpoint and failed bearer
+    attempts, which are logged but not throttled.
+  - **Outbound amplification:** a cap on subscriptions per user and on
+    fetches per user per hour, so blygd cannot be steered into hammering
+    a third party.
+  - **Abuse visibility:** count 401s, 403s and 429s per token and address
+    in the request logs, so a misbehaving tool is easy to spot and
+    revoke.
+  - A pass over every route for what it costs and who can call it, run
+    again whenever the MCP transport lands, since agents call tools
+    eagerly.
 - **Observability.** Request logs exist. Add queue-depth gauges for the
   mention tables, and the poller, before the first public tenant. The
   poller records `last_error`, `poll_failures` and `lossy` per remote
