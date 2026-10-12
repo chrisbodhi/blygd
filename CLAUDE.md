@@ -17,6 +17,7 @@ current text rather than relying on memory or on these docs.
 ```sh
 make test          # unit tests; database tests skip without a database
 make test-all      # everything, against a local Postgres 18
+make vuln          # govulncheck: known vulnerabilities on paths blygd calls
 make run           # serve on :8080 against BLYGD_DATABASE_URL
 make parity REFERENCE=path/to/blygger-studio   # differential tests vs the reference
 make interop REFERENCE=path/to/blygger-studio  # live: both studios, each subscribed to the other

@@ -2,13 +2,17 @@
 # URL, the client connects as the current OS user (the Homebrew default).
 BLYGD_TEST_DATABASE_URL ?= postgres://localhost:5432/postgres?sslmode=disable
 
-.PHONY: build test test-all run vet parity interop
+.PHONY: build test test-all run vet vuln parity interop
 
 build:
 	go build -o bin/blygd ./cmd/blygd
 
 vet:
 	go vet ./...
+
+# Known vulnerabilities in the code paths blygd calls (needs the network).
+vuln:
+	go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
 test:
 	go test ./...

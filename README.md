@@ -15,7 +15,7 @@ work. Media, public hoppers and custom domains (Phase 4) are next.
 
 ## Run it
 
-Requirements: Go 1.25+ and Postgres 18.
+Requirements: Go 1.26+ and Postgres 18.
 
 ```sh
 go mod tidy    # once, to fill go.sum
