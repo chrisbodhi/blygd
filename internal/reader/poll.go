@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/chrisbodhi/blygd/internal/batch"
 	"github.com/chrisbodhi/blygd/internal/blyg"
 	"github.com/chrisbodhi/blygd/internal/events"
 	"github.com/chrisbodhi/blygd/internal/fetch"
@@ -22,22 +23,7 @@ func (r *Reader) Run(ctx context.Context) {
 		idle = 10 * time.Second
 	}
 	log := r.Log.With("worker", "poll")
-	go func() {
-		for {
-			n, err := r.PollBatch(ctx)
-			if err != nil && ctx.Err() == nil {
-				log.Error("batch failed", "err", err)
-			}
-			if n > 0 && err == nil {
-				continue
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(idle):
-			}
-		}
-	}()
+	go batch.Loop(ctx, idle, r.PollBatch, log)
 }
 
 // remote is one leased remote origin.

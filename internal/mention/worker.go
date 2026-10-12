@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/chrisbodhi/blygd/internal/batch"
 	"github.com/chrisbodhi/blygd/internal/events"
 	"github.com/chrisbodhi/blygd/internal/fetch"
 )
@@ -37,9 +38,9 @@ var verifyRetry = []time.Duration{time.Minute, 10 * time.Minute, time.Hour}
 
 // Run runs both loops until ctx ends.
 func (wk *Workers) Run(ctx context.Context) {
-	go loop(ctx, wk.idle(), wk.VerifyBatch, wk.Log.With("worker", "verify"))
-	go loop(ctx, wk.idle(), wk.SendBatch, wk.Log.With("worker", "send"))
-	go loop(ctx, 10*time.Minute, wk.pruneClaims, wk.Log.With("worker", "prune"))
+	go batch.Loop(ctx, wk.idle(), wk.VerifyBatch, wk.Log.With("worker", "verify"))
+	go batch.Loop(ctx, wk.idle(), wk.SendBatch, wk.Log.With("worker", "send"))
+	go batch.Loop(ctx, 10*time.Minute, wk.pruneClaims, wk.Log.With("worker", "prune"))
 }
 
 func (wk *Workers) idle() time.Duration {
@@ -54,23 +55,6 @@ func (wk *Workers) batch() int {
 		return wk.Batch
 	}
 	return 10
-}
-
-func loop(ctx context.Context, idle time.Duration, fn func(context.Context) (int, error), log *slog.Logger) {
-	for {
-		n, err := fn(ctx)
-		if err != nil && ctx.Err() == nil {
-			log.Error("batch failed", "err", err)
-		}
-		if n > 0 && err == nil {
-			continue
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(idle):
-		}
-	}
 }
 
 type inboundClaim struct {
