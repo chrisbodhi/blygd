@@ -14,6 +14,19 @@ import (
 	"github.com/chrisbodhi/blygd/internal/studio"
 )
 
+// Policies for public HTML. Pages share a host with /studio/, whose token
+// sits in localStorage, and carry other origins' bytes in baked quotes.
+// bluemonday sanitizes them (blyg.PageHTML); these are the second wall: no
+// script runs at all, and the sandbox gives the page an opaque origin, so
+// even a script that got past the first could not reach the studio's
+// storage. Pages need only their inline <style>, and images: the origin's
+// media and whatever an author embeds over https. A hopper page shows
+// strangers' excerpts, so it loads no images at all.
+const (
+	pageCSP   = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' https:; base-uri 'none'; form-action 'none'; sandbox allow-popups allow-popups-to-escape-sandbox"
+	hopperCSP = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; sandbox allow-popups allow-popups-to-escape-sandbox"
+)
+
 // Surface serves every own origin's rendered files. It never renders: it
 // serves the bytes the last publish committed, which is what makes the
 // origin indistinguishable from a static host (§4).
@@ -112,6 +125,10 @@ func (h *Surface) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	hd.Set("Content-Type", f.ContentType)
 	hd.Set("ETag", f.ETag)
 	hd.Set("X-Content-Type-Options", "nosniff")
+	if strings.HasPrefix(f.ContentType, "text/html") {
+		hd.Set("Content-Security-Policy", pageCSP)
+		hd.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+	}
 	if f.Immutable {
 		hd.Set("Cache-Control", "public, max-age=31536000, immutable")
 	} else {

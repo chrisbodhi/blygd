@@ -539,6 +539,13 @@ HTML page, CSS and vanilla JS, with no build step. It talks only to
   tenant and the API, so `blyg.PageHTML` sanitizes every `content_html`
   shown on a page (bluemonday's UGC policy, plus the protocol's own
   classes and `data-blyg-*`). The wire keeps the bytes.
+- **Second wall:** every public HTML page is served with a CSP that runs
+  no script (`default-src 'none'`) and sandboxes the page into an opaque
+  origin, so even a sanitizer bypass could not read the studio's token
+  from the same host. Pages may load inline styles and images (the
+  origin's media, and `https:` images authors embed); public hopper pages,
+  which show strangers' excerpts, load no images. `TestPagesRunNoScript`
+  holds every page to it.
 - **Imported content:** stored verbatim and never trusted. §14 requires
   readers to sanitize at render, so the API hands clients verbatim HTML
   plus the obligation to sanitize. A server-rendered reading page, if one

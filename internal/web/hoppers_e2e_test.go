@@ -70,7 +70,7 @@ func TestPublicHoppers(t *testing.T) {
 			t.Errorf("public hopper shows %q", bad)
 		}
 	}
-	if r.header.Get("Link") != "" || r.header.Get("Content-Security-Policy") == "" {
+	if r.header.Get("Link") != "" || r.header.Get("Content-Security-Policy") != hopperCSP {
 		t.Errorf("headers: %v", r.header)
 	}
 	expect(t, alice.get(page, "If-None-Match", r.header.Get("ETag")), 304)

@@ -118,3 +118,31 @@ func TestStaticExport(t *testing.T) {
 		t.Error("export changed the live surface")
 	}
 }
+
+// Every HTML page an origin serves runs no script and gets an opaque
+// origin, so nothing on it can reach the studio's token on the same host;
+// data files carry no page policy.
+func TestPagesRunNoScript(t *testing.T) {
+	e := newEnv(t, mention.DefaultRateLimits)
+	alice := e.user("alice")
+	f := alice.draft(t, map[string]any{"content_md": "One."})
+	alice.publish(t, f, 200)
+	alice.edit(t, f, "Two.")
+	alice.publish(t, f, 200)
+	expect(t, alice.api("POST", "/items/"+f+"/versions/1/pin", nil), 200)
+	page := alice.itemDoc(t, f).Page
+	for _, p := range []string{"", page, blyg.PinnedPage(page, 1)} {
+		r := alice.get(p)
+		expect(t, r, 200)
+		csp := r.header.Get("Content-Security-Policy")
+		if !strings.HasPrefix(csp, "default-src 'none';") || strings.Contains(csp, "script-src") || !strings.Contains(csp, "sandbox") || strings.Contains(csp, "allow-same-origin") {
+			t.Errorf("%q: CSP %q", p, csp)
+		}
+		if r.header.Get("Referrer-Policy") == "" {
+			t.Errorf("%q: no Referrer-Policy", p)
+		}
+	}
+	if csp := alice.get("blyg.json").header.Get("Content-Security-Policy"); csp != "" {
+		t.Errorf("blyg.json carries a page policy: %q", csp)
+	}
+}

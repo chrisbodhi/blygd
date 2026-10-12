@@ -86,7 +86,8 @@ func (h *Surface) serveHopper(w http.ResponseWriter, r *http.Request, o *studio.
 	hd.Set("ETag", etag)
 	hd.Set("Cache-Control", "no-cache") // live: a withdrawal at the source shows on the next request
 	hd.Set("X-Content-Type-Options", "nosniff")
-	hd.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
+	hd.Set("Content-Security-Policy", hopperCSP)
+	hd.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 	if etagMatch(r.Header.Get("If-None-Match"), etag) {
 		w.WriteHeader(http.StatusNotModified)
 		return
