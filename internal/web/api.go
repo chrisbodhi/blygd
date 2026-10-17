@@ -97,6 +97,7 @@ func (a *API) routes() []route {
 	return append(rs,
 		route{"GET /api/tokens", account.ScopeTokensWrite, a.listTokens},
 		route{"POST /api/tokens", account.ScopeTokensWrite, a.mintToken},
+		route{"DELETE /api/tokens/self", "", a.revokeSelf},
 		route{"DELETE /api/tokens/{tid}", account.ScopeTokensWrite, a.revokeToken},
 	)
 }
@@ -247,7 +248,7 @@ func (a *API) me(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	writeJSON(w, 200, map[string]any{"handle": p.Handle, "scopes": p.Scopes, "origin": o.BaseURL})
+	writeJSON(w, 200, map[string]any{"handle": p.Handle, "scopes": p.Scopes, "origin": o.BaseURL, "expires_at": p.ExpiresAt})
 	return nil
 }
 
@@ -906,8 +907,9 @@ func (a *API) listTokens(w http.ResponseWriter, r *http.Request) error {
 
 func (a *API) mintToken(w http.ResponseWriter, r *http.Request) error {
 	var in struct {
-		Name   string   `json:"name"`
-		Scopes []string `json:"scopes"`
+		Name      string   `json:"name"`
+		Scopes    []string `json:"scopes"`
+		ExpiresIn *int64   `json:"expires_in"` // seconds; absent means as long as the minting token
 	}
 	if err := decode(r, &in); err != nil {
 		return err
@@ -919,7 +921,16 @@ func (a *API) mintToken(w http.ResponseWriter, r *http.Request) error {
 			return &httpError{403, "forbidden", "cannot grant scope " + s}
 		}
 	}
-	secret, id, err := a.Accounts.Mint(r.Context(), p.UserID, in.Name, in.Scopes)
+	var want *time.Time
+	if in.ExpiresIn != nil {
+		if *in.ExpiresIn <= 0 {
+			return badRequest("expires_in must be a positive number of seconds")
+		}
+		t := time.Now().Add(time.Duration(*in.ExpiresIn) * time.Second).UTC().Truncate(time.Second)
+		want = &t
+	}
+	expires := p.ExpiryFor(want) // never past the minting token's own expiry
+	secret, id, err := a.Accounts.Mint(r.Context(), p.UserID, in.Name, in.Scopes, expires)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) {
@@ -927,8 +938,19 @@ func (a *API) mintToken(w http.ResponseWriter, r *http.Request) error {
 		}
 		return badRequest(err.Error())
 	}
-	writeJSON(w, 201, map[string]any{"id": id, "token": secret, "scopes": in.Scopes,
+	writeJSON(w, 201, map[string]any{"id": id, "token": secret, "scopes": in.Scopes, "expires_at": expires,
 		"note": "This is the only time the token is shown."})
+	return nil
+}
+
+// revokeSelf revokes the token making the request: signing out. Any token
+// may end itself; ending another takes tokens:write.
+func (a *API) revokeSelf(w http.ResponseWriter, r *http.Request) error {
+	p := principal(r.Context())
+	if _, err := a.Accounts.Revoke(r.Context(), p.UserID, p.TokenID); err != nil {
+		return err
+	}
+	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
 

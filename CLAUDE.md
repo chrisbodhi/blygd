@@ -62,8 +62,8 @@ on the command line or in the environment. Each test gets a fresh database.
 - **Migrations are append-only.** A schema change is a new numbered file
   in `internal/db/migrations/` (tern, run at startup or by
   `blygd migrate`). Never edit one that has shipped: databases already
-  ran it. Record each new file in `migrations.sum`
-  (`shasum -a 256` in that directory), or the test fails. No `{{` in a
+  ran it. Record each new file in `internal/db/migrations.sum`
+  (`shasum -a 256` run inside `migrations/`), or the test fails. No `{{` in a
   migration, because tern parses them as Go templates.
 
 ## Layout

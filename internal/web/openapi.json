@@ -2305,6 +2305,33 @@
         }
       }
     },
+    "/api/tokens/self": {
+      "delete": {
+        "operationId": "revokeSelf",
+        "tags": [
+          "tokens"
+        ],
+        "summary": "Revoke the token making this request: sign out.",
+        "description": "Any token may end itself. Revoking another token takes tokens:write.",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-blygd-cost": "default",
+        "responses": {
+          "204": {
+            "description": "Revoked; the token no longer authenticates."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
     "/api/tokens/{tid}": {
       "parameters": [
         {
@@ -2425,12 +2452,21 @@
           "origin": {
             "type": "string",
             "format": "uri"
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this token stops authenticating; null never."
           }
         },
         "required": [
           "handle",
           "scopes",
-          "origin"
+          "origin",
+          "expires_at"
         ],
         "additionalProperties": false
       },
@@ -3581,6 +3617,14 @@
               "null"
             ],
             "format": "date-time"
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the token stops authenticating; null never."
           }
         },
         "required": [
@@ -3589,7 +3633,8 @@
           "scopes",
           "created_at",
           "last_used_at",
-          "revoked_at"
+          "revoked_at",
+          "expires_at"
         ],
         "additionalProperties": false
       },
@@ -3623,6 +3668,11 @@
               "$ref": "#/components/schemas/Scope"
             },
             "description": "Only scopes the calling token holds."
+          },
+          "expires_in": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Seconds until the token expires. Absent, it expires with the minting token, or never if that never does. Never later than the minting token: a minted token cannot outlive its minter, as it cannot hold a scope its minter lacks."
           }
         },
         "required": [
@@ -3649,13 +3699,22 @@
           },
           "note": {
             "type": "string"
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When it stops authenticating; null never."
           }
         },
         "required": [
           "id",
           "token",
           "scopes",
-          "note"
+          "note",
+          "expires_at"
         ],
         "additionalProperties": false
       },

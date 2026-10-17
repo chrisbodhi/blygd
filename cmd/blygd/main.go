@@ -5,7 +5,7 @@
 //	blygd serve                              run the server (migrates first, unless BLYGD_MIGRATE_ON_START=false)
 //	blygd migrate [status]                   apply pending schema migrations, or report them
 //	blygd user add <handle> [title]          create a user, their origin and an owner token
-//	blygd token mint <handle> <name> <scope>…  mint a scoped token (paste-a-token path, §16.6)
+//	blygd token mint <handle> <name> [--expires 30d] <scope>…  mint a scoped token (paste-a-token path, §16.6)
 //	blygd rebuild <handle>                   re-render an origin's surface
 //	blygd export <handle> > site.tar.gz      write an origin's static export (§15.7)
 package main
@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -49,7 +50,7 @@ var usage = `usage:
   blygd serve
   blygd migrate [status]
   blygd user add <handle> [title]
-  blygd token mint <handle> <name> <scope>...
+  blygd token mint <handle> <name> [--expires 30d] <scope>...
   blygd rebuild <handle>
   blygd export <handle> > site.tar.gz
 
@@ -103,11 +104,18 @@ func run(log *slog.Logger, args []string) error {
 		if err != nil {
 			return fmt.Errorf("no user %q", args[2])
 		}
-		secret, _, err := accts.Mint(ctx, uid, args[3], args[4:])
+		scopes, expires, err := mintArgs(args[4:])
+		if err != nil {
+			return err
+		}
+		secret, _, err := accts.Mint(ctx, uid, args[3], scopes, expires)
 		if err != nil {
 			return err
 		}
 		fmt.Printf("token (shown once): %s\n", secret)
+		if expires != nil {
+			fmt.Printf("expires: %s\n", expires.Format(time.RFC3339))
+		}
 		return nil
 	case len(args) == 2 && args[0] == "rebuild":
 		uid, err := accts.UserByHandle(ctx, args[1])
@@ -134,6 +142,41 @@ func run(log *slog.Logger, args []string) error {
 		return st.Export(ctx, o.ID, os.Stdout)
 	}
 	return errors.New(usage)
+}
+
+// mintArgs splits `token mint`'s trailing arguments into scopes and an
+// optional --expires duration: Go's units (12h, 90m) or whole days (30d).
+func mintArgs(args []string) ([]string, *time.Time, error) {
+	var scopes []string
+	var expires *time.Time
+	for i := 0; i < len(args); i++ {
+		if args[i] != "--expires" {
+			scopes = append(scopes, args[i])
+			continue
+		}
+		if i+1 == len(args) {
+			return nil, nil, errors.New("--expires needs a duration, such as 30d or 12h")
+		}
+		i++
+		d, err := parseDays(args[i])
+		if err != nil || d <= 0 {
+			return nil, nil, fmt.Errorf("--expires %q: want a positive duration, such as 30d or 12h", args[i])
+		}
+		t := time.Now().Add(d).UTC().Truncate(time.Second)
+		expires = &t
+	}
+	if len(scopes) == 0 {
+		return nil, nil, errors.New(usage)
+	}
+	return scopes, expires, nil
+}
+
+func parseDays(s string) (time.Duration, error) {
+	if n, ok := strings.CutSuffix(s, "d"); ok {
+		days, err := strconv.Atoi(n)
+		return time.Duration(days) * 24 * time.Hour, err
+	}
+	return time.ParseDuration(s)
 }
 
 // migrateCmd is `blygd migrate`: apply pending migrations, or with

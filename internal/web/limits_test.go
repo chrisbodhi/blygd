@@ -125,7 +125,7 @@ func TestTokenAndUserBudgets(t *testing.T) {
 	// A second token of the same user has its own export budget, until the
 	// user's runs out.
 	mint := func() *user {
-		secret, _, err := e.accts.Mint(t.Context(), alice.id, "tool", []string{"items:read"})
+		secret, _, err := e.accts.Mint(t.Context(), alice.id, "tool", []string{"items:read"}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

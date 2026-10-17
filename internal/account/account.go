@@ -58,10 +58,22 @@ var ReservedHandles = []string{"api", "admin", "healthz", "static", "studio", "w
 
 // Principal is an authenticated token.
 type Principal struct {
-	UserID  int64
-	Handle  string
-	TokenID int64
-	Scopes  []string
+	UserID    int64
+	Handle    string
+	TokenID   int64
+	Scopes    []string
+	ExpiresAt *time.Time // nil: never
+}
+
+// ExpiryFor is when a token minted by p may expire at the latest: the
+// requested time, but never after p's own expiry. A minted token cannot
+// outlive its minter, as it cannot hold a scope its minter lacks.
+func (p *Principal) ExpiryFor(want *time.Time) *time.Time {
+	if p.ExpiresAt != nil && (want == nil || want.After(*p.ExpiresAt)) {
+		t := *p.ExpiresAt
+		return &t
+	}
+	return want
 }
 
 // Can reports whether the principal holds scope.
@@ -109,7 +121,7 @@ func (a *Accounts) CreateUser(ctx context.Context, handle, publicURL, title stri
 			userID, origin, title).Scan(&originID); err != nil {
 			return err
 		}
-		secret, _, err = mint(ctx, tx, userID, "owner", []string{ScopeAll})
+		secret, _, err = mint(ctx, tx, userID, "owner", []string{ScopeAll}, nil) // the root credential never expires
 		return err
 	})
 	return userID, originID, secret, err
@@ -135,16 +147,17 @@ func (a *Accounts) UserByHandle(ctx context.Context, handle string) (int64, erro
 	return id, err
 }
 
-// Mint creates a token with the given scopes for userID.
-func (a *Accounts) Mint(ctx context.Context, userID int64, name string, scopes []string) (secret string, id int64, err error) {
+// Mint creates a token with the given scopes for userID, expiring at
+// expiresAt, or never when it is nil.
+func (a *Accounts) Mint(ctx context.Context, userID int64, name string, scopes []string, expiresAt *time.Time) (secret string, id int64, err error) {
 	err = pgx.BeginTxFunc(ctx, a.Pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
-		secret, id, err = mint(ctx, tx, userID, name, scopes)
+		secret, id, err = mint(ctx, tx, userID, name, scopes, expiresAt)
 		return err
 	})
 	return secret, id, err
 }
 
-func mint(ctx context.Context, tx pgx.Tx, userID int64, name string, scopes []string) (string, int64, error) {
+func mint(ctx context.Context, tx pgx.Tx, userID int64, name string, scopes []string, expiresAt *time.Time) (string, int64, error) {
 	if strings.TrimSpace(name) == "" {
 		return "", 0, errors.New("token name is required")
 	}
@@ -162,8 +175,11 @@ func mint(ctx context.Context, tx pgx.Tx, userID int64, name string, scopes []st
 	}
 	secret := tokenPrefix + strings.ToLower(tokenEncoding.EncodeToString(raw[:]))
 	var id int64
-	err := tx.QueryRow(ctx, `INSERT INTO tokens (user_id, name, secret_hash, scopes) VALUES ($1, $2, $3, $4) RETURNING id`,
-		userID, name, hashSecret(secret), scopes).Scan(&id)
+	if expiresAt != nil && !expiresAt.After(time.Now()) {
+		return "", 0, errors.New("a token cannot expire in the past")
+	}
+	err := tx.QueryRow(ctx, `INSERT INTO tokens (user_id, name, secret_hash, scopes, expires_at) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+		userID, name, hashSecret(secret), scopes, expiresAt).Scan(&id)
 	return secret, id, err
 }
 
@@ -176,7 +192,8 @@ func (a *Accounts) Authenticate(ctx context.Context, header string) (*Principal,
 	var p Principal
 	err := a.Pool.QueryRow(ctx, `UPDATE tokens t SET last_used_at = now()
 		FROM users u WHERE u.id = t.user_id AND t.secret_hash = $1 AND t.revoked_at IS NULL
-		RETURNING t.user_id, u.handle, t.id, t.scopes`, hashSecret(strings.TrimSpace(secret))).Scan(&p.UserID, &p.Handle, &p.TokenID, &p.Scopes)
+			AND (t.expires_at IS NULL OR t.expires_at > now())
+		RETURNING t.user_id, u.handle, t.id, t.scopes, t.expires_at`, hashSecret(strings.TrimSpace(secret))).Scan(&p.UserID, &p.Handle, &p.TokenID, &p.Scopes, &p.ExpiresAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrUnauthorized
 	}
@@ -194,11 +211,12 @@ type Token struct {
 	CreatedAt  time.Time  `json:"created_at"`
 	LastUsedAt *time.Time `json:"last_used_at"`
 	RevokedAt  *time.Time `json:"revoked_at"`
+	ExpiresAt  *time.Time `json:"expires_at"`
 }
 
 // ListTokens lists a user's tokens.
 func (a *Accounts) ListTokens(ctx context.Context, userID int64) ([]Token, error) {
-	rows, err := a.Pool.Query(ctx, `SELECT id, name, scopes, created_at, last_used_at, revoked_at
+	rows, err := a.Pool.Query(ctx, `SELECT id, name, scopes, created_at, last_used_at, revoked_at, expires_at
 		FROM tokens WHERE user_id = $1 ORDER BY id`, userID)
 	if err != nil {
 		return nil, err

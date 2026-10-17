@@ -448,6 +448,16 @@ mint scopes it holds. `blygd user add` mints the owner's `*` token; that
 is the paste-a-token path §16.6 requires beside any future OAuth-style
 flow.
 
+Tokens may expire (`expires_at`; `expires_in` at mint, `--expires` on the
+CLI), and an expired token is a 401. A minted token never outlives its
+minter, as it never holds a scope its minter lacks: absent or later
+expiries are cut to the minter's (`Principal.ExpiryFor`). The owner token
+never expires; it is the root credential and belongs offline. Any token
+may revoke itself (`DELETE /api/tokens/self`), which is signing out;
+revoking another takes `tokens:write`. Issuing stays separate from the
+policy: a login, when there are users who log in, is one more way to mint
+an expiring, scoped token.
+
 Tools discover the write surface from the studio page (§16.6), never the
 manifest: `/studio/` carries `<link rel="service-desc"
 type="application/openapi+json" href="/api/openapi.json">` (RFC 8631),
