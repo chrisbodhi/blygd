@@ -1,6 +1,7 @@
 // blygd studio: a deliberately plain client for phones and laptops. It talks
-// only to /api/ on this host, with a pasted bearer token kept in this
-// browser's localStorage. Everything shown is built as DOM nodes with text
+// only to /api/ on this host. A pasted token that may mint is traded at once
+// for the studio's own: only the scopes below, expiring in 30 days, kept in
+// this browser's localStorage. The pasted one is never stored. Everything shown is built as DOM nodes with text
 // in them, never parsed from a string: imported content is someone else's
 // HTML (§14): it is parsed inert and rebuilt node by node from an
 // allowlist (richOf), never assigned as markup (studio_test.go enforces it).
@@ -11,6 +12,11 @@ const tabs = document.getElementById("tabs");
 const toastEl = document.getElementById("toast");
 const updatesEl = document.getElementById("updates");
 const TOKEN_KEY = "blygd.token";
+// What the studio calls, and nothing more: no tokens:write (a stolen studio
+// token cannot mint), no origin or hopper settings.
+const STUDIO_SCOPES = ["items:read", "items:write", "items:publish", "items:withdraw", "items:pin",
+  "reader:read", "reader:write", "mentions:read", "mentions:write"];
+const STUDIO_TTL = 30 * 24 * 3600;
 
 // ── small helpers ─────────────────────────────────────────────────────────
 
@@ -324,17 +330,59 @@ function viewSignIn() {
   const input = h("input", { id: "token", name: "token", type: "password", autocomplete: "off", placeholder: "blygd_…" });
   show(
     h("h1", {}, "blygd studio"),
-    h("p", { class: "muted" }, "Paste an API token. It stays in this browser only."),
+    h("p", { class: "muted" }, "Paste your token. If it can mint tokens, the studio keeps a 30-day token of its own, with only the access it needs, and forgets the one you pasted."),
     h("form", {
       onsubmit: async (ev) => {
         ev.preventDefault();
-        localStorage.setItem(TOKEN_KEY, input.value.trim());
+        try {
+          localStorage.setItem(TOKEN_KEY, await studioToken(input.value.trim()));
+        } catch (e) {
+          toast(e.message);
+          return;
+        }
+        input.value = "";
         me = null;
         location.hash = "#items";
         route();
       },
     }, h("label", { for: "token" }, "Token"), input, h("div", { class: "row" }, h("button", { class: "primary" }, "Sign in"))),
   );
+}
+
+// studioToken trades a pasted token for the studio's own, when the pasted
+// one may mint; otherwise the pasted one is already as narrow as it gets.
+async function studioToken(pasted) {
+  const call = async (method, path, body) => {
+    const res = await fetch("/api" + path, {
+      method,
+      headers: Object.assign({ Authorization: "Bearer " + pasted }, body ? { "Content-Type": "application/json" } : {}),
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(res.status === 401 ? "That token was refused." : json.message || "HTTP " + res.status);
+    return json;
+  };
+  const who = await call("GET", "/me");
+  const all = who.scopes.includes("*");
+  if (!all && !who.scopes.includes("tokens:write")) return pasted;
+  const device = (/iPhone|iPad|Android|Mac|Windows|Linux/.exec(navigator.userAgent) || ["browser"])[0];
+  const minted = await call("POST", "/tokens", {
+    name: `studio on ${device}, ${new Date().toISOString().slice(0, 10)}`,
+    scopes: STUDIO_SCOPES.filter((sc) => all || who.scopes.includes(sc)),
+    expires_in: STUDIO_TTL,
+  });
+  return minted.token;
+}
+
+async function signOut() {
+  try {
+    await api("DELETE", "/tokens/self");
+  } catch (e) {
+    if (e.status !== 401) return toast(e.message);
+  }
+  localStorage.removeItem(TOKEN_KEY);
+  me = null;
+  route();
 }
 
 // ── items ─────────────────────────────────────────────────────────────────
@@ -349,6 +397,8 @@ async function viewItems() {
   show(
     h("h1", {}, "Your items"),
     h("p", { class: "muted small" }, me.origin),
+    h("p", { class: "muted small" }, me.expires_at ? `Signed in until ${new Date(me.expires_at).toLocaleDateString()} · ` : "Signed in · ",
+      h("a", { href: "#items", onclick: (e) => { e.preventDefault(); signOut(); } }, "Sign out")),
     h("div", { class: "chips" }, chip("", "All"), chip("draft", "Drafts"), chip("published", "Published"), chip("withdrawn", "Withdrawn")),
     h("div", { class: "row" }, h("button", { class: "primary", onclick: () => (location.hash = "#write") }, "New fragment"),
       h("button", { onclick: () => newDraft({ kind: "thread", content_md: "" }) }, "New thread")),

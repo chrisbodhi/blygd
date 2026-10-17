@@ -528,16 +528,24 @@ reconnect, re-fetch.
 
 `/studio/` is a deliberately plain client, embedded in the binary: one
 HTML page, CSS and vanilla JS, with no build step. It talks only to
-`/api/` with a pasted token, kept in the browser's `localStorage`.
+`/api/`.
+
+- **Its own token.** A pasted token that may mint is traded at once for a
+  studio token: only the scopes the studio calls (items, reader,
+  mentions; no `tokens:write`, origin or hopper settings), 30 days, named
+  for the device. Only that one is kept, in `localStorage`. A stolen
+  studio token cannot mint, and it ends on its own. A pasted token that
+  cannot mint is used as it is. Sign out revokes the token.
 
 - Its CSP allows scripts and styles from itself only, connections to
   this host only, and no framing.
 - It never parses a string into markup, so imported content is only ever
   read as text. `studio_test.go` fails on any use of `innerHTML` or its
   kin.
-- The token shares an origin with the public pages. That is safe only
-  because those pages sanitize every `content_html` they show. A real
-  client should live on its own origin (Phase 4's OAuth-style approval).
+- The token shares an origin with the public pages. Those pages sanitize
+  every `content_html` they show and run no script under a sandboxing CSP
+  (HTML safety). A real client should still live on its own origin
+  (Phase 4's OAuth-style approval).
 
 ## HTML safety
 

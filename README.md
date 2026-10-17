@@ -31,7 +31,11 @@ go run ./cmd/blygd serve
 Then open `/studio/` in a browser (on the same host, e.g.
 `http://localhost:8080/studio/`) and paste the owner token. It is a plain,
 phone-friendly client for writing, publishing, reading and handling
-mentions. The token stays in that browser.
+mentions. The studio trades the owner token at once for a 30-day token of
+its own, with only the scopes it uses, and forgets the one you pasted:
+keep the owner token somewhere safe, such as a password manager, to sign
+in again. Other tools get their own tokens:
+`blygd token mint chris my-tool --expires 30d items:read`.
 
 Every command applies pending schema migrations first (tern, embedded in
 the binary). `blygd migrate status` reports where a database stands, and
