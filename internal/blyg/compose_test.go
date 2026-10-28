@@ -122,6 +122,45 @@ func TestBlankLineDetachesTheQuote(t *testing.T) {
 	}
 }
 
+func TestLazyContinuationBelongsToTheQuote(t *testing.T) {
+	// §10.1 (decision #76): the blockquote's extent is CommonMark's, so the
+	// second line is part of the selection although it has no marker.
+	out := compose(t, "![["+ownID+"]]\n> looks like\nfrom inside.\n\nCommentary.", true)
+	clean(t, out)
+	if sel := out.Transclusions[0].Selector; sel == nil || !strings.Contains(sel.Exact, "from inside.") {
+		t.Fatalf("lazy line left out of the selection: %+v", sel)
+	}
+	if strings.Contains(out.ContentHTML, "<p>from inside.</p>") {
+		t.Fatalf("lazy line fell through as prose: %s", out.ContentHTML)
+	}
+	// A line that starts another block is not a continuation.
+	out = compose(t, "![["+ownID+"]]\n> looks like\n---", true)
+	clean(t, out)
+	if !strings.Contains(out.ContentHTML, "<hr") || out.Transclusions[0].Selector.Exact != "looks like" {
+		t.Fatalf("a thematic break must end the quote: %s", out.ContentHTML)
+	}
+}
+
+func TestCRLFLinesEndLikeLF(t *testing.T) {
+	// §10.1 (decision #76): a line ends at LF or CRLF alike.
+	out := compose(t, "Before.\r\n\r\n![["+ownID+"]]\r\n\r\nAfter.", true)
+	clean(t, out)
+	if len(out.Transclusions) != 1 || out.Transclusions[0].Selector != nil {
+		t.Fatalf("a CRLF directive line must bake whole: %+v %s", out.Transclusions, out.ContentHTML)
+	}
+	out = compose(t, "![["+ownID+"]]\r\n> looks like from inside.\r\n\r\nCommentary.", true)
+	clean(t, out)
+	if len(out.Transclusions) != 1 || out.Transclusions[0].Selector == nil || out.Transclusions[0].Selector.Exact != "looks like from inside." {
+		t.Fatalf("a CRLF partial quote: %+v %s", out.Transclusions, out.ContentHTML)
+	}
+	if !HasThreadGrammar("![[" + ownID + "]]\r\n") {
+		t.Fatal("HasThreadGrammar must see a CRLF directive line")
+	}
+	if c := compose(t, "![["+ownID+"@v2]]\r\n", true); len(c.Problems) != 1 {
+		t.Fatalf("a CRLF reserved line must be refused: %+v", c.Problems)
+	}
+}
+
 func TestGrammarIsInertInCode(t *testing.T) {
 	md := "```\n![[" + ownID + "]]\n[[" + draftID + "]]\n```\n\n" +
 		"- ```md\n  ![[" + draftID + "]]\n  ```\n\n" +

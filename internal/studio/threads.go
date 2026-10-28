@@ -90,6 +90,10 @@ func (r *resolver) resolve(id string, use blyg.Use) (*blyg.Target, error) {
 		FROM items i LEFT JOIN item_versions v ON v.item_id = i.id AND v.version = i.version
 		WHERE i.origin_id = $1 AND i.id = $2`, r.origin.ID, id).Scan(&kind, &version, &withdrawn, &page, &html, &pinned)
 	switch {
+	case err == nil && len(r.imports[id]) > 0:
+		// A local id never falls through to an import, and one also held
+		// from another origin is §5.1's ambiguity (§10.2, decision #76).
+		return nil, &blyg.Unresolved{Reason: "this id is one of yours and also an item imported from " + r.imports[id][0].Origin + ": it is ambiguous (§5.1)"}
 	case err == nil:
 		return r.local(id, use, *kind, version, withdrawn, page, html, pinned)
 	case !errors.Is(err, pgx.ErrNoRows):
@@ -111,7 +115,7 @@ func (r *resolver) local(id string, use blyg.Use, kind string, version int, with
 		if id == r.self {
 			return nil, &blyg.Unresolved{Reason: "a thread cannot transclude itself"}
 		}
-		loop, err := r.closureContains(id, r.self)
+		loop, err := r.closureContains(id, version, r.self)
 		if err != nil {
 			return nil, err
 		}
@@ -122,26 +126,33 @@ func (r *resolver) local(id string, use blyg.Use, kind string, version int, with
 	return &blyg.Target{ID: id, Kind: kind, Version: version, ContentHTML: *html, Page: r.origin.BaseURL + *page, Pinned: pinned}, nil
 }
 
-// closureContains walks the stored local transclusions of start's latest
-// version, and theirs, looking for want (§10.2). Remote entries are not
-// walked: harmless by snapshot, and unknowable in general.
-func (r *resolver) closureContains(start, want string) (bool, error) {
-	seen := map[string]bool{}
-	queue := []string{start}
+// closureContains walks the local transclusions of start's version, and of
+// each version they baked, looking for want (§10.2). The walk follows the
+// versions actually baked, never the targets' current ones, which would let
+// a thread contain itself once a quoted thread republished without the
+// quote (decision #76, finding F3). Remote entries are not walked: harmless
+// by snapshot, and unknowable in general.
+func (r *resolver) closureContains(start string, version int, want string) (bool, error) {
+	type node struct {
+		id      string
+		version int
+	}
+	seen := map[node]bool{}
+	queue := []node{{start, version}}
 	for len(queue) > 0 {
-		id := queue[0]
+		n := queue[0]
 		queue = queue[1:]
-		if seen[id] {
+		if seen[n] {
 			continue
 		}
-		seen[id] = true
-		if id == want {
+		seen[n] = true
+		if n.id == want {
 			return true, nil
 		}
 		var raw []byte
 		err := r.tx.QueryRow(r.ctx, `SELECT v.transclusions FROM items i
-			JOIN item_versions v ON v.item_id = i.id AND v.version = i.version
-			WHERE i.origin_id = $1 AND i.id = $2`, r.origin.ID, id).Scan(&raw)
+			JOIN item_versions v ON v.item_id = i.id
+			WHERE i.origin_id = $1 AND i.id = $2 AND v.version = $3`, r.origin.ID, n.id, n.version).Scan(&raw)
 		if errors.Is(err, pgx.ErrNoRows) {
 			continue
 		}
@@ -155,8 +166,8 @@ func (r *resolver) closureContains(start, want string) (bool, error) {
 			}
 		}
 		for _, ref := range refs {
-			if ref.Origin == "" && !seen[ref.ID] {
-				queue = append(queue, ref.ID)
+			if next := (node{ref.ID, ref.Version}); ref.Origin == "" && !seen[next] {
+				queue = append(queue, next)
 			}
 		}
 	}
@@ -214,7 +225,7 @@ func cited(s *Snapshot, at time.Time) *blyg.Cited {
 
 // stubAgreement applies §10.6 rule 3: when the body transcludes the stub's
 // target, stub_of.version is the version baked; otherwise it keeps the
-// version set when the stub was created.
+// value it last had, which raw carries.
 func stubAgreement(raw json.RawMessage, own string, refs []blyg.Reference) (json.RawMessage, error) {
 	var stub blyg.StubOf
 	if err := json.Unmarshal(raw, &stub); err != nil {

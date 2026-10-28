@@ -478,7 +478,20 @@ func (s *Studio) Publish(ctx context.Context, originID int64, id string, opts Pu
 			}
 			transclusions = string(b)
 			if it.StubOf != nil {
-				agreed, err := stubAgreement(it.StubOf, o.BaseURL, c.Transclusions)
+				// §10.6 rule 3: the value is monotonic, so it starts from the
+				// last one published, not the one frozen at creation. An
+				// endcap carries none (§9), so a return looks past it.
+				last := it.StubOf
+				var published []byte
+				err := tx.QueryRow(ctx, `SELECT stub_of FROM item_versions WHERE item_id = $1 AND stub_of IS NOT NULL
+					ORDER BY version DESC LIMIT 1`, id).Scan(&published)
+				switch {
+				case err == nil:
+					last = published
+				case !errors.Is(err, pgx.ErrNoRows):
+					return err
+				}
+				agreed, err := stubAgreement(last, o.BaseURL, c.Transclusions)
 				if err != nil {
 					return err
 				}

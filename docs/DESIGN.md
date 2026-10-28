@@ -217,6 +217,8 @@ interval (§12.3). A poll failure never changes item state.
 - A lower version than the watermark is not adopted. It sets
   `discrepancy`.
 - Same version, different hash: a stealth edit, adopted and recorded.
+  Except after an endcap: content at the endcap's version is a replay,
+  not adopted, because the watermark survives withdrawal (§13.4).
 - A `content_hash` that does not match `content_md`: recorded, adopted.
 - An endcap rolls the item to null: `doc` is cleared, `page_url` kept.
 - Pins the changelog names are fetched once into `imported_pins` and
@@ -274,8 +276,10 @@ because any reader may re-run the partial check.
 
 **Resolution** (§10.2) is the studio's `resolver`. It looks in this
 origin first: a published item of either kind, then the local closure
-check for threads, walking stored `transclusions[]` within this origin
-only. After that it looks at imports fetched before the transaction.
+check for threads, walking the `transclusions[]` of the versions actually
+baked, within this origin only. A local id never falls through to an
+import, and one also held as an import is ambiguous (§5.1), a publish
+error. After that it looks at imports fetched before the transaction.
 L0 rows, items withdrawn with nothing retained, and ids imported from
 two origins are publish errors. A withdrawn import with a retained pin
 bakes the latest pin. Every problem is reported at once, as `422` with a
@@ -594,6 +598,12 @@ HTML page, CSS and vanilla JS, with no build step. It talks only to
   not write-once: a rebuild re-renders it, so sanitizer and chrome fixes
   reach old pins. Pinned pages advertise no Webmention endpoint, because
   §15.3 accepts a target only as an item's page or document.
+- A partial quote's blockquote has CommonMark's extent, lazy continuation
+  included (§10.1, decision #76). The reference (0.48.2) still ends it at
+  the first line without `>`, so a document it composed selected less than
+  we would read. Fork flattening takes the extent from the bake: lazy
+  lines are the quote's only when the bake holds them, else the author's
+  prose, so neither reading loses or repeats words.
 - Fork flattening puts a blank line after each flattened quote. The
   reference does not, and the prose after a quote then joins it by lazy
   continuation.

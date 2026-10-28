@@ -18,9 +18,9 @@ func pinned(t *testing.T, md string, gen ...GenMeta) ForkSource {
 
 func TestFlattenForkCopiesTheDocument(t *testing.T) {
 	src := pinned(t, "My *own* prose, see [["+headedID+"]].\n\n"+
-		"![["+remoteID+"]]\n\n"+
+		"![["+remoteID+"]]\nRight after the whole bake.\n\n"+
 		"![["+ownID+"]]\n> from inside.\n"+
-		"After the partial.\n\n"+
+		"# After the partial\n\n"+
 		"![["+ownID+"]]\n\n> An author quote after a whole bake.")
 	md, exact := FlattenFork(src, quoteLink)
 	if !exact {
@@ -29,8 +29,9 @@ func TestFlattenForkCopiesTheDocument(t *testing.T) {
 	want := "My *own* prose, see [On stigmergy](https://ex.test/me/t/" + headedID + "/).\n\n" +
 		"> See [notes](https://pi.test/notes/) and ![](https://pi.test/m.png)\n>\n" +
 		"> — quoted from [pi.test · v1](https://pi.test/items/" + remoteID + ".json)\n\n" +
+		"Right after the whole bake.\n\n" +
 		"> from inside.\n>\n> — quoted from [ex.test · v3](https://ex.test/me/items/" + ownID + ".json)\n\n" +
-		"After the partial.\n\n" +
+		"# After the partial\n\n" +
 		"> Stigmergy is what a protocol looks like from inside.\n>\n> Second & last.\n>\n" +
 		"> — quoted from [ex.test · v3](https://ex.test/me/items/" + ownID + ".json)\n\n" +
 		"> An author quote after a whole bake."
@@ -48,12 +49,34 @@ func TestFlattenForkCopiesTheDocument(t *testing.T) {
 	}
 	// The partial's lines are consumed only because the bake says partial;
 	// the author's own quote after a whole bake is kept, apart; and the
-	// prose after a quote stays out of it.
+	// prose after a quote stays out of it, where it would otherwise join by
+	// lazy continuation.
 	if strings.Count(md, "An author quote") != 1 {
 		t.Fatal("author's quotation lost or duplicated")
 	}
-	if strings.Contains(c.ContentHTML, "After the partial.</p>\n</blockquote>") || !strings.Contains(c.ContentHTML, "<p>After the partial.</p>") {
+	if strings.Contains(c.ContentHTML, "Right after the whole bake.</p>\n</blockquote>") || !strings.Contains(c.ContentHTML, "<p>Right after the whole bake.</p>") {
 		t.Fatalf("prose after a flattened quote joined it: %s", c.ContentHTML)
+	}
+	if !strings.Contains(c.ContentHTML, "<h1>After the partial</h1>") {
+		t.Fatalf("the block after a partial quote was lost: %s", c.ContentHTML)
+	}
+}
+
+func TestFlattenForkReadsTheQuoteExtentFromTheBake(t *testing.T) {
+	// Composed under §10.1's CommonMark extent, the lazy line was selected
+	// and baked: it is the quote's, and the fork does not repeat it.
+	src := pinned(t, "![["+ownID+"]]\n> looks like\nfrom inside.\n\nAfter.")
+	md, exact := FlattenFork(src, quoteLink)
+	if !exact || strings.Count(md, "from inside.") != 1 || !strings.Contains(md, "> looks like from inside.") {
+		t.Fatalf("fork of a lazy quote: %q exact=%v", md, exact)
+	}
+	// Composed by a client that ended the quote at the first line without
+	// `>`, the same line was the author's prose: the fork keeps it.
+	src = ForkSource{Origin: srcOrigin, ContentMD: "![[" + ownID + "]]\n> looks like\nAfter, mine.",
+		ContentHTML: BakePartial(&Target{ID: ownID, Version: 3}, "looks like") + "\n<p>After, mine.</p>\n"}
+	md, exact = FlattenFork(src, quoteLink)
+	if !exact || !strings.HasSuffix(md, "\n\nAfter, mine.") {
+		t.Fatalf("author's prose lost from a pre-#76 quote: %q exact=%v", md, exact)
 	}
 }
 

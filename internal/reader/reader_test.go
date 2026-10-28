@@ -242,6 +242,25 @@ func TestWithdrawalRetainsOnlyPins(t *testing.T) {
 		t.Error("withdrawn content kept")
 	}
 
+	// The watermark survives withdrawal (§13.4, finding F5): content at or
+	// below the endcap's version is a replay, not the item returning.
+	// No poll fetches a document at the version it holds, so the endcap's
+	// own version is applied directly, as any fetch of it would be.
+	a.Kind, a.Version, a.ContentMD = "fragment", 3, "second words, replayed"
+	if _, err := g.r.ApplyDocument(ctx, g.sid, g.b.Origin(), idA, []byte(g.b.Doc(a)), g.b.Origin()+"items/"+idA+".json"); err != nil {
+		t.Fatal(err)
+	}
+	if ra = g.row(idA); ra.state != "withdrawn" || ra.hasDoc || ra.version != 3 || !strings.Contains(ra.discrepancy, "endcap") {
+		t.Fatalf("replay at the endcap's version adopted or silent: %+v", ra)
+	}
+	a.Version = 2
+	g.b.Publish()
+	g.reconcileNext()
+	g.poll()
+	if ra = g.row(idA); ra.state != "withdrawn" || ra.hasDoc || ra.version != 3 || !strings.Contains(ra.discrepancy, "below the watermark") {
+		t.Fatalf("replay below the endcap adopted or silent: %+v", ra)
+	}
+
 	// A later version is the item returning (§9, §13.1 rule 3).
 	a.Kind, a.Version, a.ContentMD = "fragment", 4, "back again"
 	g.b.Publish()

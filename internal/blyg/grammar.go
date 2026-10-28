@@ -13,11 +13,13 @@ import (
 // The bracket grammar of §10.1. It is permanent protocol surface: a line
 // that is only `![[id]]` is a transclusion directive, `![[id@vN]]` on its
 // own line is reserved, and `[[id]]` anywhere outside code is a plain link.
+// A line ends at LF or CRLF alike (§10.1): callers split on LF, so a line
+// may carry its CR, and the CR stays in content_md.
 const idClass = `[0-9a-hjkmnp-tv-z]{26}`
 
 var (
-	directiveLine = regexp.MustCompile(`^[ \t]*!\[\[(` + idClass + `)\]\][ \t]*$`)
-	reservedLine  = regexp.MustCompile(`^[ \t]*!\[\[` + idClass + `@v\d+\]\][ \t]*$`)
+	directiveLine = regexp.MustCompile(`^[ \t]*!\[\[(` + idClass + `)\]\][ \t]*\r?$`)
+	reservedLine  = regexp.MustCompile(`^[ \t]*!\[\[` + idClass + `@v\d+\]\][ \t]*\r?$`)
 	// Go has no lookbehind; a match preceded by '!' is the directive form
 	// written inline, which is inert text (§10.1), and callers skip it.
 	inlineLink = regexp.MustCompile(`\[\[(` + idClass + `)\]\]`)
@@ -98,14 +100,35 @@ func lineOffsets(lines []string) []int {
 // directive at lines[i] (§10.1: no blank line between), with each line's
 // marker and at most one following space removed, and the index of the
 // first line after it. quote is "" and ok false when nothing is attached.
+//
+// The blockquote's extent is CommonMark's, lazy continuation included
+// (§10.1, decision #76): a line without its own `>` belongs to the quote
+// when the renderer's parser reads it as part of the same blockquote.
 func attachedQuote(lines []string, i int) (quote string, next int, ok bool) {
 	j := i + 1
-	var run []string
-	for j < len(lines) && quoteLine.MatchString(lines[j]) {
-		run = append(run, quoteMark.ReplaceAllString(lines[j], ""))
+	var raw, run []string
+	for j < len(lines) {
+		l := lines[j]
+		switch {
+		case quoteLine.MatchString(l):
+		case len(run) > 0 && strings.TrimSpace(l) != "" && oneBlockquote(append(raw, l)):
+		default:
+			return strings.Join(run, "\n"), j, len(run) > 0
+		}
+		raw = append(raw, l)
+		run = append(run, quoteMark.ReplaceAllString(l, ""))
 		j++
 	}
 	return strings.Join(run, "\n"), j, len(run) > 0
+}
+
+// oneBlockquote reports whether lines parse as a single blockquote, which
+// is to say the last line is a lazy continuation of the quote before it.
+func oneBlockquote(lines []string) bool {
+	src := []byte(strings.Join(lines, "\n"))
+	doc := goldmark.New(goldmark.WithParser(safeParser("", ""))).Parser().Parse(text.NewReader(src))
+	first := doc.FirstChild()
+	return first != nil && first.Kind() == ast.KindBlockquote && first.NextSibling() == nil
 }
 
 // directiveAt reports the directive id on a line, and the offset of its

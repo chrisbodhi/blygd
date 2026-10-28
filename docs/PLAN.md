@@ -155,6 +155,109 @@ Left for later:
   `rel="service-desc"` to the OpenAPI document. Approval and MCP open;
   the reference's shape is in its `docs/client-access.md`.)*
 
+## Phase 5 — protocol 0.4
+
+Move from `protocol-v0.3.md` at `d008e21` (0.3's last revision) to
+`protocol-v0.4.md` at `24b9770` (its sixth revision, 2026-10-20). Every 0.4
+construct is additive, so blygd today is a 0.4 publisher that emits none
+of them. The gaps are in reading, in receiving mentions, and in three 0.3
+rules that 0.4 states precisely. Steps are in order: each is shippable on
+its own, and the version string moves last.
+
+1. **Rules 0.4 makes precise**, all from decision #76, and none of them a
+   wire change:
+   - A partial quote's blockquote has CommonMark's extent, lazy
+     continuation included (§10.1). `attachedQuote` stops at the first
+     line without `>`.
+   - A line ends at LF or CRLF (§10.1). The grammar splits on `\n` alone,
+     so a CRLF directive line does not match.
+   - The local closure check walks the versions actually baked, from each
+     `transclusions[]` entry to that version's own (§10.2). Today
+     `closureContains` reads each item's current version.
+   - Check, and add tests for: a local id (draft or published) never
+     falls through to an import; `transclusions[]` has one entry per
+     directive; `stub_of.version` never moves backwards (§10.6 rule 3); a
+     document at or below the withdrawal endcap's version is a replay
+     (§13.4).
+
+   *(Done, 2026-10-28. Two of the "check" items were not yet true: a stub
+   that stopped quoting fell back to its creation version, and content at a
+   withdrawal endcap's version was adopted as a stealth edit. A published
+   local id that is also held as an import is now a publish error for
+   every use, not only directives. `make parity` against blygger-studio
+   0.48.2 (`b93ac12`): 56 cases, no unexpected differences. The reference
+   still ends a partial quote at the first line without `>`, which parity
+   caught as a fork dropping the author's prose; fork flattening now reads
+   the quote's extent from the bake, so either reading flattens whole.)*
+2. **Receiving mentions:**
+   - The target check is membership, not location (§15.3 step 1, #84): a
+     target may also be a pinned version's document or page. Revisit the
+     DESIGN.md departure that pinned pages advertise no endpoint.
+   - Verification under templates (§15.4 step 2, #61): when the final URL
+     is not the default, fetch `{origin}blyg.json`, expand its `item`
+     template and accept an exact match. The bound rises to 3 fetches.
+   - Relations `source`, then `link`, after `fork` (§15.4 step 4).
+   - Reposts and notices (§15.4, §15.5, #80): a `link` mention, or a stub
+     or transclusion whose source has no words of its own, is a notice. A
+     notice never appears in a responses list. The receiver classifies; no
+     sender marks it.
+   - A migration widening the `relation` CHECKs in `001_initial.sql`
+     (inbound and outbound), plus a column for the class. Both API changes
+     edit `openapi.json`.
+3. **Reading a relocated surface** (§4, §6.1, §12, #51 and #64):
+   - The manifest's `feed` and `items` are authoritative, and its `item`
+     and `pin` templates (RFC 6570 level 1) replace
+     `{origin}items/{id}.json` and `{origin}items/{id}/v{n}.json` for
+     remote origins. The poller hard-codes all four today, and
+     `refreshManifest` assumes `identity + "blyg.json"`.
+   - §12.1 step 4: a `rel="blyg"` href whose body parses as a manifest is
+     the manifest. The identity is its final URL minus its last path
+     segment (§12.2).
+   - `page` may be absolute (§5.8). Resolve it; never prefix it.
+   - The fake blyg in `internal/testblyg` gains a templated mode, with
+     query-string templates, so tests have something to subscribe to.
+   - Our own surface does not change. We keep the default paths and emit
+     no template keys, as §6.1 recommends.
+4. **Sending mentions:** with no `page` held, the fallback target is the
+   target's item document, expanded from its `item` template, and never
+   the `f/{id}/` / `t/{id}/` convention (§15.2, #85). The outbox writes the
+   convention today and the send worker swaps in the page; the swap moves
+   to the item document, from the manifest the worker already reads.
+5. **Emitting the new constructs:**
+   - Disclosed links (§10.3a, #79, which reverses #32): each resolved
+     `[[id]]` adds a `links[]` entry, and a remote one sends a `link`
+     mention. A markdown link stays silent. Item documents gain the
+     member; endcaps omit it.
+   - Labels (§10.1, #70 and #81): `[[id | text]]` and `![[id | text]]`.
+     On a link the label is the anchor text, ahead of the DESIGN.md
+     labelling departure. On a directive it is baked as `data-blyg-label`,
+     and fork flattening uses it in the attribution line. A label that
+     would contain `]]` is rewritten.
+   - Remote generation sources (§5.7 rules 1, 8 and 9): a `[TK]` source
+     resolves like a directive, so it may be imported. `GenSource` gains
+     `origin` and `cited`, and a remote source sends a `source` mention.
+     It goes through `studio.Imports` like a quote: the door stays as
+     narrow as it is.
+6. **Bump** `ProtocolVersion` to `"0.4"`, move DESIGN.md's spec citation,
+   and rerun `make parity` and `make interop` against a reference that
+   speaks 0.4.
+
+**Open question:** §10.2 step 2 (#82) resolves against any snapshot the
+publisher holds, not only a subscribed origin's. `reader.Snapshots` joins
+through `subscriptions`, which is also what keeps one tenant from quoting
+another's imports. Responding from anywhere needs a per-user one-off
+snapshot with no subscription behind it, and a decision on how that fits
+the plane-separation door before any code.
+
+Left for later, all optional in the spec:
+
+- Queueing maintenance republishes low, by hash or by a small edit
+  (§13.2, #77 and #83), and folding items published together (§13.7,
+  #78).
+- Re-sending a version's mentions when it is pinned (§15.2, #73).
+- §16.9 `pinned_at` and `cid`, and §16.10 image sizes: ruled shapes, not
+  yet normative.
+
 ## Interop (2026-10-10)
 
 Checked against the reference client, blygger-studio 0.39.0 (`9f6bab8`).

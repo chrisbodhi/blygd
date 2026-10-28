@@ -190,6 +190,15 @@ func (r *Reader) ApplyDocument(ctx context.Context, remoteID int64, origin, item
 			_, err = tx.Exec(ctx, `UPDATE imported_items SET fetched_at = $3, discrepancy = $4, discrepancy_at = $3
 				WHERE remote_origin_id = $1 AND item_id = $2`, remoteID, itemID, now, joinNotes(notes))
 			return err
+		case d.Version == version && curState == "withdrawn" && d.Kind != "withdrawn":
+			// §13.4: the watermark survives withdrawal. The endcap is the
+			// highest version, so content at its number is a replay under
+			// §13.3, not the item returning (decision #76, finding F5).
+			res.Outcome = "regression"
+			notes = append([]string{fmt.Sprintf("origin served content at v%d, the withdrawal endcap's version; not adopted (§13.4)", d.Version)}, notes...)
+			_, err = tx.Exec(ctx, `UPDATE imported_items SET fetched_at = $3, discrepancy = $4, discrepancy_at = $3
+				WHERE remote_origin_id = $1 AND item_id = $2`, remoteID, itemID, now, joinNotes(notes))
+			return err
 		case d.Version == version && curHash != nil && *curHash == d.ContentHash && (curState == "withdrawn") == (d.Kind == "withdrawn"):
 			res.Outcome = "unchanged"
 			_, err = tx.Exec(ctx, `UPDATE imported_items SET fetched_at = $3, page_url = coalesce($4, page_url),

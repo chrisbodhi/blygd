@@ -64,8 +64,7 @@ func FlattenFork(src ForkSource, link QuoteLink) (md string, exact bool) {
 			q++
 			out = append(out, f.flattenQuote(baked, src.Origin))
 			if hasClass(baked, "blyg-partial") {
-				_, next, _ := attachedQuote(lines, i)
-				i = next - 1
+				i = partialEnd(lines, i, baked) - 1
 			}
 			if i+1 < len(lines) && strings.TrimSpace(lines[i+1]) != "" {
 				// What follows was a separate block in the pinned rendering
@@ -298,6 +297,31 @@ func (f *flattener) blocks(nodes []*html.Node, origin string) []string {
 	}
 	flush()
 	return out
+}
+
+// partialEnd returns the index of the first line after the blockquote
+// attached to the partial directive at lines[i]. Its extent is CommonMark's
+// (§10.1, decision #76), but a document composed before that rule, or by a
+// client that ends the quote at the first line without `>`, selected less:
+// the bake is what was selected, so lazy lines are the quote's only when
+// the bake holds them, and otherwise they are the author's prose.
+func partialEnd(lines []string, i int, baked *html.Node) int {
+	quote, next, _ := attachedQuote(lines, i)
+	marked := i + 1
+	for marked < next && quoteLine.MatchString(lines[marked]) {
+		marked++
+	}
+	if marked == next {
+		return next
+	}
+	var bake strings.Builder
+	for _, c := range children(baked) {
+		_ = html.Render(&bake, c)
+	}
+	if rendered, err := RenderMarkdown(quote, ""); err == nil && SelectionText(rendered) == SelectionText(bake.String()) {
+		return next
+	}
+	return marked
 }
 
 func quoteMD(md string) string {

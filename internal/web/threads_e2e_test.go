@@ -125,6 +125,21 @@ func TestThreadsLocal(t *testing.T) {
 	if p := problems(t, alice.publish(t, th, 422)); !strings.Contains(p, "already quotes this one") {
 		t.Errorf("closure: %s", p)
 	}
+	// The walk follows the versions baked, not the current ones (decision
+	// #76, finding F3): y bakes z v1, which quoted x, so x may not quote y
+	// even after z republishes without the quote.
+	x := alice.draft(t, map[string]any{"kind": "thread", "content_md": "x"})
+	alice.publish(t, x, 200)
+	z := alice.draft(t, map[string]any{"kind": "thread", "content_md": "![[" + x + "]]"})
+	alice.publish(t, z, 200)
+	y := alice.draft(t, map[string]any{"kind": "thread", "content_md": "![[" + z + "]]"})
+	alice.publish(t, y, 200)
+	alice.edit(t, z, "no longer quoting")
+	alice.publish(t, z, 200)
+	alice.edit(t, x, "![["+y+"]]")
+	if p := problems(t, alice.publish(t, x, 422)); !strings.Contains(p, "already quotes this one") {
+		t.Errorf("closure through a baked version: %s", p)
+	}
 	self := alice.draft(t, map[string]any{"kind": "thread", "content_md": "x"})
 	alice.edit(t, self, "![["+self+"]]")
 	if p := problems(t, alice.publish(t, self, 422)); !strings.Contains(p, "draft") {
@@ -249,6 +264,30 @@ func TestThreadsImported(t *testing.T) {
 	}
 }
 
+// A local id never falls through to an import, and an import with a local
+// item's id is ambiguous (§10.2 step 1, §5.1, decision #76).
+func TestLocalIDNeverFallsThroughToAnImport(t *testing.T) {
+	e := newEnv(t, mention.DefaultRateLimits)
+	bob := e.user("bob")
+	d := bob.draft(t, map[string]any{"content_md": "my own, unpublished"})
+	remote := &testblyg.Blyg{S: testblyg.New(t), Mount: "/r/", Title: "Remote"}
+	remote.Items = []*testblyg.Item{{ID: d, Kind: "fragment", Version: 1, Updated: time.Now(), ContentMD: "theirs, by the same id"}}
+	remote.Publish()
+	bob.subscribe(t, remote.Origin())
+
+	th := bob.draft(t, map[string]any{"kind": "thread", "content_md": "![[" + d + "]]"})
+	if p := problems(t, bob.publish(t, th, 422)); !strings.Contains(p, "ambiguous") {
+		t.Errorf("a draft's id held as an import: %s", p)
+	}
+	bob.publish(t, d, 200)
+	for _, md := range []string{"![[" + d + "]]", "see [[" + d + "]]"} {
+		bob.edit(t, th, md)
+		if p := problems(t, bob.publish(t, th, 422)); !strings.Contains(p, "ambiguous") {
+			t.Errorf("%s: %s", md, p)
+		}
+	}
+}
+
 func TestStubs(t *testing.T) {
 	e := newEnv(t, mention.DefaultRateLimits)
 	alice, bob := e.user("alice"), e.user("bob")
@@ -291,10 +330,12 @@ func TestStubs(t *testing.T) {
 		t.Errorf("cited: %v", stub.Cited)
 	}
 
-	// A response by link keeps the version set when the stub was created.
+	// A version that stops quoting keeps the value stub_of last had, the
+	// version baked then, not the one set at creation: it never moves
+	// backwards (§10.6 rule 3, decision #76, finding F17).
 	bob.edit(t, st, "I disagree, without quoting.")
 	bob.publish(t, st, 200)
-	if d = bob.itemDoc(t, st); !strings.Contains(compact(t, d.StubOf), `"version":1,`) {
+	if d = bob.itemDoc(t, st); !strings.Contains(compact(t, d.StubOf), `"version":2,`) {
 		t.Errorf("response by link: %s", d.StubOf)
 	}
 
@@ -316,6 +357,11 @@ func TestStubs(t *testing.T) {
 	expect(t, bob.api("POST", "/items/"+st+"/withdraw", nil), 200)
 	if d = bob.itemDoc(t, st); d.StubOf != nil {
 		t.Errorf("endcap keeps stub_of: %s", d.StubOf)
+	}
+	// A return looks past the endcap for the value stub_of last had.
+	bob.publish(t, st, 200)
+	if d = bob.itemDoc(t, st); !strings.Contains(compact(t, d.StubOf), `"version":2,`) {
+		t.Errorf("stub_of after a return: %s", d.StubOf)
 	}
 
 	// A plain-web stub carries the client's label, dated.
