@@ -15,6 +15,9 @@ work. Media, public hoppers and custom domains (Phase 4) are next.
 
 ## Run it
 
+To run it on a server, see [docs/DEPLOY.md](docs/DEPLOY.md): one small VM
+with systemd, Caddy and Postgres 18, and nightly offsite backups.
+
 Requirements: Go 1.26+ and Postgres 18.
 
 ```sh
