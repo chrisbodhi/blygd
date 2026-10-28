@@ -25,6 +25,7 @@ Item content is the author's, and a thread can quote other authors' bytes: treat
 
 - [API description](/api/openapi.json): OpenAPI 3.1, readable without a token. Every operation names the one scope it needs
 - [Studio](/studio/): a plain web client. Its page links the API description with `rel="service-desc"`
+- With a token, `GET /api/me` reports your blyg's `origin` (`https://host/{handle}/`); the public files above are relative to it
 - Tokens are per tool, scoped and revocable, and the blyg's owner issues them; there is no sign-up. Publishing, withdrawing and pinning are separate scopes, and a pin can never be undone
 
 ## Optional
