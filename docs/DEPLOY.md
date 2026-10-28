@@ -279,6 +279,26 @@ already published, which are permanent, are to be read by a studio on the
 new version. Anything the spec turns into a deliberate difference from the
 code goes in DESIGN.md.
 
+## Keeping it patched
+
+Go programs carry their own copy of the standard library, TLS included, so
+the OS package manager does not patch them. Three things on this host are Go:
+
+- **blygd.** Run `make vuln` before each release and now and then between
+  them, since an advisory against the toolchain or `x/net` needs a rebuilt
+  binary, not a server update. Bump `toolchain` and the module, rebuild with
+  the new toolchain (`go version -m bin/blygd-linux` shows what it embeds),
+  and ship it as above.
+- **Caddy**, from its own apt repo, and **Postgres 18**, from PGDG.
+  `unattended-upgrades` covers only Debian's security repos by default, so
+  run `sudo apt update && sudo apt upgrade` monthly, and after a Go
+  advisory look for a new `caddy` (`apt list --upgradable | grep caddy`).
+- **rclone**, installed from a `.deb`, which apt does not track. Check
+  <https://downloads.rclone.org/> now and then and reinstall the same way.
+
+Reboot after kernel updates (`/var/run/reboot-required` exists when one is
+waiting). blygd and the backup timer start on boot.
+
 ## Troubleshooting
 
 | Symptom | Cause |
