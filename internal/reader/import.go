@@ -44,6 +44,19 @@ type Reader struct {
 	// ManualPollFloor is the least time between polls of one origin that a
 	// user may ask for (PollFor). Default one minute.
 	ManualPollFloor time.Duration
+	// PollDeadline bounds one poll of one origin, all its fetches together,
+	// so a slow or hostile origin cannot hold the poller: MaxFetches at the
+	// per-fetch timeout would otherwise run for over an hour. It must stay
+	// under the poll lease, or a second poll of the origin could start
+	// beside the first. Default 5 minutes.
+	PollDeadline time.Duration
+}
+
+func (r *Reader) pollDeadline() time.Duration {
+	if r.PollDeadline > 0 {
+		return min(r.PollDeadline, pollLease)
+	}
+	return 5 * time.Minute
 }
 
 func (r *Reader) recheckPerReconcile() int {

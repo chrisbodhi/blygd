@@ -2,6 +2,7 @@ package reader
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -602,5 +603,89 @@ func TestManifestNamedByRelIsReReadThere(t *testing.T) {
 	}
 	if g.row(idA) == nil {
 		t.Error("nothing imported")
+	}
+}
+
+// slowBlyg publishes n fragments on a server of its own that answers every
+// request after delay.
+func slowBlyg(t *testing.T, n int, delay time.Duration) *testblyg.Blyg {
+	b := &testblyg.Blyg{S: testblyg.New(t), Mount: "/blyg/", Title: "Slow"}
+	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	for i := range n {
+		id := fmt.Sprintf("0d%022d0d", i)
+		b.Items = append(b.Items, &testblyg.Item{ID: id, Kind: "fragment", Version: 1, ContentMD: "slow", Updated: now})
+	}
+	b.Publish()
+	b.S.SetDelay(delay)
+	return b
+}
+
+func TestPollStopsAtItsDeadline(t *testing.T) {
+	g := newRig(t)
+	ctx := context.Background()
+	g.r.PollDeadline = 300 * time.Millisecond
+	g.b = slowBlyg(t, 40, 0)
+	g.subscribe()
+	g.b.S.SetDelay(50 * time.Millisecond) // 40 documents: 2 s unbounded
+
+	start := time.Now()
+	g.poll()
+	if took := time.Since(start); took > 1500*time.Millisecond {
+		t.Fatalf("poll took %s; its deadline is %s", took, g.r.PollDeadline)
+	}
+	var n, failures int
+	var lastErr string
+	var feedETag *string
+	_ = g.r.Pool.QueryRow(ctx, `SELECT count(*) FROM imported_items WHERE remote_origin_id = $1`, g.sid).Scan(&n)
+	if err := g.r.Pool.QueryRow(ctx, `SELECT poll_failures, coalesce(last_error, ''), feed_etag FROM remote_origins WHERE id = $1`, g.sid).
+		Scan(&failures, &lastErr, &feedETag); err != nil {
+		t.Fatal(err)
+	}
+	if n == 0 || n == 40 {
+		t.Errorf("%d of 40 imported; the deadline should keep what it fetched and stop", n)
+	}
+	if failures != 1 || !strings.Contains(lastErr, "deadline") {
+		t.Errorf("failures %d, last error %q: a poll cut short backs off (§12.3)", failures, lastErr)
+	}
+	if feedETag != nil {
+		t.Errorf("feed validator %q saved past unfetched entries", *feedETag)
+	}
+
+	// At full speed the next poll finishes the job.
+	g.b.S.SetDelay(0)
+	g.poll()
+	_ = g.r.Pool.QueryRow(ctx, `SELECT count(*) FROM imported_items WHERE remote_origin_id = $1`, g.sid).Scan(&n)
+	if n != 40 {
+		t.Errorf("%d of 40 after a full-speed poll", n)
+	}
+}
+
+func TestBatchPollsOriginsSideBySide(t *testing.T) {
+	g := newRig(t)
+	ctx := context.Background()
+	g.r.PollDeadline = 400 * time.Millisecond
+	var slow []*testblyg.Blyg
+	for range 3 {
+		b := slowBlyg(t, 20, 0)
+		if _, _, err := g.r.Subscribe(ctx, g.uid, b.Origin()); err != nil {
+			t.Fatal(err)
+		}
+		b.S.SetDelay(50 * time.Millisecond)
+		slow = append(slow, b)
+	}
+	start := time.Now()
+	n, err := g.r.PollBatch(ctx)
+	if err != nil || n != 3 {
+		t.Fatalf("PollBatch: %d %v", n, err)
+	}
+	// Each origin runs into its deadline; one after another would take
+	// three deadlines.
+	if took := time.Since(start); took > 1000*time.Millisecond {
+		t.Errorf("batch took %s: one slow origin held up the others", took)
+	}
+	for _, b := range slow {
+		if b.S.Hits("/blyg/feed.xml") == 0 {
+			t.Errorf("%s never polled", b.Origin())
+		}
 	}
 }

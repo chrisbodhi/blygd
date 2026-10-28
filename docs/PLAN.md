@@ -317,6 +317,13 @@ them.
    no deadline per poll. 200 fetches at 20 s is about 67 minutes, past
    the 15-minute lease, so `PollFor` can start a second poll of the same
    origin.
+   *(Done, 2026-10-28. `Reader.PollDeadline`, 5 minutes by default and
+   capped at the lease, bounds one poll. The poll stops at the next fetch
+   by the same path as a 429, keeps what it applied, saves no validators
+   and counts as a failure for backoff. `PollBatch` polls its leased
+   origins concurrently, at most `Batch` (5) at once. A user's `POST
+   …/poll` still waits for its poll, now at most the deadline. The fake
+   blyg gained `SetDelay`.)*
 
 ## Interop (2026-10-10)
 

@@ -35,6 +35,15 @@ type Server struct {
 	files     map[string]Response
 	hits      map[string]int
 	condition map[string]string
+	delay     time.Duration
+}
+
+// SetDelay makes every response wait d first, as a slow origin would. A
+// request cancelled meanwhile gets nothing.
+func (s *Server) SetDelay(d time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.delay = d
 }
 
 // New starts a server and registers its shutdown with t.
@@ -86,7 +95,15 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	s.hits[key]++
 	s.condition[key] = r.Header.Get("If-None-Match")
 	f, ok := s.files[key]
+	delay := s.delay
 	s.mu.Unlock()
+	if delay > 0 {
+		select {
+		case <-time.After(delay):
+		case <-r.Context().Done():
+			return
+		}
+	}
 	if !ok {
 		http.NotFound(w, r)
 		return

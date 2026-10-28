@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -79,16 +80,27 @@ func (r *Reader) PollBatch(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	for _, o := range leased {
-		if err := r.pollOne(ctx, o); err != nil {
-			return len(leased), err
-		}
+	// The batch's origins are polled side by side, so a slow one delays
+	// only itself. Each origin still sees one poll at a time (§12.3).
+	errs := make([]error, len(leased))
+	var wg sync.WaitGroup
+	for i, o := range leased {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs[i] = r.pollOne(ctx, o)
+		}()
 	}
-	return len(leased), nil
+	wg.Wait()
+	return len(leased), errors.Join(errs...)
 }
 
 // leaseFor is how long a lease holds an origin; finish releases it early.
-const leaseFor = "15 minutes"
+// PollDeadline is kept under it.
+const (
+	leaseFor  = "15 minutes"
+	pollLease = 15 * time.Minute
+)
 
 // lease claims the origins the subquery selects: one UPDATE pushes
 // next_poll_at forward and holds poll_lease_until, and the network work runs
@@ -114,11 +126,23 @@ func (r *Reader) lease(ctx context.Context, which string, args ...any) ([]remote
 }
 
 func (r *Reader) pollOne(ctx context.Context, o remote) error {
+	pctx, cancel := context.WithTimeout(ctx, r.pollDeadline())
+	defer cancel()
 	var res pollResult
 	if o.kind == "l0" {
-		res = r.pollL0(ctx, o)
+		res = r.pollL0(pctx, o)
 	} else {
-		res = r.pollBlyg(ctx, o)
+		res = r.pollBlyg(pctx, o)
+	}
+	if pctx.Err() != nil && ctx.Err() == nil {
+		// The deadline cut the poll short. What it applied stands, but no
+		// validator is saved past an unfetched entry, and it counts as a
+		// failure: an origin that is always too slow backs off (§12.3)
+		// rather than holding a poll slot every minute.
+		res.failed = true
+		res.err = fmt.Sprintf("the poll ran past its %s deadline; what was fetched is kept", r.pollDeadline())
+		res.feedETag, res.feedLM, res.indexETag, res.indexLM, res.newestGUID = nil, nil, nil, nil, nil
+		res.reconciled, res.more = false, false
 	}
 	if err := r.finish(ctx, o, res); err != nil {
 		return err
@@ -438,8 +462,13 @@ func (r *Reader) refreshManifest(ctx context.Context, o *remote, res *pollResult
 }
 
 // fetchItem fetches and applies one item document, then any pins it newly
-// names. It returns true when the origin asked us to stop (429/503).
+// names. It returns true when the poll must stop: the origin asked (429/
+// 503), or the poll's deadline has passed.
 func (r *Reader) fetchItem(ctx context.Context, o remote, id string, budget *int, res *pollResult) bool {
+	if ctx.Err() != nil {
+		res.incomplete = true
+		return true
+	}
 	*budget--
 	u := o.surface.ItemURL(id)
 	resp, err := r.get(ctx, u, fetch.Conditional{}, "application/json")
@@ -480,6 +509,10 @@ func (r *Reader) fetchItem(ctx context.Context, o remote, id string, budget *int
 		if *budget <= 0 {
 			res.more = true
 			return false
+		}
+		if ctx.Err() != nil {
+			res.incomplete = true
+			return true
 		}
 		*budget--
 		pu := o.surface.PinURL(id, v)

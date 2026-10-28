@@ -228,7 +228,12 @@ it names. One poll of one blyg:
 4. Only a fetched document advances state, in its own short transaction
    after its fetch.
 
-A poll fetches at most 200 documents. A large first backfill continues a
+A poll fetches at most 200 documents, within a 5-minute deadline for the
+whole poll, kept under the 15-minute lease so two polls of one origin
+never overlap. A poll cut short keeps what it applied, saves no
+validators and counts as a failure, so an origin that is always too slow
+backs off instead of holding a slot. A batch's origins are polled side by
+side, so a slow one delays only itself. A large first backfill continues a
 minute later. Feed and index validators are saved only once everything
 they triggered has been fetched, so a 304 cannot hide an unfinished
 entry. Failure backs off exponentially from the 30-minute interval, up to
