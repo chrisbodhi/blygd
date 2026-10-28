@@ -1,0 +1,21 @@
+# /etc/caddy/Caddyfile
+blyg.example {
+	encode zstd gzip
+
+	# Matches the 10 MiB media cap (BLYGD_MEDIA_MAX_BYTES) with headroom.
+	request_body {
+		max_size 12MB
+	}
+
+	reverse_proxy 127.0.0.1:8080 {
+		# GET /api/events is SSE: do not buffer it.
+		flush_interval -1
+	}
+
+	log {
+		output file /var/log/caddy/blygd.log {
+			roll_size 50mb
+			roll_keep 5
+		}
+	}
+}

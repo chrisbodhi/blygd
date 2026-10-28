@@ -1,0 +1,16 @@
+[Unit]
+Description=blygd Postgres backup
+After=postgresql.service
+
+[Service]
+Type=oneshot
+User=blygd
+Group=blygd
+# Optional offsite copy: RCLONE_REMOTE=r2:blygd-backups, and rclone config under blygd's home.
+EnvironmentFile=-/etc/blygd/backup.env
+ExecStart=/usr/local/bin/blygd-backup
+ProtectSystem=strict
+ReadWritePaths=/var/backups/blygd
+ProtectHome=read-only
+PrivateTmp=true
+NoNewPrivileges=true

@@ -1,0 +1,36 @@
+[Unit]
+Description=blygd, a Blygger studio
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=blygd
+Group=blygd
+EnvironmentFile=/etc/blygd/blygd.env
+ExecStart=/usr/local/bin/blygd serve
+Restart=on-failure
+RestartSec=3
+# serve cancels its context on SIGTERM and drains; give it time.
+TimeoutStopSec=30
+
+# Hardening. blygd needs the network and nothing on disk: all state is in Postgres.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+# Unix-socket Postgres, plus outbound HTTP.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target
