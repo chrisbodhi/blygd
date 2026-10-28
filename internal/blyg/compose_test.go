@@ -329,6 +329,56 @@ func TestHasThreadGrammar(t *testing.T) {
 	}
 }
 
+func TestLabelledDirective(t *testing.T) {
+	for line, want := range map[string]string{
+		"![[" + ownID + "]]":                  "|",
+		"  ![[" + ownID + "]] \r":             "|",
+		"![[" + ownID + " | the opening ]]":   "|the opening",
+		"![[" + ownID + "|a | b]]":            "|a | b",
+		"![[" + ownID + " | ]]":               "|",
+		"![[" + ownID + " | a]] b":            "",
+		"![[" + ownID + " | a]]b]]":           "",
+		"![[" + ownID + " x]]":                "",
+		"![[0000000000000000000000000u | x]]": "",
+		"text ![[" + ownID + "]]":             "",
+	} {
+		id, label, ok := labelledDirective(line)
+		got := ""
+		if ok {
+			got = "|" + label
+			if id != ownID {
+				t.Errorf("%q: id %q", line, id)
+			}
+		}
+		if got != want {
+			t.Errorf("%q: %q, want %q", line, got, want)
+		}
+	}
+}
+
+func TestHasOwnWords(t *testing.T) {
+	whole := BakeWhole(&Target{ID: ownID, Version: 3}, "<p>w</p>")
+	part := func(sel string) string { return BakePartial(&Target{ID: ownID, Version: 3}, sel) }
+	for _, c := range []struct {
+		name, md, html string
+		want           bool
+	}{
+		{"a bare directive", "![[" + ownID + "]]\n", whole, false},
+		{"twenty directives, labelled", strings.Repeat("![["+ownID+" | x]]\n\n", 20), strings.Repeat(whole, 20), false},
+		{"a partial selection", "![[" + ownID + "]]\n> sel\n", part("sel"), false},
+		{"a lazy line the bake selected", "![[" + ownID + "]]\n> sel\nmore\n", part("sel more"), false},
+		{"a lazy line the bake did not select", "![[" + ownID + "]]\n> sel\nmine\n", part("sel") + "<p>mine</p>", true},
+		{"a quotation after a whole bake", "![[" + ownID + "]]\n> mine\n", whole + "<blockquote><p>mine</p></blockquote>", true},
+		{"a paragraph", "![[" + ownID + "]]\n\nI disagree.", whole + "<p>I disagree.</p>", true},
+		{"a directive in code", "```\n![[" + ownID + "]]\n```", "<pre><code>![[" + ownID + "]]</code></pre>", true},
+		{"bakes that do not line up", "![[" + ownID + "]]\n> sel\nmore", "", false},
+	} {
+		if got := HasOwnWords(c.md, c.html); got != c.want {
+			t.Errorf("%s: %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
 func TestPageHTML(t *testing.T) {
 	bake := `<blockquote class="blyg-transclusion blyg-partial" data-blyg-id="` + remoteID + `" data-blyg-version="1" data-blyg-origin="https://pi.test/">` +
 		`<p onclick="x()">hi <script>alert(1)</script><a href="javascript:alert(1)">j</a> <span class="blyg-tk-gen evil">g</span></p><iframe src="https://pi.test/"></iframe></blockquote>`

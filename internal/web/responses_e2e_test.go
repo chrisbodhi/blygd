@@ -119,3 +119,92 @@ func TestResponsesAreCurated(t *testing.T) {
 		t.Error("the schema let a gone mention be approved")
 	}
 }
+
+// Notices are held apart from responses (§15.5, decisions #79 and #80): a
+// repost verifies with its relation unchanged, is classed a notice by the
+// receiver, and can never be shown among responses.
+func TestNoticesAreHeldApart(t *testing.T) {
+	e := newEnv(t, mention.DefaultRateLimits)
+	alice, bob := e.user("alice"), e.user("bob")
+	ctx := context.Background()
+	run := func() {
+		t.Helper()
+		if _, err := e.workers.SendBatch(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.workers.VerifyBatch(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mentions := func(q string) []map[string]any {
+		var out []map[string]any
+		for _, m := range alice.api("GET", "/mentions"+q, nil).json(t)["mentions"].([]any) {
+			out = append(out, m.(map[string]any))
+		}
+		return out
+	}
+	page := func(id string) string { return string(alice.get("f/" + id + "/").body) }
+
+	target := alice.draft(t, map[string]any{"content_md": "A claim."})
+	alice.publish(t, target, 200)
+	bob.subscribe(t, alice.origin)
+	th := bob.draft(t, map[string]any{"kind": "thread", "content_md": "![[" + target + "]]"})
+	bob.publish(t, th, 200)
+	run()
+
+	ms := mentions("")
+	if len(ms) != 1 || ms[0]["status"] != "verified" || ms[0]["relation"] != "transclusion" || ms[0]["class"] != "notice" {
+		t.Fatalf("a repost: %v", ms)
+	}
+	mid := itoa(int(ms[0]["id"].(float64)))
+	expect(t, alice.api("PUT", "/mentions/"+mid+"/approval", nil), 409)
+	if len(mentions("?class=response")) != 0 || len(mentions("?class=notice")) != 1 {
+		t.Error("the class filter does not hold notices apart")
+	}
+	expect(t, alice.api("GET", "/mentions?class=other", nil), 400)
+
+	// Words of its own make it a response, which may be shown; losing them
+	// again makes it a notice, and the approval goes with the class.
+	resend := url.Values{"source": {bob.origin + "t/" + th + "/"}, "target": {alice.origin + "f/" + target + "/"}}
+	bob.edit(t, th, "![["+target+"]]\n\nWords of my own.")
+	bob.publish(t, th, 200)
+	expect(t, e.do("POST", alice.origin+"webmention", "", resend), 202)
+	run()
+	if m := mentions("")[0]; m["class"] != "response" {
+		t.Fatalf("a quote with words: %v", m)
+	}
+	expect(t, alice.api("PUT", "/mentions/"+mid+"/approval", nil), 204)
+	if !strings.Contains(page(target), "quoted this") {
+		t.Fatal("an approved response is not shown")
+	}
+	bob.edit(t, th, "![["+target+"]]")
+	bob.publish(t, th, 200)
+	expect(t, e.do("POST", alice.origin+"webmention", "", resend), 202)
+	run()
+	if m := mentions("")[0]; m["class"] != "notice" || m["approved_at"] != nil || strings.Contains(page(target), "quoted this") {
+		t.Fatalf("a response that became a repost kept its approval: %v", m)
+	}
+
+	// The schema holds the classes whatever the Go does.
+	for _, set := range []string{
+		"approved_at = now()",                   // a notice shown
+		"relation = 'link', class = 'response'", // a link is always a notice
+		"class = NULL",                          // class goes with relation
+		"class = 'other'",
+	} {
+		if _, err := e.pool.Exec(ctx, `UPDATE inbound_mentions SET `+set+` WHERE id = $1`, mid); err == nil {
+			t.Errorf("the schema allowed %s", set)
+		}
+	}
+	for _, set := range []string{"relation = 'source', class = 'response'", "relation = 'link', class = 'notice'"} {
+		if _, err := e.pool.Exec(ctx, `UPDATE inbound_mentions SET `+set+` WHERE id = $1`, mid); err != nil {
+			t.Errorf("the schema refused %s: %v", set, err)
+		}
+	}
+	for rel, ok := range map[string]bool{"source": true, "link": true, "bogus": false} {
+		_, err := e.pool.Exec(ctx, `UPDATE outbound_mentions SET relation = $1`, rel)
+		if (err == nil) != ok {
+			t.Errorf("outbound relation %s: %v", rel, err)
+		}
+	}
+}

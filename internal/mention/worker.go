@@ -122,9 +122,9 @@ func (wk *Workers) recordInbound(ctx context.Context, c inboundClaim, out Outcom
 	if status == "failed" && c.everVerified {
 		status = "gone"
 	}
-	var relation any
+	var relation, class any
 	if out.Relation != "" {
-		relation = out.Relation
+		relation, class = out.Relation, out.Class
 	}
 	var dropped bool
 	var originID int64
@@ -133,12 +133,14 @@ func (wk *Workers) recordInbound(ctx context.Context, c inboundClaim, out Outcom
 		-- §15.5: approval holds only while what is shown stays the same.
 		approved_at = CASE WHEN $2 = 'verified'
 			AND m.relation IS NOT DISTINCT FROM $3::text
+			AND m.class IS NOT DISTINCT FROM $11::text
 			AND m.source_origin IS NOT DISTINCT FROM nullif($4, '')
 			AND m.source_page IS NOT DISTINCT FROM nullif($9, '')
 			AND m.source_author IS NOT DISTINCT FROM $8::jsonb
 			THEN m.approved_at END,
 		status = $2,
 		relation = coalesce($3, CASE WHEN $2 = 'gone' THEN relation END),
+		class = coalesce($11, CASE WHEN $2 = 'gone' THEN class END),
 		ever_verified = ever_verified OR $2 = 'verified',
 		source_origin = coalesce(nullif($4, ''), source_origin),
 		source_item_id = coalesce(nullif($5, ''), source_item_id),
@@ -153,11 +155,11 @@ func (wk *Workers) recordInbound(ctx context.Context, c inboundClaim, out Outcom
 		WHERE m.id = $1
 		RETURNING old.approved_at IS NOT NULL AND m.approved_at IS NULL, m.origin_id, m.target_item_id`,
 		c.id, status, relation, out.SourceOrigin, out.SourceID, out.SourceVersion, out.SourceKind,
-		nullJSON(out.SourceAuthor), out.SourcePage, out.Reason).Scan(&dropped, &originID, &itemID)
+		nullJSON(out.SourceAuthor), out.SourcePage, out.Reason, class).Scan(&dropped, &originID, &itemID)
 	if err != nil {
 		return err
 	}
-	wk.notify(ctx, "mention", originID, map[string]any{"id": c.id, "status": status, "relation": out.Relation})
+	wk.notify(ctx, "mention", originID, map[string]any{"id": c.id, "status": status, "relation": out.Relation, "class": out.Class})
 	if !dropped || wk.OnDisplayChange == nil {
 		return nil
 	}

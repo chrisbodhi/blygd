@@ -83,7 +83,8 @@ has a test.
 | Media any published version references is kept forever | §8 rules 2 and 4 | `version_media` foreign key (RESTRICT) + trigger `version_media_guard` |
 | Media only drafts use is never served | §4 | the surface serves media only when `version_media` lists it |
 | A response shows only while approved and verified | §15.5 | CHECK `approved_at IS NULL OR status IN ('verified', 'pending')`; render filter |
-| An approval does not survive a changed response | §15.5 | verifier clears `approved_at` unless relation, origin, page and author match |
+| An approval does not survive a changed response | §15.5 | verifier clears `approved_at` unless relation, class, origin, page and author match |
+| A notice is never shown among responses | §15.5 | CHECK `approved_at IS NULL OR class = 'response'`; a link is always a notice; class is set exactly with relation |
 | A public hopper's slug never changes | §13.5 (reference `slug_frozen`) | CHECK `NOT public OR slug_frozen` + trigger `hoppers_guard` |
 | Public hoppers are never protocol surface | §13.5 | served live, never in `surface_files`; structural test in `internal/hopper` |
 | Pinned version pages stay 200 forever | §8.4 rule 1 | `surface_files.permanent` (re-renderable, not write-once) |
@@ -118,9 +119,11 @@ has a test.
 
 **Receiving.** `POST {origin}webmention` runs §15.3:
 
-1. Syntactic checks return 400. The target must be inside this origin and
-   name a published item, by page or by document URL. A withdrawn target
-   is fine.
+1. Syntactic checks return 400. The target must be one of this origin's
+   items by an address it serves for it (§15.3 step 1, decision #84): its
+   page, its document, or a pinned version's page or document. That is a
+   membership test; blygd never relocates its surface, so every such
+   address is also inside the origin. A withdrawn target is fine.
 2. Three rate caps return 429 and the claim is never queued: per source
    host (60/h), per registrable domain (240/h), global (2000/h). The caps
    are **instance-wide**, because verification fetches cost the machine,
@@ -128,12 +131,24 @@ has a test.
 3. Otherwise 202, and the claim is upserted as `pending`. A re-sent pair
    re-verifies rather than duplicating.
 
-**Verifying.** A worker runs §15.4 with at most two bounded fetches. The
-item document must have been fetched from exactly
-`{origin}items/{id}.json` for its own origin and id. That one rule rejects
-mirrors, pinned files, and path-mounted neighbours speaking for each other.
-The relation check is `stub`, then `transclusion`, then `fork`; a fork
-counts only if it names a version pinned here.
+**Verifying.** A worker runs §15.4 with at most two bounded fetches, or
+three under templates. The item document must have been fetched from
+exactly `{origin}items/{id}.json` for its own origin and id, or, when the
+asserted origin's own `blyg.json` carries an `item` template (§6.1), from
+exactly that template's expansion. That one rule rejects mirrors, pinned
+files, and path-mounted neighbours speaking for each other. The relation
+check is `stub`, `transclusion`, `fork`, `source`, then `link`; a fork
+counts only if it names a version pinned here, and an unpinned one falls
+through to the rest.
+
+The receiver also derives a class (§15.5). A `link`, or a stub or
+transclusion whose document has no words of its own (a repost, §15.4), is
+a **notice**; the rest are **responses**. The repost test sets aside
+directive lines, labels included, and the partial selection attached to
+each, reading how far a selection runs from the bake as fork flattening
+does, so a document from a client that ends quotes at the first unmarked
+line keeps its words. Notices can be listed (`?class=notice`) but never
+approved or shown.
 
 - No content is stored; a verified mention is a pointer.
 - A mention that verified before and fails now becomes `gone`, and the
@@ -357,11 +372,12 @@ anyone else. So the defaults assume a response may be hostile.
   `origin:write` beside `mentions:write`. Hiding needs only
   `mentions:write`.
 - **No swap after approval.** A re-sent mention re-verifies, and approval
-  survives only if relation, source origin, page and author are unchanged.
+  survives only if relation, class, source origin, page and author are
+  unchanged.
   Otherwise, or if it goes `failed`/`gone`, approval is cleared, and the
   worker's `OnDisplayChange` hook re-renders the page at once.
 - **Little to show.** An entry is a verb ("responded", "quoted this",
-  "forked this"), the source's author name (as asserted, cut to 80
+  "forked this", "drew on this"), the source's author name (as asserted, cut to 80
   characters), its host, and a `nofollow ugc` link. No words from the
   source, which is never stored.
 - **Blocks** by host or by registrable domain (harassers mint
@@ -596,8 +612,10 @@ HTML page, CSS and vanilla JS, with no build step. It talks only to
   scripts. The pin's promise is its JSON file, which stays byte-exact and
   is linked from the page. For the same reason the page is permanent but
   not write-once: a rebuild re-renders it, so sanitizer and chrome fixes
-  reach old pins. Pinned pages advertise no Webmention endpoint, because
-  §15.3 accepts a target only as an item's page or document.
+  reach old pins. Pinned pages advertise no Webmention endpoint of their
+  own: a sender finds it in the manifest first (§15.2), and the receiver
+  accepts a pinned version's page or document as a target (§15.3,
+  decision #84).
 - A partial quote's blockquote has CommonMark's extent, lazy continuation
   included (§10.1, decision #76). The reference (0.48.2) still ends it at
   the first line without `>`, so a document it composed selected less than

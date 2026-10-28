@@ -1269,6 +1269,19 @@
             "description": "Filter by status."
           },
           {
+            "name": "class",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "response",
+                "notice"
+              ]
+            },
+            "description": "Filter by class (§15.5): responses, or notices to hold apart."
+          },
+          {
             "name": "include_blocked",
             "in": "query",
             "required": false,
@@ -1326,7 +1339,7 @@
             "$ref": "#/components/responses/TooManyRequests"
           }
         },
-        "description": "Publishing a response is curation, never automatic, so this also needs origin:write. What shows: a verb, the source's author name, its host and a link; no words from the source."
+        "description": "Publishing a response is curation, never automatic, so this also needs origin:write. What shows: a verb, the source's author name, its host and a link; no words from the source. A notice is refused with 409: it is never shown among responses (§15.5)."
       },
       "delete": {
         "operationId": "hideMention",
@@ -3399,8 +3412,22 @@
               "stub",
               "transclusion",
               "fork",
+              "source",
+              "link",
               null
             ]
+          },
+          "class": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "response",
+              "notice",
+              null
+            ],
+            "description": "Set with relation (§15.5). A notice is a link, or a stub or transclusion from a document with no words of its own (a repost); it is never shown among responses and cannot be approved."
           },
           "source_origin": {
             "type": [
@@ -3461,7 +3488,7 @@
               "null"
             ],
             "format": "date-time",
-            "description": "Shown on the target's page since then (§15.5). Cleared when a re-verification finds the relation, origin, page or author changed, or the mention stops verifying."
+            "description": "Shown on the target's page since then (§15.5). Cleared when a re-verification finds the relation, class, origin, page or author changed, or the mention stops verifying."
           },
           "blocked": {
             "type": "boolean",
@@ -3475,6 +3502,7 @@
           "target_url",
           "status",
           "relation",
+          "class",
           "received_at",
           "verified_at",
           "source_host",
@@ -3515,6 +3543,8 @@
               "stub",
               "transclusion",
               "fork",
+              "source",
+              "link",
               "url"
             ]
           },

@@ -204,6 +204,13 @@ its own, and the version string moves last.
    - A migration widening the `relation` CHECKs in `001_initial.sql`
      (inbound and outbound), plus a column for the class. Both API changes
      edit `openapi.json`.
+
+   *(Done, 2026-10-28: migration 003. A notice is refused approval and the
+   schema refuses one shown. Approval now also survives only an unchanged
+   class. Mentions verified before 0.4 are recorded as responses until
+   they re-verify. The repost test reads a partial selection's extent from
+   the bake, as fork flattening does. `blyg.Surface` reads a manifest's
+   surface keys, and step 3 reuses it.)*
 3. **Reading a relocated surface** (§4, §6.1, §12, #51 and #64):
    - The manifest's `feed` and `items` are authoritative, and its `item`
      and `pin` templates (RFC 6570 level 1) replace

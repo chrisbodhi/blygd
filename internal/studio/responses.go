@@ -41,8 +41,9 @@ func (s *Studio) SetMentionApproval(ctx context.Context, originID, mentionID int
 			return err
 		}
 		var itemID, status string
-		err = tx.QueryRow(ctx, `SELECT target_item_id, status FROM inbound_mentions WHERE origin_id = $1 AND id = $2 FOR UPDATE`,
-			originID, mentionID).Scan(&itemID, &status)
+		var class *string
+		err = tx.QueryRow(ctx, `SELECT target_item_id, status, class FROM inbound_mentions WHERE origin_id = $1 AND id = $2 FOR UPDATE`,
+			originID, mentionID).Scan(&itemID, &status, &class)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return notFound("mention not found")
 		}
@@ -51,6 +52,10 @@ func (s *Studio) SetMentionApproval(ctx context.Context, originID, mentionID int
 		}
 		if approve && status != "verified" {
 			return conflict("only a verified mention can be shown; this one is %s", status)
+		}
+		if approve && (class == nil || *class != "response") {
+			// §15.5: notices (links and reposts) never appear among responses.
+			return conflict("a notice is not a response and is never shown among them (§15.5)")
 		}
 		if _, err := tx.Exec(ctx, `UPDATE inbound_mentions SET approved_at = CASE WHEN $3 THEN coalesce(approved_at, now()) END
 			WHERE origin_id = $1 AND id = $2`, originID, mentionID, approve); err != nil {
@@ -157,7 +162,7 @@ func (s *Studio) Unblock(ctx context.Context, originID, blockID int64) error {
 	return err
 }
 
-var responseVerbs = map[string]string{"stub": "responded", "transclusion": "quoted this", "fork": "forked this"}
+var responseVerbs = map[string]string{"stub": "responded", "transclusion": "quoted this", "fork": "forked this", "source": "drew on this"}
 
 // authorCap bounds a shown author name: it is the source's assertion.
 const authorCap = 80
@@ -165,7 +170,7 @@ const authorCap = 80
 // shownResponses are an item's approved, verified mentions, oldest first.
 func shownResponses(ctx context.Context, tx pgx.Tx, itemID string) ([]blyg.PageResponse, error) {
 	rows, err := tx.Query(ctx, `SELECT relation, source_author, coalesce(source_page, source_url), source_host
-		FROM inbound_mentions WHERE target_item_id = $1 AND status = 'verified' AND approved_at IS NOT NULL
+		FROM inbound_mentions WHERE target_item_id = $1 AND status = 'verified' AND class = 'response' AND approved_at IS NOT NULL
 		ORDER BY approved_at, id`, itemID)
 	if err != nil {
 		return nil, err

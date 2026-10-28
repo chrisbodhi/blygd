@@ -228,3 +228,71 @@ func LocateSelection(targetHTML, selection string) *Selector {
 func escapeHTML(s string) string {
 	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;", "'", "&#39;").Replace(s)
 }
+
+// labelledDirective reads a transclusion directive line with or without a
+// label (§10.1, decision #70): `![[id]]` or `![[id | label]]`, surrounding
+// whitespace allowed. The id is the 26 characters after the brackets; the
+// label is everything after the pipe up to the first `]]`, which must end
+// the line, so a label may hold a pipe but never `]]`.
+func labelledDirective(line string) (id, label string, ok bool) {
+	t := strings.TrimRight(strings.TrimLeft(line, " \t"), " \t\r")
+	if len(t) < 31 || !strings.HasPrefix(t, "![[") || !ValidID(t[3:29]) {
+		return "", "", false
+	}
+	id, rest := t[3:29], t[29:]
+	if rest == "]]" {
+		return id, "", true
+	}
+	rest = strings.TrimLeft(rest, " \t")
+	end := strings.Index(rest, "]]")
+	if !strings.HasPrefix(rest, "|") || end != len(rest)-2 {
+		return "", "", false
+	}
+	return id, strings.TrimSpace(rest[1:end]), true
+}
+
+// HasOwnWords reports whether a document has words of its own once its
+// transclusion directives, labels included, and each partial selection
+// attached to one are set aside. A stub or transclusion from a document
+// without them is a repost (§15.4, decision #80).
+//
+// How far a partial selection runs is read from the bake, as fork
+// flattening reads it: a document composed before CommonMark's extent was
+// the rule selected less, and its lazy lines are the author's. A blockquote
+// after a whole bake is the author's quotation (decision #62). When the
+// bakes do not line up with the directives, §10.1's extent applies.
+func HasOwnWords(contentMD, contentHTML string) bool {
+	quotes := topLevelQuotes(parseFragment(contentHTML))
+	code := codeSpans(contentMD)
+	lines := strings.Split(contentMD, "\n")
+	starts := lineOffsets(lines)
+	live := func(i int) bool {
+		_, _, ok := labelledDirective(lines[i])
+		return ok && !inSpans(code, starts[i]+strings.IndexByte(lines[i], '!'))
+	}
+	directives := 0
+	for i := range lines {
+		if live(i) {
+			directives++
+		}
+	}
+	q := 0
+	for i := 0; i < len(lines); i++ {
+		l := lines[i]
+		if live(i) {
+			switch {
+			case len(quotes) != directives:
+				_, next, _ := attachedQuote(lines, i)
+				i = next - 1
+			case hasClass(quotes[q], "blyg-partial"):
+				i = partialEnd(lines, i, quotes[q]) - 1
+			}
+			q++
+			continue
+		}
+		if strings.TrimSpace(l) != "" {
+			return true
+		}
+	}
+	return false
+}

@@ -22,7 +22,8 @@ type Outcome struct {
 	Transient bool   // the network said nothing; retry rather than conclude
 	Reason    string
 
-	Relation      string // stub, transclusion, fork
+	Relation      string // stub, transclusion, fork, source, link
+	Class         string // response or notice (§15.5), with Relation
 	SourceOrigin  string
 	SourceID      string
 	SourceVersion int
@@ -50,9 +51,15 @@ type sourceDoc struct {
 	Version       int             `json:"version"`
 	Page          string          `json:"page"`
 	Author        json.RawMessage `json:"author"`
+	ContentMD     string          `json:"content_md"`
+	ContentHTML   string          `json:"content_html"`
 	StubOf        json.RawMessage `json:"stub_of"`
 	Transclusions []identity      `json:"transclusions"`
 	ForkedFrom    *identity       `json:"forked_from"`
+	Generated     []struct {
+		Sources []identity `json:"sources"`
+	} `json:"generated"`
+	Links []identity `json:"links"`
 }
 
 // identity is a reference's machine-readable identity and nothing else
@@ -83,7 +90,8 @@ func fetchFailure(what string, err error) Outcome {
 	return transient("%s: %v", what, err)
 }
 
-// Verify runs §15.4 for one claim: at most two fetches, each bounded by
+// Verify runs §15.4 for one claim: at most two fetches, or three when the
+// source origin's manifest must be read, each bounded by
 // fetch.VerifyLimits. It never stores or returns source content.
 func Verify(ctx context.Context, c *fetch.Client, sourceURL string, t Target) Outcome {
 	const accept = "application/json, text/html;q=0.9"
@@ -123,14 +131,25 @@ func Verify(ctx context.Context, c *fetch.Client, sourceURL string, t Target) Ou
 	// Step 2: the document must have been fetched from exactly
 	// {origin}items/{id}.json for its own origin and id — §12.2's identity
 	// rule applied inbound. This is what stops a mirror speaking in a real
-	// blyg's name, and why a pinned file never verifies.
+	// blyg's name, and why a pinned file never verifies. Under surface
+	// templates (§6.1, decision #61) the asserted origin's own manifest may
+	// place it elsewhere: one more fetch reads its `item` template, and only
+	// an exact match is accepted.
 	origin, err := blyg.NormalizeOrigin(doc.Origin)
 	if err != nil {
 		return failed("source origin is not an http(s) origin")
 	}
 	final, err := blyg.NormalizeURL(docURL)
-	if err != nil || final != blyg.ItemDocURL(origin, doc.ID) {
-		return failed("item document was fetched from %s, not from %s", docURL, blyg.ItemDocURL(origin, doc.ID))
+	if err != nil {
+		return failed("item document URL %s is not an http(s) URL", docURL)
+	}
+	if want := blyg.ItemDocURL(origin, doc.ID); final != want {
+		if o, ok := templatedItem(ctx, c, origin, doc.ID, final); !ok {
+			if o.Status != "" {
+				return o
+			}
+			return failed("item document was fetched from %s, not from %s or the origin's item template", docURL, want)
+		}
 	}
 
 	out := Outcome{
@@ -155,31 +174,78 @@ func Verify(ctx context.Context, c *fetch.Client, sourceURL string, t Target) Ou
 	// Step 4: relation, in order. Identity members only; `cited` and
 	// `selector` are never consulted.
 	us := func(o string) bool { return o != "" && blyg.SameOrigin(o, t.Origin) }
+	verified := func(rel string) Outcome {
+		out.Status, out.Relation, out.Class = "verified", rel, classOf(rel, doc)
+		return out
+	}
 	if doc.StubOf != nil {
 		var stub identity
 		if json.Unmarshal(doc.StubOf, &stub) == nil && us(stub.Origin) && stub.ID == t.ItemID {
-			out.Status, out.Relation = "verified", "stub"
-			return out
+			return verified("stub")
 		}
 	}
 	for _, r := range doc.Transclusions {
 		if us(r.Origin) && r.ID == t.ItemID {
-			out.Status, out.Relation = "verified", "transclusion"
-			return out
+			return verified("transclusion")
 		}
 	}
+	reason := "source document does not reference this item"
 	if f := doc.ForkedFrom; f != nil && us(f.Origin) && f.ID == t.ItemID {
 		if t.IsPinned != nil && t.IsPinned(f.Version) {
-			out.Status, out.Relation = "verified", "fork"
-			return out
+			return verified("fork")
 		}
-		out.Status = "failed"
-		out.Reason = fmt.Sprintf("forked_from names v%d, which is not pinned here", f.Version)
-		return out
+		// An unpinned fork is not a fork; a later relation may still hold.
+		reason = fmt.Sprintf("forked_from names v%d, which is not pinned here", f.Version)
+	}
+	for _, g := range doc.Generated {
+		for _, r := range g.Sources {
+			if us(r.Origin) && r.ID == t.ItemID {
+				return verified("source") // §5.7 rule 9
+			}
+		}
+	}
+	for _, r := range doc.Links {
+		if us(r.Origin) && r.ID == t.ItemID {
+			return verified("link") // §10.3a, decision #79
+		}
 	}
 	out.Status = "failed"
-	out.Reason = "source document does not reference this item"
+	out.Reason = reason
 	return out
+}
+
+// classOf is §15.5's class, which the receiver derives and no sender
+// marks: a link is a notice, and so is a stub or transclusion from a
+// document with no words of its own, a repost (§15.4, decision #80). The
+// relation is unchanged either way; stub-ness still comes from the marker.
+func classOf(relation string, doc sourceDoc) string {
+	switch {
+	case relation == "link":
+		return "notice"
+	case (relation == "stub" || relation == "transclusion") && !blyg.HasOwnWords(doc.ContentMD, doc.ContentHTML):
+		return "notice"
+	}
+	return "response"
+}
+
+// templatedItem is §15.4 step 2 under surface templates: it reads the
+// asserted origin's own manifest at {origin}blyg.json and reports whether
+// its `item` template, expanded with id, is exactly final. A non-zero
+// outcome says why the manifest could not be read.
+func templatedItem(ctx context.Context, c *fetch.Client, origin, id, final string) (Outcome, bool) {
+	resp, err := c.Get(ctx, origin+"blyg.json", fetch.VerifyLimits, "application/json")
+	if err != nil {
+		return fetchFailure("fetching the source origin's manifest", err), false
+	}
+	if o, done := statusOutcome("the source origin's manifest", resp.Status); done {
+		return o, false
+	}
+	s := blyg.SurfaceOf(origin, resp.Body)
+	if !s.Templated() {
+		return Outcome{}, false
+	}
+	want, err := blyg.NormalizeURL(s.ItemURL(id))
+	return Outcome{}, err == nil && want == final
 }
 
 // statusOutcome maps a non-200 status to an outcome.

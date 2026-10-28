@@ -117,6 +117,80 @@ func TestVerifyRelations(t *testing.T) {
 	}
 }
 
+// Protocol 0.4's relations, after fork and in this order (§15.4 step 4),
+// and the class the receiver derives (§15.5).
+func TestVerifyRelationsAndClasses(t *testing.T) {
+	w := newWorld(t)
+	docPath := "/them/items/" + sourceID + ".json"
+	us := w.us()
+	quote := "![[" + targetID + "]]\n"
+	bake := `<blockquote class="blyg-transclusion" data-blyg-id="` + targetID + `" data-blyg-version="1" data-blyg-origin="` + us + `"><p>q</p></blockquote>`
+	ref := map[string]any{"origin": us, "id": targetID, "version": 1}
+	cases := []struct {
+		name                    string
+		extra                   map[string]any
+		pinned                  []int
+		status, relation, class string
+	}{
+		{"source", map[string]any{"generated": []any{map[string]any{"sources": []any{map[string]any{"id": "0000000000000000000000000a", "version": 1}, ref}}}},
+			nil, "verified", "source", "response"},
+		{"an own-origin source names us not", map[string]any{"generated": []any{map[string]any{"sources": []any{map[string]any{"id": targetID, "version": 1}}}}},
+			nil, "failed", "", ""},
+		{"link", map[string]any{"links": []any{map[string]any{"id": targetID, "origin": us}}}, nil, "verified", "link", "notice"},
+		{"an unpinned fork falls through to a link", map[string]any{"forked_from": ref, "links": []any{map[string]any{"id": targetID, "origin": us}}},
+			nil, "verified", "link", "notice"},
+		{"a stub wins over a link", map[string]any{"stub_of": ref, "links": []any{map[string]any{"id": targetID, "origin": us}}}, nil, "verified", "stub", "response"},
+		{"a stub with no words is a repost", map[string]any{"stub_of": ref, "transclusions": []any{ref}, "content_md": quote, "content_html": bake},
+			nil, "verified", "stub", "notice"},
+		{"a labelled transclusion with no words is a repost", map[string]any{"transclusions": []any{ref},
+			"content_md": "![[" + targetID + " | theirs]]\n", "content_html": bake}, nil, "verified", "transclusion", "notice"},
+		{"a stub with words is a response", map[string]any{"stub_of": ref, "transclusions": []any{ref}, "content_md": quote + "\nI disagree.",
+			"content_html": bake + "<p>I disagree.</p>"}, nil, "verified", "stub", "response"},
+		{"a fork is a response whatever its words", map[string]any{"forked_from": ref, "content_md": quote, "content_html": bake}, []int{1}, "verified", "fork", "response"},
+	}
+	for _, tc := range cases {
+		w.docs[docPath] = w.doc(w.them(), tc.extra)
+		out := w.verify(t, w.srv.URL+docPath, tc.pinned...)
+		if out.Status != tc.status || out.Relation != tc.relation || out.Class != tc.class {
+			t.Errorf("%s: got %s/%s/%s (%s), want %s/%s/%s", tc.name, out.Status, out.Relation, out.Class, out.Reason, tc.status, tc.relation, tc.class)
+		}
+	}
+	w.docs[docPath] = w.doc(w.them(), map[string]any{"forked_from": ref})
+	if out := w.verify(t, w.srv.URL+docPath); out.Status != "failed" || !strings.Contains(out.Reason, "not pinned") {
+		t.Errorf("an unpinned fork alone: %+v", out)
+	}
+}
+
+// §15.4 step 2 under surface templates (§6.1, decision #61): a document
+// away from the default path verifies only by its own origin's template.
+func TestVerifyUnderTemplates(t *testing.T) {
+	w := newWorld(t)
+	stub := map[string]any{"stub_of": map[string]any{"origin": w.us(), "id": targetID, "version": 1}}
+	tpl := w.srv.URL + "/tpl/"
+	w.docs["/tpl/blyg.json"] = `{"blyg":"0.4","title":"t","item":"` + w.srv.URL + `/wp/items/{id}"}`
+	w.docs["/wp/items/"+sourceID] = w.doc(tpl, stub)
+	if out := w.verify(t, w.srv.URL+"/wp/items/"+sourceID); out.Status != "verified" || out.SourceOrigin != tpl {
+		t.Errorf("templated source: %+v", out)
+	}
+	// Elsewhere than the template says.
+	w.docs["/wp2/items/"+sourceID] = w.doc(tpl, stub)
+	if out := w.verify(t, w.srv.URL+"/wp2/items/"+sourceID); out.Status != "failed" {
+		t.Errorf("off-template source verified: %+v", out)
+	}
+	// The template is the asserted origin's own: /them/ has none, so a
+	// document claiming /them/ cannot borrow /tpl/'s.
+	w.docs["/them/blyg.json"] = `{"blyg":"0.4","title":"them"}`
+	w.docs["/wp/items/"+sourceID] = w.doc(w.them(), stub)
+	if out := w.verify(t, w.srv.URL+"/wp/items/"+sourceID); out.Status != "failed" {
+		t.Errorf("borrowed template verified: %+v", out)
+	}
+	// No manifest at the asserted origin fails the claim.
+	w.docs["/wp/items/"+sourceID] = w.doc(w.srv.URL+"/gone/", stub)
+	if out := w.verify(t, w.srv.URL+"/wp/items/"+sourceID); out.Status != "failed" || out.Transient {
+		t.Errorf("missing manifest: %+v", out)
+	}
+}
+
 func TestVerifyIdentity(t *testing.T) {
 	w := newWorld(t)
 	stub := map[string]any{"stub_of": map[string]any{"origin": w.us(), "id": targetID, "version": 1}}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -410,6 +411,26 @@ func TestWebmentionEndpoint(t *testing.T) {
 	}
 	if got := post("https://b.example.org/y", page); got != 202 {
 		t.Errorf("other host: %d", got)
+	}
+
+	// A target is known by membership (§15.3 step 1, decision #84): a
+	// pinned version's document and page are this blyg's item too; an
+	// unpinned version has no such address.
+	expect(t, alice.api("POST", "/items/"+id+"/versions/1/pin", nil), 200)
+	alice.edit(t, id, "target, revised")
+	expect(t, alice.api("POST", "/items/"+id+"/publish", nil), 200)
+	for i, c := range []struct {
+		target string
+		want   int
+	}{
+		{alice.origin + "items/" + id + "/v1.json", 202},
+		{page + "v1/", 202},
+		{alice.origin + "items/" + id + "/v2.json", 400},
+		{page + "v2/", 400},
+	} {
+		if got := post(fmt.Sprintf("https://p%d.example.net/x", i), c.target); got != c.want {
+			t.Errorf("target %s: %d, want %d", c.target, got, c.want)
+		}
 	}
 
 	// An origin that does not accept mentions has no endpoint.
