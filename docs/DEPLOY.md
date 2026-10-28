@@ -242,6 +242,10 @@ sudo journalctl -u blygd -n 30 --no-pager              # "migrated" from..to, th
 curl -4 -sI https://<host>/healthz
 ```
 
+Then add a row to [DEPLOYS.md](DEPLOYS.md): the commit, the toolchain, and
+`shasum -a 256 bin/blygd-linux` of what you shipped. Nothing else records
+what is live.
+
 blygd migrates on start, so expect a few seconds of downtime. To separate
 the schema change from the restart, set `BLYGD_MIGRATE_ON_START=false` in
 `blygd.env`; the new binary then refuses to start on an old schema until
