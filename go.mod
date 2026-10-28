@@ -2,7 +2,7 @@ module github.com/chrisbodhi/blygd
 
 go 1.26.0
 
-toolchain go1.26.9
+toolchain go1.26.10
 
 require (
 	github.com/jackc/pgx/v5 v5.10.0
@@ -10,7 +10,7 @@ require (
 	github.com/microcosm-cc/bluemonday v1.0.27
 	github.com/rivo/uniseg v0.4.7
 	github.com/yuin/goldmark v1.7.17
-	golang.org/x/net v0.61.0
+	golang.org/x/net v0.62.0
 )
 
 require (
