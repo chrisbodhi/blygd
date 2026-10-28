@@ -204,14 +204,80 @@ For restores, make a separate read-only key
 
 ## Upgrading
 
+### Before you ship
+
+On your own machine, from a clean checkout of what you will deploy:
+
 ```sh
-# rebuild, scp to /tmp/blygd, then
-sudo install -m755 /tmp/blygd /usr/local/bin/blygd && sudo systemctl restart blygd
+make test-all      # everything, against a local Postgres 18
+make vuln          # known vulnerabilities on paths blygd calls
 ```
 
-blygd migrates on start, so expect a few seconds of downtime. Take a dump
-first (`sudo systemctl start blygd-backup`). Set `BLYGD_MIGRATE_ON_START=false`
-and run `blygd migrate` by hand if you want to separate the two.
+When the change follows the spec or the reference client moving, also run
+`make parity` and `make interop` against a current checkout of
+`blygger-studio` (`scripts/interop/README.md`), and read the spec text you
+are changing to, not these docs: CLAUDE.md says the spec wins.
+
+A new file in `internal/db/migrations/` changes the database, and that does
+not roll back with the binary (migrations are append-only and there are no
+down migrations). Look at what is pending first, on the server:
+
+```sh
+sudo -u blygd sh -c 'set -a; . /etc/blygd/blygd.env; blygd migrate status'
+```
+
+### Ship it
+
+```sh
+# on your machine
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o bin/blygd-linux ./cmd/blygd
+scp bin/blygd-linux <you>@<host>:/tmp/blygd
+
+# on the server
+sudo systemctl start blygd-backup                      # a fresh dump, offsite too
+sudo cp /usr/local/bin/blygd /usr/local/bin/blygd.prev
+sudo install -m755 /tmp/blygd /usr/local/bin/blygd
+sudo systemctl restart blygd
+sudo journalctl -u blygd -n 30 --no-pager              # "migrated" from..to, then "listening"
+curl -4 -sI https://<host>/healthz
+```
+
+blygd migrates on start, so expect a few seconds of downtime. To separate
+the schema change from the restart, set `BLYGD_MIGRATE_ON_START=false` in
+`blygd.env`; the new binary then refuses to start on an old schema until
+you run `blygd migrate`.
+
+If the release changes how pages render, re-render each origin so existing
+pages pick it up (it runs in a transaction):
+
+```sh
+sudo -u blygd sh -c 'set -a; . /etc/blygd/blygd.env; blygd rebuild <handle>'
+```
+
+Pins and item documents never change, rebuild or not (DESIGN.md
+"Invariants"); it rewrites only the re-renderable files.
+
+### Rolling back
+
+- **No migration in the release:** put the old binary back and restart.
+  ```sh
+  sudo install -m755 /usr/local/bin/blygd.prev /usr/local/bin/blygd && sudo systemctl restart blygd
+  ```
+- **The release migrated:** the old binary refuses to run on a database
+  newer than itself. Either ship a fixed binary forward, or restore the
+  pre-upgrade dump into a fresh database and point blygd at it, which
+  loses whatever was written since the dump. Prefer the first; test a
+  migration against a copy of a real dump before it ships.
+
+### A new spec version
+
+Keep the changes in their own commits and ship them together only after
+`make interop` passes. Two things to settle by reading the new text, not by
+assumption: what the `blyg` version string in manifests and items
+(`blyg.ProtocolVersion`, written at render time) becomes, and how documents
+already published, which are permanent, are to be read by a studio on the
+new version. Anything the spec turns into a deliberate difference from the
+code goes in DESIGN.md.
 
 ## Troubleshooting
 
