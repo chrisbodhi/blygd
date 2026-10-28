@@ -190,7 +190,7 @@ func TestPublishLifecycle(t *testing.T) {
 	r := alice.api("POST", "/items/"+id+"/publish", map[string]any{"note": "first"})
 	expect(t, r, 200)
 	d := alice.itemDoc(t, id)
-	if d.Blyg != "0.3" || d.Kind != "fragment" || d.Origin != alice.origin || d.Page != "f/"+id+"/" || d.Version != 1 ||
+	if d.Blyg != "0.4" || d.Kind != "fragment" || d.Origin != alice.origin || d.Page != "f/"+id+"/" || d.Version != 1 ||
 		d.ContentHash != blyg.ContentHash(d.ContentMD) || d.Created != d.Updated || len(d.Changelog) != 1 ||
 		*d.Changelog[0].Note != "first" || d.Media == nil {
 		t.Fatalf("v1 doc: %+v", d)

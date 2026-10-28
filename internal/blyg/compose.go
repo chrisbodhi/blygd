@@ -276,7 +276,7 @@ func (c *composer) refuseDirectives(md string) {
 		if id, _, at := directiveAt(l); id != "" && !inSpans(code, starts[i]+at) {
 			c.problem(strings.TrimSpace(l), "only threads transclude (§10): publish this as a thread, or use [["+id+"]] to link")
 		} else if reservedLine.MatchString(l) && !inSpans(code, starts[i]+strings.IndexByte(l, '!')) {
-			c.problem(strings.TrimSpace(l), "explicit versions (![[id@vN]]) are reserved in 0.3 (§10.1)")
+			c.problem(strings.TrimSpace(l), "explicit versions (![[id@vN]]) are reserved (§10.1)")
 		}
 	}
 }
@@ -297,7 +297,7 @@ func (c *composer) thread(md string) string {
 		l := lines[i]
 		if reservedLine.MatchString(l) && !inSpans(code, starts[i]+strings.IndexByte(l, '!')) {
 			flush()
-			c.problem(strings.TrimSpace(l), "explicit versions (![[id@vN]]) are reserved in 0.3 (§10.1)")
+			c.problem(strings.TrimSpace(l), "explicit versions (![[id@vN]]) are reserved (§10.1)")
 			continue
 		}
 		id, label, at := directiveAt(l)

@@ -105,7 +105,7 @@ type importedDoc struct {
 	} `json:"changelog"`
 }
 
-// knownKind reports whether a reader at 0.3 understands kind (§5.3).
+// knownKind reports whether a reader at 0.4 understands kind (§5.3).
 // Unknown kinds are ignored, never rejected.
 func knownKind(kind string) bool {
 	return kind == "fragment" || kind == "thread" || kind == "withdrawn"

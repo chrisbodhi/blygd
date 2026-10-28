@@ -2,7 +2,7 @@
 // pure renderers for every file on the public surface. Nothing here touches
 // the database or the network.
 //
-// Section numbers (§) refer to blygger-spec docs/protocol-v0.3.md.
+// Section numbers (§) refer to blygger-spec docs/protocol-v0.4.md.
 package blyg
 
 import (
@@ -13,7 +13,7 @@ import (
 )
 
 // ProtocolVersion is the manifest/item "blyg" key (§3.1).
-const ProtocolVersion = "0.3"
+const ProtocolVersion = "0.4"
 
 // IDAlphabet is lowercase Crockford base32 without i, l, o, u (§5.1).
 const IDAlphabet = "0123456789abcdefghjkmnpqrstvwxyz"

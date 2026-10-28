@@ -306,6 +306,17 @@ its own, and the version string moves last.
    and rerun `make parity` and `make interop` against a reference that
    speaks 0.4.
 
+   *(Done, 2026-10-28. Manifests, item documents and pins now say
+   `"blyg": "0.4"`. CLAUDE.md, DESIGN.md and `openapi.json` (now API
+   version 0.4.0) cite `protocol-v0.4.md`. The fake test blyg still serves
+   `"0.3"`, which covers reading an older publisher.
+   - **Against blygger-studio 0.48.2 (`b93ac12`):** parity, 56 cases with
+     no unexpected differences; interop, all five scenarios, 0 failed.
+   - **Not yet covered:** interop exercises no 0.4 construct.
+     `scripts/interop/check.py` still needs scenarios for a relocated
+     surface, `link` and `source` mentions, and labels. The reference
+     emits neither `links[]` nor `data-blyg-label` yet.)*
+
 **Open question:** §10.2 step 2 (#82) resolves against any snapshot the
 publisher holds, not only a subscribed origin's. `reader.Snapshots` joins
 through `subscriptions`, which is also what keeps one tenant from quoting

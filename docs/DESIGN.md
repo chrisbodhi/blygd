@@ -5,9 +5,11 @@ reader, hoppers and Webmentions together. It is headless — every client
 (the SwiftUI app, ygg.el, an agent) talks to it over the write API — and
 multi-tenant, with each user owning one origin.
 
-Spec references (§) are to `blygger-spec` `docs/protocol-v0.3.md`, read at
-commit `c2da39f` (2026-10-07) for Phase 1 and `d008e21` (2026-10-07) for
-Phases 2 and 3.
+Spec references (§) are to `blygger-spec` `docs/protocol-v0.4.md`, read at
+commit `24b9770` (2026-10-20, its sixth revision) for Phase 5. Phases 1–3
+were built against `docs/protocol-v0.3.md` at `c2da39f` and `d008e21`
+(2026-10-07). Section numbers carry over, with §10.3a new in 0.4. blygd
+emits `"blyg": "0.4"` (§3.1), and reads any `0.x`.
 
 ## Three planes
 

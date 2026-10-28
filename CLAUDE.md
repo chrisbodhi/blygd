@@ -6,7 +6,7 @@ behaviour and `docs/PLAN.md` before starting a phase.
 
 ## The spec is the authority
 
-The normative text is `blygger/blygger-spec` `docs/protocol-v0.3.md`.
+The normative text is `blygger/blygger-spec` `docs/protocol-v0.4.md`.
 Cite sections (§) in code comments where a rule comes from the spec. When
 the spec and this code disagree, the spec wins, unless DESIGN.md lists the
 difference as a deliberate departure. The spec moves often, so read the
