@@ -20,12 +20,20 @@ import (
 // What shows is a verb, the source's author name, its host and a link; no
 // words from the source, which is never stored.
 
-// RerenderItem re-renders one item's surface files. The mention worker
-// calls it when a verification withdraws an approval.
-func (s *Studio) RerenderItem(ctx context.Context, originID int64, itemID string) error {
+// ChangeDisplay runs change under the origin's lock and, when it reports an
+// item whose shown responses changed, re-renders that item in the same
+// transaction. The mention worker records each verification through it, so
+// a withdrawn approval and the page that stops showing it commit together:
+// if the render fails, the approval stands and the claim comes due again.
+// The lock order, origin then mention, is SetMentionApproval's.
+func (s *Studio) ChangeDisplay(ctx context.Context, originID int64, change func(tx pgx.Tx) (itemID string, changed bool, err error)) error {
 	return pgx.BeginTxFunc(ctx, s.Pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
 		o, err := lockOrigin(ctx, tx, originID)
 		if err != nil {
+			return err
+		}
+		itemID, changed, err := change(tx)
+		if err != nil || !changed {
 			return err
 		}
 		return s.renderItem(ctx, tx, o, itemID)

@@ -2,9 +2,12 @@ package web
 
 import (
 	"context"
+	"errors"
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/chrisbodhi/blygd/internal/mention"
 )
@@ -117,6 +120,77 @@ func TestResponsesAreCurated(t *testing.T) {
 	expect(t, alice.api("PUT", "/mentions/"+mid+"/approval", nil), 409) // only verified mentions show
 	if _, err := e.pool.Exec(ctx, `UPDATE inbound_mentions SET approved_at = now() WHERE id = $1`, mid); err == nil {
 		t.Error("the schema let a gone mention be approved")
+	}
+}
+
+// A withdrawn approval and the page that stops showing it commit together
+// (render inside the transaction). If the render fails, neither happens and
+// the claim comes due again; with the old split, the page kept showing a
+// response the database no longer approved, and nothing retried it.
+func TestWithdrawnApprovalCommitsWithItsPage(t *testing.T) {
+	e := newEnv(t, mention.DefaultRateLimits)
+	alice, bob := e.user("alice"), e.user("bob")
+	ctx := context.Background()
+	page := func(id string) string { return string(alice.get("f/" + id + "/").body) }
+	approved := func(mid string) bool {
+		var ok bool
+		if err := e.pool.QueryRow(ctx, `SELECT approved_at IS NOT NULL FROM inbound_mentions WHERE id = $1`, mid).Scan(&ok); err != nil {
+			t.Fatal(err)
+		}
+		return ok
+	}
+
+	target := alice.draft(t, map[string]any{"content_md": "A claim."})
+	alice.publish(t, target, 200)
+	bob.subscribe(t, alice.origin)
+	stub := bob.draft(t, map[string]any{"stub_of": map[string]any{"id": target}})
+	bob.edit(t, stub, "![["+target+"]]\n\nA reply.")
+	bob.publish(t, stub, 200)
+	if _, err := e.workers.SendBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.workers.VerifyBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	ms := alice.api("GET", "/mentions", nil).json(t)["mentions"].([]any)
+	mid := itoa(int(ms[0].(map[string]any)["id"].(float64)))
+	expect(t, alice.api("PUT", "/mentions/"+mid+"/approval", nil), 204)
+	if !strings.Contains(page(target), "Responses") {
+		t.Fatal("approved response not shown")
+	}
+
+	// The stub is withdrawn, and the re-render after the update fails.
+	expect(t, bob.api("POST", "/items/"+stub+"/withdraw", nil), 200)
+	if _, err := e.workers.SendBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	real := e.workers.Display
+	e.workers.Display = func(ctx context.Context, originID int64, change func(pgx.Tx) (string, bool, error)) error {
+		return real(ctx, originID, func(tx pgx.Tx) (string, bool, error) {
+			id, changed, err := change(tx)
+			if changed {
+				return "", false, errors.New("render failed")
+			}
+			return id, changed, err
+		})
+	}
+	if _, err := e.workers.VerifyBatch(ctx); err == nil {
+		t.Fatal("a failed render was not reported")
+	}
+	if !approved(mid) || !strings.Contains(page(target), "Responses") {
+		t.Fatalf("approved %v; the database and the page disagree after a failed render", approved(mid))
+	}
+
+	// Next time round the render works, and both change.
+	e.workers.Display = real
+	if _, err := e.pool.Exec(ctx, `UPDATE inbound_mentions SET next_attempt_at = now() WHERE id = $1`, mid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.workers.VerifyBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if approved(mid) || strings.Contains(page(target), "Responses") {
+		t.Fatalf("approved %v after the retry; the response should be off the page", approved(mid))
 	}
 }
 

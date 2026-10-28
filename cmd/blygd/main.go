@@ -251,7 +251,7 @@ func serve(ctx context.Context, log *slog.Logger, cfg *config.Config, pool *pgxp
 	}
 	surface := &web.Surface{Studio: st, Receiver: receiver, Hoppers: hoppers, Scheme: cfg.Scheme(), TrustProxy: cfg.TrustProxy, Log: log}
 
-	workers := &mention.Workers{Pool: pool, Fetch: fc, Log: log, OnDisplayChange: st.RerenderItem}
+	workers := &mention.Workers{Pool: pool, Fetch: fc, Log: log, Display: st.ChangeDisplay}
 	workers.Run(ctx)
 	rd.Run(ctx)
 

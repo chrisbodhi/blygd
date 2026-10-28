@@ -391,7 +391,9 @@ anyone else. So the defaults assume a response may be hostile.
   survives only if relation, class, source origin, page and author are
   unchanged.
   Otherwise, or if it goes `failed`/`gone`, approval is cleared, and the
-  worker's `OnDisplayChange` hook re-renders the page at once.
+  page is re-rendered in the same transaction (`Studio.ChangeDisplay`,
+  under the origin's lock): if the render fails, the approval stands and
+  the claim is retried.
 - **Little to show.** An entry is a verb ("responded", "quoted this",
   "forked this", "drew on this"), the source's author name (as asserted, cut to 80
   characters), its host, and a `nofollow ugc` link. No words from the

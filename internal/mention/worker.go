@@ -26,10 +26,17 @@ type Workers struct {
 	Log   *slog.Logger
 	Batch int
 	Idle  time.Duration
-	// OnDisplayChange re-renders an item whose shown responses changed
-	// because a verification withdrew an approval (§15.5). The studio
-	// renders; this package never writes the surface.
-	OnDisplayChange func(ctx context.Context, originID int64, itemID string) error
+	// Display records a verification: it runs change in a transaction
+	// under the origin's lock and, when change reports that an approved
+	// response left an item (§15.5), re-renders that item before the
+	// commit. The studio renders; this package never writes the surface.
+	// Nil records without rendering, for tests with no studio.
+	Display func(ctx context.Context, originID int64, change func(tx pgx.Tx) (itemID string, changed bool, err error)) error
+}
+
+// querier is what recording a verification needs from a pool or a tx.
+type querier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
 // verifyRetry is the backoff for a verification the network could not
@@ -126,10 +133,9 @@ func (wk *Workers) recordInbound(ctx context.Context, c inboundClaim, out Outcom
 	if out.Relation != "" {
 		relation, class = out.Relation, out.Class
 	}
-	var dropped bool
 	var originID int64
-	var itemID string
-	err := wk.Pool.QueryRow(ctx, `UPDATE inbound_mentions m SET
+	record := func(q querier) (itemID string, dropped bool, err error) {
+		err = q.QueryRow(ctx, `UPDATE inbound_mentions m SET
 		-- §15.5: approval holds only while what is shown stays the same.
 		approved_at = CASE WHEN $2 = 'verified'
 			AND m.relation IS NOT DISTINCT FROM $3::text
@@ -154,17 +160,23 @@ func (wk *Workers) recordInbound(ctx context.Context, c inboundClaim, out Outcom
 		FROM (SELECT approved_at FROM inbound_mentions WHERE id = $1) old
 		WHERE m.id = $1
 		RETURNING old.approved_at IS NOT NULL AND m.approved_at IS NULL, m.origin_id, m.target_item_id`,
-		c.id, status, relation, out.SourceOrigin, out.SourceID, out.SourceVersion, out.SourceKind,
-		nullJSON(out.SourceAuthor), out.SourcePage, out.Reason, class).Scan(&dropped, &originID, &itemID)
+			c.id, status, relation, out.SourceOrigin, out.SourceID, out.SourceVersion, out.SourceKind,
+			nullJSON(out.SourceAuthor), out.SourcePage, out.Reason, class).Scan(&dropped, &originID, &itemID)
+		return itemID, dropped, err
+	}
+	var err error
+	if wk.Display == nil {
+		_, _, err = record(wk.Pool)
+	} else {
+		// An approved response that leaves the page is re-rendered off it
+		// in the transaction that withdrew the approval.
+		err = wk.Display(ctx, c.originID, func(tx pgx.Tx) (string, bool, error) { return record(tx) })
+	}
 	if err != nil {
 		return err
 	}
 	wk.notify(ctx, "mention", originID, map[string]any{"id": c.id, "status": status, "relation": out.Relation, "class": out.Class})
-	if !dropped || wk.OnDisplayChange == nil {
-		return nil
-	}
-	// An approved response left the page: re-render it now.
-	return wk.OnDisplayChange(ctx, originID, itemID)
+	return nil
 }
 
 func nullJSON(b []byte) any {

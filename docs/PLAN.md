@@ -294,6 +294,30 @@ Not in the spec at all:
   provider, per-user keys and a review step before publish, so it
   starts with a design note.
 
+## Hardening (from the architecture review, 2026-10-28)
+
+The review is `reports/architecture-review-entire-project-2026-10-28-171955.md`.
+Its two critical findings come before Phase 5 step 4, and neither touches
+step 4's files. The rest wait until after the 0.4 bump unless step 4 needs
+them.
+
+1. **A withdrawn approval re-rendered outside its transaction** (C1). The
+   mention worker committed `approved_at = NULL` and then re-rendered the
+   page in a second transaction. A failed render left the page showing a
+   response the database no longer approved, and nothing retried it.
+   *(Done, 2026-10-28. `Workers.Display` replaces `OnDisplayChange`, and
+   `Studio.ChangeDisplay` runs the worker's update under the origin's lock
+   and renders before the commit. That is the same lock order as
+   `SetMentionApproval`, origin then mention. A failed render now rolls
+   both back, and the claim comes due again when its lease lapses. Every
+   verification now takes the origin lock briefly. Taking it only when an
+   approval might drop would race an approval made between the read and
+   the update.)*
+2. **One origin can stall the poller** (C2). Polls run one at a time with
+   no deadline per poll. 200 fetches at 20 s is about 67 minutes, past
+   the 15-minute lease, so `PollFor` can start a second poll of the same
+   origin.
+
 ## Interop (2026-10-10)
 
 Checked against the reference client, blygger-studio 0.39.0 (`9f6bab8`).
