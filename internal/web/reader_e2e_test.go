@@ -3,6 +3,8 @@ package web
 import (
 	"context"
 	"errors"
+	"fmt"
+	"html"
 	"strings"
 	"testing"
 	"time"
@@ -205,6 +207,70 @@ func TestOutboundUsesImportedPage(t *testing.T) {
 	// §15.2: the target is the page the sender holds, not the f/{id}/
 	// convention, and that page's endpoint got the mention.
 	if out["target_url"] != remote.Origin()+"posts/fork-me/" || out["status"] != "sent" || remote.S.Hits("/wm") != 1 {
+		t.Fatalf("outbound: %v (wm hits %d)", out, remote.S.Hits("/wm"))
+	}
+}
+
+// A fork of an item on a templated surface (§6.1): the pin check reads the
+// pin template, the fork's page links where the check found the file, and
+// with no page held the mention's target is the item document from the
+// item template, never the f/{id}/ guess (§15.2, #85).
+func TestForkOfARelocatedSurface(t *testing.T) {
+	e := newEnv(t, mention.DefaultRateLimits)
+	ctx := context.Background()
+	bob := e.user("bob")
+	remote := &testblyg.Blyg{S: testblyg.New(t), Mount: "/blyg/", Title: "Remote",
+		ItemTmpl: "api?route=/items/{id}", PinTmpl: "api?route=/pins/{id}/{n}", Webmention: "/wm"}
+	src := &testblyg.Item{ID: "0a00000000000000000000000a", Kind: "fragment", Version: 1, ContentMD: "fork me",
+		Pinned: []int{1}, Updated: time.Now()}
+	remote.Items = []*testblyg.Item{src}
+	remote.Publish()
+	remote.SetPin(src, 1, "fork me")
+	remote.S.SetResponse("/wm", testblyg.Response{Status: 202})
+	// The default paths answer too, wrongly: only the manifest says which
+	// is the blyg's.
+	remote.S.Set("/blyg/items/"+src.ID+"/v1.json", `{"blyg": "0.4", "id": "someone-else"}`)
+
+	fork := bob.draft(t, map[string]any{"forked_from": map[string]any{"origin": remote.Origin(), "id": src.ID, "version": 1}})
+	if md := bob.api("GET", "/items/"+fork, nil).json(t)["draft_md"]; !strings.Contains(fmt.Sprint(md), "fork me") {
+		t.Fatalf("fork copied %v; the pin template's file says \"fork me\"", md)
+	}
+	expect(t, bob.api("POST", "/items/"+fork+"/publish", nil), 200)
+	pin := remote.Origin() + "api?route=/pins/" + src.ID + "/1"
+	if p := string(bob.get("f/" + fork + "/").body); !strings.Contains(p, `Forked from <a href="`+html.EscapeString(pin)+`">`) {
+		t.Fatalf("fork page should link the templated pin %s:\n%s", pin, p)
+	}
+	var oid int64
+	if err := e.pool.QueryRow(ctx, `SELECT id FROM origins WHERE owner_id = $1`, bob.id).Scan(&oid); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.studio.Rebuild(ctx, oid); err != nil {
+		t.Fatal(err)
+	}
+	if p := string(bob.get("f/" + fork + "/").body); !strings.Contains(p, html.EscapeString(pin)) {
+		t.Fatal("a rebuild lost the templated pin link: rendering must not depend on the network")
+	}
+
+	// A manifest that cannot be read just now is waited for, not guessed
+	// around: the default path would be the wrong address.
+	remote.S.SetResponse("/blyg/blyg.json", testblyg.Response{Status: 503})
+	if n, err := e.workers.SendBatch(ctx); err != nil || n != 1 {
+		t.Fatalf("send: %d %v", n, err)
+	}
+	out := bob.api("GET", "/outbound", nil).json(t)["outbound"].([]any)[0].(map[string]any)
+	if out["status"] != "pending" || !strings.Contains(fmt.Sprint(out["last_result"]), "manifest") || remote.S.Hits("/wm") != 0 {
+		t.Fatalf("unreadable manifest: %v", out)
+	}
+	remote.Publish()
+	if _, err := e.pool.Exec(ctx, `UPDATE outbound_mentions SET next_attempt_at = now()`); err != nil {
+		t.Fatal(err)
+	}
+
+	if n, err := e.workers.SendBatch(ctx); err != nil || n != 1 {
+		t.Fatalf("send: %d %v", n, err)
+	}
+	out = bob.api("GET", "/outbound", nil).json(t)["outbound"].([]any)[0].(map[string]any)
+	if out["target_url"] != remote.Origin()+"api?route=/items/"+src.ID || out["status"] != "sent" || remote.S.Hits("/wm") != 1 {
 		t.Fatalf("outbound: %v (wm hits %d)", out, remote.S.Hits("/wm"))
 	}
 }

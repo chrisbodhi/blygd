@@ -349,7 +349,12 @@ func TestForkMentionRoundTrip(t *testing.T) {
 	if d := bob.itemDoc(t, fork); d.ForkedFrom == nil {
 		t.Errorf("endcap dropped forked_from (§9 keeps it)")
 	}
-	wm := url.Values{"source": {bob.origin + "f/" + fork + "/"}, "target": {alice.origin + "f/" + src + "/"}}
+	// Bob holds no page for the source, so the mention named its item
+	// document (§15.2, #85), and the re-send names the same target.
+	if out["target_url"] != alice.origin+"items/"+src+".json" {
+		t.Errorf("target %v: with no page held it is the item document, never f/{id}/", out["target_url"])
+	}
+	wm := url.Values{"source": {bob.origin + "f/" + fork + "/"}, "target": {alice.origin + "items/" + src + ".json"}}
 	expect(t, e.do("POST", alice.origin+"webmention", "", wm), 202)
 	if _, err := e.workers.VerifyBatch(ctx); err != nil {
 		t.Fatal(err)

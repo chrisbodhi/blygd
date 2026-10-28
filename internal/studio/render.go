@@ -163,7 +163,7 @@ func (s *Studio) renderItemTo(ctx context.Context, tx pgx.Tx, out surfaceOut, o 
 	page, err := blyg.RenderPermalink(pageSite(o), blyg.PageItem{
 		ID: id, Kind: latest.Kind, Version: it.Version, Updated: latest.At, Page: *it.Page,
 		ContentHTML: blyg.PageHTML(latest.ContentHTML), Pins: pins, Withdrawn: it.Withdrawn,
-		ForkedFrom: forkRef(it.ForkedFrom), ForkedFromURL: s.forkLink(ctx, tx, o, it.ForkedFrom),
+		ForkedFrom: forkRef(it.ForkedFrom), ForkedFromURL: s.forkLink(ctx, tx, o, it),
 		Responses: responses,
 	})
 	if err != nil {
@@ -225,9 +225,11 @@ func itemDoc(o *Origin, it *Item, vs []*Version) *blyg.ItemDoc {
 }
 
 // forkLink is where a fork's lineage line points (§5.6 rule 7): an own
-// source's pinned page, which we know we serve, else the pinned file.
-func (s *Studio) forkLink(ctx context.Context, tx pgx.Tx, o *Origin, raw json.RawMessage) string {
-	ref := forkRef(raw)
+// source's pinned page, which we know we serve, else the pinned file where
+// the first publish's pin check found it (the source's `pin` template,
+// §6.1), else the default path. Rendering never fetches.
+func (s *Studio) forkLink(ctx context.Context, tx pgx.Tx, o *Origin, it *Item) string {
+	ref := forkRef(it.ForkedFrom)
 	if ref == nil {
 		return ""
 	}
@@ -238,6 +240,10 @@ func (s *Studio) forkLink(ctx context.Context, tx pgx.Tx, o *Origin, raw json.Ra
 			o.ID, ref.ID, ref.Version).Scan(&page) == nil && page != nil {
 			return o.BaseURL + blyg.PinnedPage(*page, ref.Version)
 		}
+	}
+	var found *string
+	if tx.QueryRow(ctx, `SELECT forked_from_url FROM items WHERE origin_id = $1 AND id = $2`, o.ID, it.ID).Scan(&found) == nil && found != nil {
+		return *found
 	}
 	return blyg.PinURL(ref.Origin, ref.ID, ref.Version)
 }

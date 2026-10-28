@@ -12,6 +12,7 @@ import (
 
 	"github.com/chrisbodhi/blygd/internal/blyg"
 	"github.com/chrisbodhi/blygd/internal/fetch"
+	"github.com/chrisbodhi/blygd/internal/surface"
 )
 
 // Imports is the one way imported bytes reach plane 1: a read-only lookup,
@@ -395,7 +396,11 @@ func (s *Studio) forkContent(ctx context.Context, o *Origin, ref blyg.Reference)
 		if s.Fetch == nil {
 			return "", "", invalid("cannot fetch the pinned source to copy; send content_md to fork without copying")
 		}
-		pinURL := blyg.PinURL(ref.Origin, ref.ID, ref.Version)
+		l, _ := surface.Locate(ctx, s.Fetch, ref.Origin, fetch.VerifyLimits)
+		if l.Transient() {
+			return "", "", invalid("could not read %sblyg.json to find the pinned file (HTTP %d); send content_md to fork without copying", l.Origin, l.Status)
+		}
+		pinURL := l.PinURL(ref.ID, ref.Version) // §6.1: the `pin` template
 		resp, err := s.Fetch.Get(ctx, pinURL, fetch.VerifyLimits, "application/json")
 		if err != nil {
 			return "", "", invalid("could not fetch %s to copy (%v); send content_md to fork without copying", pinURL, err)
@@ -420,8 +425,14 @@ func (s *Studio) forkContent(ctx context.Context, o *Origin, ref blyg.Reference)
 }
 
 // quoteLink is where a flattened quote's attribution line points: the
-// quoted item's page where we hold it, else its item document (§5.6 rule 6).
+// quoted item's page where we hold it, else its item document (§5.6 rule
+// 6), from the quoted origin's `item` template (§6.1). Each origin's
+// manifest is read once per flattening.
 func (s *Studio) quoteLink(ctx context.Context, o *Origin) blyg.QuoteLink {
+	var located *surface.Cache
+	if s.Fetch != nil {
+		located = &surface.Cache{G: s.Fetch, Lim: fetch.VerifyLimits}
+	}
 	return func(origin, id string) string {
 		if blyg.SameOrigin(origin, o.BaseURL) {
 			var page *string
@@ -436,6 +447,9 @@ func (s *Studio) quoteLink(ctx context.Context, o *Origin) blyg.QuoteLink {
 					}
 				}
 			}
+		}
+		if located != nil && !blyg.SameOrigin(origin, o.BaseURL) {
+			return located.Locate(ctx, origin).ItemURL(id)
 		}
 		return blyg.ItemDocURL(origin, id)
 	}

@@ -2,6 +2,7 @@ package mention
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/chrisbodhi/blygd/internal/batch"
 	"github.com/chrisbodhi/blygd/internal/events"
 	"github.com/chrisbodhi/blygd/internal/fetch"
+	"github.com/chrisbodhi/blygd/internal/surface"
 )
 
 // Workers drain the inbound verification queue and the outbound outbox.
@@ -195,10 +197,9 @@ type outboundClaim struct {
 }
 
 // importedPage returns the target's page as the import mirror holds it
-// (§15.2: "the target's page if the sender holds it, else the reference
-// convention"). The publish transaction wrote the convention, because it
-// does not read the mirror; the worker, which writes no surface, upgrades
-// the target here.
+// (§15.2: "the target's page when the sender holds it"). The publish
+// transaction does not read the mirror, so it wrote the default item
+// document; the worker, which writes no surface, picks the target here.
 func (wk *Workers) importedPage(ctx context.Context, origin, itemID string) string {
 	if origin == "" || itemID == "" {
 		return ""
@@ -233,13 +234,10 @@ func (wk *Workers) SendBatch(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	for _, c := range claims {
-		if page := wk.importedPage(ctx, c.m.TargetOrigin, c.targetID); page != "" && page != c.m.TargetURL {
-			c.m.TargetURL = page
-			if _, err := wk.Pool.Exec(ctx, `UPDATE outbound_mentions SET target_url = $2 WHERE id = $1`, c.id, page); err != nil {
-				return len(claims), err
-			}
+		res, err := wk.sendOne(ctx, &c)
+		if err != nil {
+			return len(claims), err
 		}
-		res := Send(ctx, wk.Fetch, c.m)
 		status, next := res.Status, any(nil)
 		if status == "retry" {
 			if c.attempts > len(RetrySchedule) {
@@ -258,6 +256,35 @@ func (wk *Workers) SendBatch(ctx context.Context) (int, error) {
 		wk.notify(ctx, "outbound", c.originID, map[string]any{"id": c.id, "status": status, "last_result": res.Detail})
 	}
 	return len(claims), nil
+}
+
+// sendOne picks a blyg target's address and sends (§15.2, #85): the
+// target's page when the mirror holds it, else its item document, expanded
+// from the target origin's `item` template, and never the f/{id}/ or
+// t/{id}/ convention. The manifest read for the template is the one
+// endpoint discovery reads first, so it is fetched once. A manifest that
+// cannot be read for a reason that may pass is retried rather than guessed
+// around.
+func (wk *Workers) sendOne(ctx context.Context, c *outboundClaim) (SendResult, error) {
+	if c.m.TargetOrigin == "" || c.targetID == "" {
+		return Send(ctx, wk.Fetch, c.m), nil
+	}
+	l, _ := surface.Locate(ctx, wk.Fetch, c.m.TargetOrigin, sendLimits)
+	if l.Transient() {
+		return SendResult{Status: "retry", Detail: fmt.Sprintf("the target's manifest %sblyg.json could not be read (HTTP %d)", l.Origin, l.Status)}, nil
+	}
+	c.m.Located = &l
+	target := wk.importedPage(ctx, c.m.TargetOrigin, c.targetID)
+	if target == "" {
+		target = l.ItemURL(c.targetID)
+	}
+	if target != c.m.TargetURL {
+		c.m.TargetURL = target
+		if _, err := wk.Pool.Exec(ctx, `UPDATE outbound_mentions SET target_url = $2 WHERE id = $1`, c.id, target); err != nil {
+			return SendResult{}, err
+		}
+	}
+	return Send(ctx, wk.Fetch, c.m), nil
 }
 
 // notify sends a hint to the origin owner's open studios. Delivery is not

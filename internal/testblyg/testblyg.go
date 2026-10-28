@@ -136,6 +136,7 @@ type Item struct {
 	ContentMD string
 	Hash      string // empty: the correct hash
 	Page      string // empty: f/{id}/
+	NoPage    bool   // omit page, as a blyg with no HTML pages does (§5.8)
 	Pinned    []int
 	Updated   time.Time
 }
@@ -161,6 +162,8 @@ type Blyg struct {
 	// The identity stays Mount, so ManifestPath should sit directly under
 	// it.
 	ManifestPath string
+	// Webmention is the manifest's webmention value (§15.1), if any.
+	Webmention string
 }
 
 // Origin is the blyg's identity origin.
@@ -212,10 +215,14 @@ func (b *Blyg) Doc(it *Item) string {
 		}
 		cl = append(cl, fmt.Sprintf(`{"version": %d, "at": "%s", "note": null%s}`, v, blyg.Time(it.Updated), pinned))
 	}
-	return fmt.Sprintf(`{"blyg": "0.3", "id": %q, "kind": %q, "origin": %q, "page": %q, "created": "%s", "updated": "%s",
+	pageMember := fmt.Sprintf(`"page": %q, `, page)
+	if it.NoPage {
+		pageMember = ""
+	}
+	return fmt.Sprintf(`{"blyg": "0.3", "id": %q, "kind": %q, "origin": %q, %s"created": "%s", "updated": "%s",
 		"version": %d, "content_md": %q, "content_html": %q, "content_hash": %q, "media": [], "x-unknown": {"kept": true},
 		"changelog": [%s]}`,
-		it.ID, it.Kind, b.Origin(), page, blyg.Time(it.Updated), blyg.Time(it.Updated),
+		it.ID, it.Kind, b.Origin(), pageMember, blyg.Time(it.Updated), blyg.Time(it.Updated),
 		it.Version, it.ContentMD, html, hash, strings.Join(cl, ", "))
 }
 
@@ -240,6 +247,9 @@ func (b *Blyg) Publish() {
 	}
 	if b.PinTmpl != "" {
 		keys += fmt.Sprintf(`, "pin": %q`, b.PinTmpl)
+	}
+	if b.Webmention != "" {
+		keys += fmt.Sprintf(`, "webmention": %q`, b.Webmention)
 	}
 	b.S.Set(b.Path(b.ManifestURL()), fmt.Sprintf(`{"blyg": "0.3", "level": 1, "site": %q, "title": %q, %s}`, site, b.Title, keys))
 	var idx, entries []string

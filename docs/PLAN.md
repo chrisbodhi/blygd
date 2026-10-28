@@ -248,6 +248,27 @@ its own, and the version string moves last.
      rendered link name `item` and `pin`. Each fetches
      `{origin}blyg.json` outside the transaction, as the verifier does,
      and falls back to the defaults when it has no template.
+
+   *(Done, 2026-10-28. `internal/surface.Locate` is the one manifest
+   read, used by the verifier, the sender, the fork pin check, fork
+   copying and `quoteLink`, which caches per origin for one call.
+   - **Correction to the plan, from the review:** a fork's rendered link
+     cannot fetch, because rendering runs inside transactions and
+     `Rebuild` works offline. The pin check's confirmed URL is kept in
+     `items.forked_from_url` (migration 005), written once with no trigger.
+   - **The sender:** it retries a manifest it cannot read yet, rather than
+     guessing the default path. It still names a held page only when the
+     page is under the target's origin. An absolute page elsewhere (§5.8)
+     falls back to the item document, which every 0.4 receiver accepts
+     (#84), so a stranger's page claim can never aim our mention at a
+     third party.
+   - **The snapshot page fallback:** with no `page` held, it is the item
+     document, never `f/{id}/`.
+   - **What changed for existing tests:** `TestForkMentionRoundTrip`'s
+     hand re-send now names the item document. A sender holding no page
+     targets that address now.
+   - **Verification:** parity, 56 cases with no unexpected differences;
+     interop, 0 failed.)*
 5. **Emitting the new constructs:**
    - Disclosed links (§10.3a, #79, which reverses #32): each resolved
      `[[id]]` adds a `links[]` entry, and a remote one sends a `link`

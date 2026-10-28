@@ -14,6 +14,7 @@ import (
 
 	"github.com/chrisbodhi/blygd/internal/blyg"
 	"github.com/chrisbodhi/blygd/internal/fetch"
+	"github.com/chrisbodhi/blygd/internal/surface"
 )
 
 // Outcome is the result of verifying one claimed mention (§15.4).
@@ -233,18 +234,17 @@ func classOf(relation string, doc sourceDoc) string {
 // its `item` template, expanded with id, is exactly final. A non-zero
 // outcome says why the manifest could not be read.
 func templatedItem(ctx context.Context, c *fetch.Client, origin, id, final string) (Outcome, bool) {
-	resp, err := c.Get(ctx, origin+"blyg.json", fetch.VerifyLimits, "application/json")
+	l, err := surface.Locate(ctx, c, origin, fetch.VerifyLimits)
 	if err != nil {
 		return fetchFailure("fetching the source origin's manifest", err), false
 	}
-	if o, done := statusOutcome("the source origin's manifest", resp.Status); done {
+	if o, done := statusOutcome("the source origin's manifest", l.Status); done {
 		return o, false
 	}
-	s := blyg.SurfaceOf(origin, resp.Body)
-	if !s.Templated() {
+	if !l.Templated() {
 		return Outcome{}, false
 	}
-	want, err := blyg.NormalizeURL(s.ItemURL(id))
+	want, err := blyg.NormalizeURL(l.ItemURL(id))
 	return Outcome{}, err == nil && want == final
 }
 

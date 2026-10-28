@@ -77,6 +77,7 @@ internal/studio      plane 1: item lifecycle, pins, outbox, render-on-publish
 internal/mention     §15: receiver, verifier, sender, lease workers
 internal/reader      §12–13: resolution, importer, poller, reading overlay
 internal/fetch       bounded, SSRF-guarded HTTP client
+internal/surface     locates another origin's surface from its manifest (§6.1)
 internal/account     users, scoped tokens
 internal/hopper      hopper CRUD over references; public hopper view (§13.5, live)
 internal/web         HTTP: origin surface, /api, /studio (embedded plain client), router; end-to-end tests

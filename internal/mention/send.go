@@ -3,7 +3,6 @@ package mention
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/chrisbodhi/blygd/internal/blyg"
 	"github.com/chrisbodhi/blygd/internal/fetch"
+	"github.com/chrisbodhi/blygd/internal/surface"
 )
 
 // RetrySchedule is §15.2's RECOMMENDED backoff after a network failure, 5xx
@@ -25,6 +25,9 @@ type Outbound struct {
 	SourceURL    string
 	TargetURL    string
 	TargetOrigin string // set for blyg targets: try the manifest first
+	// Located is the target origin's manifest, when the caller has read
+	// it already; Discover reads it otherwise.
+	Located *surface.Located
 }
 
 // SendResult is the outcome of one send attempt.
@@ -88,15 +91,15 @@ func Send(ctx context.Context, c *fetch.Client, m Outbound) SendResult {
 // res says why: no_endpoint (recorded, not retried) or retry.
 func Discover(ctx context.Context, c *fetch.Client, m Outbound) (endpoint string, res SendResult) {
 	if m.TargetOrigin != "" {
-		manifestURL := m.TargetOrigin + "blyg.json"
-		if resp, err := c.Get(ctx, manifestURL, sendLimits, "application/json"); err == nil && resp.Status == 200 {
-			var man struct {
-				Webmention string `json:"webmention"`
-			}
-			if json.Unmarshal(resp.Body, &man) == nil && strings.TrimSpace(man.Webmention) != "" {
-				if ep := absHTTP(resp.FinalURL, man.Webmention); ep != "" {
-					return ep, SendResult{}
-				}
+		l := m.Located
+		if l == nil {
+			found, _ := surface.Locate(ctx, c, m.TargetOrigin, sendLimits)
+			l = &found
+		}
+		// §15.1: resolved against the manifest URL.
+		if wm := strings.TrimSpace(blyg.ManifestString(l.Manifest, "webmention")); l.Found() && wm != "" {
+			if ep := absHTTP(l.URL, wm); ep != "" {
+				return ep, SendResult{}
 			}
 		}
 	}

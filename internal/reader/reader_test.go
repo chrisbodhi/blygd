@@ -515,7 +515,8 @@ func TestImportFromARelocatedSurface(t *testing.T) {
 	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	const page = "https://www.example.com/2026/10/a-post/"
 	a := &testblyg.Item{ID: idA, Kind: "fragment", Version: 1, ContentMD: "words", Page: page, Pinned: []int{1}, Updated: now}
-	g.b.Items = []*testblyg.Item{a}
+	pageless := &testblyg.Item{ID: idB, Kind: "fragment", Version: 1, ContentMD: "no page", NoPage: true, Updated: now}
+	g.b.Items = []*testblyg.Item{a, pageless}
 	g.relocate()
 	g.b.SetPin(a, 1, "words")
 	g.subscribe()
@@ -541,6 +542,12 @@ func TestImportFromARelocatedSurface(t *testing.T) {
 	e, err := g.r.BlogrollEntry(ctx, g.uid, g.sid)
 	if err != nil || e.XMLURL != g.b.Origin()+"api?route=/feed" {
 		t.Errorf("blogroll xmlUrl: %+v %v", e, err)
+	}
+	// With no page, a snapshot's address is its item document, from the
+	// template (§5.8, §15.2 #85), not the f/{id}/ guess.
+	snaps, err := g.r.Snapshots(ctx, g.uid, []string{idB})
+	if err != nil || len(snaps[idB]) != 1 || snaps[idB][0].Page != g.b.Origin()+"api?route=/items/"+idB {
+		t.Errorf("snapshot page without a page: %+v %v", snaps[idB], err)
 	}
 
 	// The default path does not speak for a relocated origin (§12.2, §6.1).

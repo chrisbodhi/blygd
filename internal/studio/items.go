@@ -365,14 +365,14 @@ func (s *Studio) Publish(ctx context.Context, originID int64, id string, opts Pu
 		return nil, err
 	}
 	var warnings []string
-	var forkKind string
+	var forkPinURL string
 	if pre.Version == 0 && pre.ForkedFrom != nil {
-		w, kind, err := s.checkForkPin(ctx, originID, pre.ForkedFrom)
+		w, pinURL, err := s.checkForkPin(ctx, originID, pre.ForkedFrom)
 		if err != nil {
 			return nil, err
 		}
 		warnings = append(warnings, w...)
-		forkKind = kind
+		forkPinURL = pinURL
 	}
 	// The import lookup is a read of the mirror through reader, done before
 	// the transaction like any other outside input (CLAUDE.md).
@@ -518,12 +518,13 @@ func (s *Studio) Publish(ctx context.Context, originID int64, id string, opts Pu
 			return err
 		}
 		it, err = scanItem(tx.QueryRow(ctx, `UPDATE items SET version = $2, withdrawn = false, page = $3,
-			first_published_at = coalesce(first_published_at, $4), published_at = $4, draft_note = NULL
-			WHERE id = $1 RETURNING `+itemCols, id, next, page, at))
+			first_published_at = coalesce(first_published_at, $4), published_at = $4, draft_note = NULL,
+			forked_from_url = coalesce(forked_from_url, nullif($5, ''))
+			WHERE id = $1 RETURNING `+itemCols, id, next, page, at, forkPinURL))
 		if err != nil {
 			return err
 		}
-		if err := enqueueOutbound(ctx, tx, o, it, v, forkKind); err != nil {
+		if err := enqueueOutbound(ctx, tx, o, it, v); err != nil {
 			return err
 		}
 		if err := s.renderItem(ctx, tx, o, id); err != nil {

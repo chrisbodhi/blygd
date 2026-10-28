@@ -10,13 +10,16 @@ import (
 
 	"github.com/chrisbodhi/blygd/internal/blyg"
 	"github.com/chrisbodhi/blygd/internal/fetch"
+	"github.com/chrisbodhi/blygd/internal/surface"
 )
 
 // checkForkPin applies §5.6 rule 2 before a fork's first publish: the
 // referenced version must be pinned at its origin. Refuse on evidence (a 4xx,
 // or a 200 that is not that pinned version); proceed with a warning when the
 // network says nothing (failure, timeout, 5xx), so a stranger's outage is
-// never a veto. Returns the target's kind when it learns it.
+// never a veto. The pinned file's URL comes from the source origin's `pin`
+// template (§6.1); it is returned when the check confirmed it there, for
+// the fork's page to link to (§5.6 rule 7), and is empty otherwise.
 func (s *Studio) checkForkPin(ctx context.Context, originID int64, raw json.RawMessage) ([]string, string, error) {
 	var ref blyg.Reference
 	if err := json.Unmarshal(raw, &ref); err != nil {
@@ -27,19 +30,25 @@ func (s *Studio) checkForkPin(ctx context.Context, originID int64, raw json.RawM
 		return nil, "", err
 	}
 	if blyg.SameOrigin(ref.Origin, own.BaseURL) {
-		var kind string
-		err := s.Pool.QueryRow(ctx, `SELECT i.authored_kind FROM item_versions v JOIN items i ON i.id = v.item_id
+		var pinned bool
+		err := s.Pool.QueryRow(ctx, `SELECT true FROM item_versions v JOIN items i ON i.id = v.item_id
 			WHERE i.origin_id = $1 AND v.item_id = $2 AND v.version = $3 AND v.pinned_at IS NOT NULL`,
-			originID, ref.ID, ref.Version).Scan(&kind)
+			originID, ref.ID, ref.Version).Scan(&pinned)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, "", invalid("forked_from names v%d of %s, which is not pinned here (§5.6 rule 2)", ref.Version, ref.ID)
 		}
-		return nil, kind, err
+		return nil, "", err
 	}
 	if s.Fetch == nil {
 		return []string{"lineage not checked: no fetch client configured"}, "", nil
 	}
-	pinURL := blyg.PinURL(ref.Origin, ref.ID, ref.Version)
+	// Without the manifest a 404 at the default path is no evidence: a
+	// templated origin serves its pins elsewhere.
+	l, _ := surface.Locate(ctx, s.Fetch, ref.Origin, fetch.VerifyLimits)
+	if l.Transient() {
+		return []string{fmt.Sprintf("could not read %sblyg.json to find the pinned file (HTTP %d); published anyway", l.Origin, l.Status)}, "", nil
+	}
+	pinURL := l.PinURL(ref.ID, ref.Version)
 	resp, err := s.Fetch.Get(ctx, pinURL, fetch.VerifyLimits, "application/json")
 	if err != nil {
 		return []string{fmt.Sprintf("could not confirm %s is pinned (%v); published anyway", pinURL, err)}, "", nil
@@ -56,7 +65,7 @@ func (s *Studio) checkForkPin(ctx context.Context, originID int64, raw json.RawM
 	if err := json.Unmarshal(resp.Body, &doc); err != nil || doc.ID != ref.ID || doc.Version != ref.Version {
 		return nil, "", invalid("forked_from: %s is not v%d of %s (§5.6 rule 2)", pinURL, ref.Version, ref.ID)
 	}
-	return nil, doc.Kind, nil
+	return nil, pinURL, nil
 }
 
 // outRef is one remote reference a version makes (§15.2).
@@ -73,9 +82,9 @@ type outRef struct {
 // cross-origin stub_of, transclusions[] entries carrying an origin, and a
 // cross-origin forked_from; plus a {url} stub. Same-origin references never
 // generate mentions.
-func remoteRefs(own string, it *Item, v *Version, forkKind string) []outRef {
+func remoteRefs(own string, it *Item, v *Version) []outRef {
 	var out []outRef
-	add := func(rel string, ref blyg.Reference, kind string) {
+	add := func(rel string, ref blyg.Reference) {
 		if ref.Origin == "" || blyg.SameOrigin(ref.Origin, own) {
 			return
 		}
@@ -83,14 +92,16 @@ func remoteRefs(own string, it *Item, v *Version, forkKind string) []outRef {
 		if err != nil || !blyg.ValidID(ref.ID) {
 			return
 		}
-		// §15.2: the target's page if the sender holds it, else the
-		// reference convention. The publish transaction never reads the
-		// import mirror, so this writes the convention and the send worker
-		// swaps in the imported page when there is one.
+		// §15.2 (#85): the target's page if the sender holds it, else its
+		// item document, from the target origin's `item` template; never
+		// the f/{id}/ convention. The publish transaction reads neither
+		// the mirror nor the network, so this writes the default item
+		// document and the send worker, which reads the target's manifest
+		// anyway, settles the address before sending.
 		out = append(out, outRef{
 			key:           "blyg " + origin + " " + ref.ID,
 			relation:      rel,
-			targetURL:     origin + blyg.DefaultPage(kind, ref.ID),
+			targetURL:     blyg.Surface{Origin: origin}.ItemURL(ref.ID),
 			targetOrigin:  origin,
 			targetID:      ref.ID,
 			targetVersion: ref.Version,
@@ -99,7 +110,7 @@ func remoteRefs(own string, it *Item, v *Version, forkKind string) []outRef {
 	if it.ForkedFrom != nil {
 		var ref blyg.Reference
 		if json.Unmarshal(it.ForkedFrom, &ref) == nil {
-			add("fork", ref, forkKind)
+			add("fork", ref)
 		}
 	}
 	if v.StubOf != nil {
@@ -113,7 +124,7 @@ func remoteRefs(own string, it *Item, v *Version, forkKind string) []outRef {
 					out = append(out, outRef{key: "url " + u, relation: "url", targetURL: u})
 				}
 			} else {
-				add("stub", stub.Reference, "")
+				add("stub", stub.Reference)
 			}
 		}
 	}
@@ -121,7 +132,7 @@ func remoteRefs(own string, it *Item, v *Version, forkKind string) []outRef {
 		var refs []blyg.Reference
 		if json.Unmarshal(v.Transclusions, &refs) == nil {
 			for _, r := range refs {
-				add("transclusion", r, "")
+				add("transclusion", r)
 			}
 		}
 	}
@@ -131,13 +142,13 @@ func remoteRefs(own string, it *Item, v *Version, forkKind string) []outRef {
 // enqueueOutbound writes the outbox rows for a new version, inside the
 // publish transaction. A reference whose target version is unchanged since
 // the last send is left alone; new or changed ones go (back) to pending.
-func enqueueOutbound(ctx context.Context, tx pgx.Tx, o *Origin, it *Item, v *Version, forkKind string) error {
+func enqueueOutbound(ctx context.Context, tx pgx.Tx, o *Origin, it *Item, v *Version) error {
 	if it.Page == nil {
 		return errors.New("enqueueOutbound: item has no page")
 	}
 	source := o.BaseURL + *it.Page
 	seen := map[string]bool{}
-	for _, r := range remoteRefs(o.BaseURL, it, v, forkKind) {
+	for _, r := range remoteRefs(o.BaseURL, it, v) {
 		// One row per target. A stub usually quotes its target too; the
 		// first relation wins (fork, then stub, then transclusion), so the
 		// row says stub. Verification checks every relation anyway (§15.4).

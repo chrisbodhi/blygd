@@ -275,10 +275,22 @@ serves URLs inside an own origin from `surface_files` with the same
 status codes and ETags as HTTP. The importer sees exactly the bytes a
 remote reader would.
 
-**Outbound targets** (§15.2): the publish transaction writes the
-reference convention, because it does not read the mirror. The send
-worker, which writes no surface, swaps in the imported item's `page`
-when the mirror holds one.
+**Outbound targets** (§15.2, #85): the publish transaction, which reads
+neither the mirror nor the network, writes the target's default item
+document. The send worker settles the address before sending: the
+imported item's `page` when the mirror holds one under the target's
+origin, else the item document from the target origin's `item` template.
+It never guesses `f/{id}/`. The manifest it reads for the template is the
+one endpoint discovery reads first, so it is fetched once. A manifest
+that cannot be read for a reason that may pass (no response, 429, 5xx) is
+retried, because guessing the default path would aim at the wrong
+address on a templated origin.
+
+**Other origins' surfaces** are located by `internal/surface`, which
+reads `{origin}blyg.json` and nothing else. It depends only on `blyg` and
+`fetch`, so plane 1 may use it without reaching the mirror. The verifier,
+the sender, the fork pin check, fork copying and the attribution link all
+use it. The reader keeps its own copy of each subscribed manifest.
 
 **Reading API**: subscriptions, a merged feed with keyset paging and an
 unread filter, single items with retained pins, and read marks per
@@ -343,7 +355,8 @@ client-written (§5.2).
 
 **Forks** (§5.6 rule 6). `POST /api/items {forked_from}` without
 `content_md` fetches the pinned document before any transaction (or
-reads it from plane 1 when it is our own). `blyg.FlattenFork` then
+reads it from plane 1 when it is our own), from the source origin's `pin`
+template (§6.1). `blyg.FlattenFork` then
 builds the draft:
 
 - own prose is copied byte-exact;
@@ -353,8 +366,18 @@ builds the draft:
 - generated spans become `[TK]impyrt …[/TK]`, so the fork discloses them
   again.
 
+A quote's attribution line links the quoted item's page where we hold
+it, else its item document from its origin's `item` template, with each
+origin's manifest read once per flattening.
+
 When the prose cannot be matched to the bake, the whole draft is rebuilt
-from the HTML. A fork's page shows its lineage (rule 7).
+from the HTML. A fork's page shows its lineage (rule 7). For a remote
+source the link is the pinned file where the first publish's pin check
+found it, through the `pin` template, kept in `items.forked_from_url`
+(migration 005). Rendering runs inside transactions and must work
+offline for a rebuild, so it never fetches. The URL is written once, and
+only when the check confirmed the file. Otherwise the page links the
+default path.
 
 ## Media (Phase 4)
 
