@@ -32,6 +32,7 @@ type Resolution struct {
 	SiteURL  string `json:"site_url,omitempty"` // L0 channel link
 
 	Manifest     json.RawMessage `json:"-"`
+	ManifestURL  string          `json:"-"` // its final URL: where to re-read it
 	ManifestETag string          `json:"-"`
 	// SiteDiscrepancy is set when the manifest's self-asserted site
 	// disagrees with the identity. It is surfaced and never adopted.
@@ -88,10 +89,15 @@ func (rs *resolver) probe(base string) *Resolution {
 }
 
 // manifestResolution builds a blyg resolution from a fetched manifest, or
-// returns nil if the body is not one.
+// returns nil if the body is not one. A manifest's address is a path: one
+// served at a URL with a query string has no identity and is out of scope
+// (§12.1 step 1, decision #64).
 func manifestResolution(resp *fetch.Response) *Resolution {
 	m, ok := blyg.ParseManifest(resp.Body)
 	if !ok {
+		return nil
+	}
+	if u, err := url.Parse(resp.FinalURL); err != nil || u.RawQuery != "" || u.ForceQuery {
 		return nil
 	}
 	identity, err := IdentityFromManifestURL(resp.FinalURL)
@@ -99,7 +105,7 @@ func manifestResolution(resp *fetch.Response) *Resolution {
 		return nil
 	}
 	res := &Resolution{Kind: "blyg", Identity: identity, Title: blyg.ManifestString(m, "title"),
-		Manifest: json.RawMessage(resp.Body), ManifestETag: resp.Header.Get("ETag")}
+		Manifest: json.RawMessage(resp.Body), ManifestURL: resp.FinalURL, ManifestETag: resp.Header.Get("ETag")}
 	if site := blyg.ManifestString(m, "site"); site != "" && !blyg.SameOrigin(site, identity) {
 		res.SiteDiscrepancy = fmt.Sprintf("manifest asserts site %s, but it was fetched from %s; the fetch origin is the identity (§12.2)", site, identity)
 	}
@@ -107,7 +113,8 @@ func manifestResolution(resp *fetch.Response) *Resolution {
 }
 
 // IdentityFromManifestURL is §12.2: the URL the manifest was fetched from,
-// after redirects, minus blyg.json.
+// after redirects, minus its last path segment (blyg.json at the default
+// location).
 func IdentityFromManifestURL(final string) (string, error) {
 	u, err := url.Parse(final)
 	if err != nil {
@@ -175,9 +182,18 @@ func Resolve(ctx context.Context, f Fetcher, input string) (*Resolution, error) 
 				}
 				l0 = l0Resolution(resp.FinalURL, feed)
 			} else {
-				// Step 4: one rel="blyg" hop. The target's own HTML is never
+				// Step 4: one rel="blyg" hop. A target whose body parses as a
+				// manifest is the manifest; otherwise it is an origin base URL
+				// and is probed as in step 2. The target's own HTML is never
 				// scanned, so there is no recursion and no loop.
 				links = blyg.FindHTMLLinks(resp.Body, resp.FinalURL)
+				if links.Blyg != "" && !rs.probed[links.Blyg] {
+					if hr, err := rs.get(links.Blyg); err == nil && hr.Status == 200 {
+						if res := manifestResolution(hr); res != nil {
+							return done(res)
+						}
+					}
+				}
 				if links.Blyg != "" {
 					if base, err := blyg.NormalizeOrigin(links.Blyg); err == nil {
 						if res := rs.probe(base); res != nil {

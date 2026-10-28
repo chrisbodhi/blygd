@@ -130,14 +130,15 @@ func (r *Reader) attach(ctx context.Context, userID int64, res *Resolution, from
 		if res.SiteDiscrepancy != "" {
 			siteDisc = res.SiteDiscrepancy
 		}
-		err := tx.QueryRow(ctx, `INSERT INTO remote_origins (kind, identity_url, manifest, manifest_etag, title, site_url, site_discrepancy)
-			VALUES ($1, $2, $3, nullif($4, ''), nullif($5, ''), $6, $7)
+		err := tx.QueryRow(ctx, `INSERT INTO remote_origins (kind, identity_url, manifest, manifest_etag, title, site_url, site_discrepancy, manifest_url)
+			VALUES ($1, $2, $3, nullif($4, ''), nullif($5, ''), $6, $7, nullif($8, ''))
 			ON CONFLICT (identity_url) DO UPDATE SET
 				manifest = coalesce(EXCLUDED.manifest, remote_origins.manifest),
+				manifest_url = coalesce(EXCLUDED.manifest_url, remote_origins.manifest_url),
 				title = coalesce(EXCLUDED.title, remote_origins.title),
 				site_url = coalesce(EXCLUDED.site_url, remote_origins.site_url),
 				site_discrepancy = CASE WHEN EXCLUDED.manifest IS NULL THEN remote_origins.site_discrepancy ELSE EXCLUDED.site_discrepancy END
-			RETURNING id`, res.Kind, res.Identity, manifest, res.ManifestETag, res.Title, siteURL, siteDisc).Scan(&id)
+			RETURNING id`, res.Kind, res.Identity, manifest, res.ManifestETag, res.Title, siteURL, siteDisc, res.ManifestURL).Scan(&id)
 		if err != nil {
 			return err
 		}
@@ -253,16 +254,17 @@ func (r *Reader) SetDisplayTitle(ctx context.Context, userID, remoteID int64, ti
 func (r *Reader) BlogrollEntry(ctx context.Context, userID, remoteID int64) (*blyg.BlogrollEntry, error) {
 	var kind, identity string
 	var title, display, siteURL *string
-	err := r.Pool.QueryRow(ctx, `SELECT ro.kind, ro.identity_url, ro.title, s.display_title, ro.site_url
+	var manifest []byte
+	err := r.Pool.QueryRow(ctx, `SELECT ro.kind, ro.identity_url, ro.title, s.display_title, ro.site_url, ro.manifest
 		FROM subscriptions s JOIN remote_origins ro ON ro.id = s.remote_origin_id
-		WHERE s.user_id = $1 AND ro.id = $2`, userID, remoteID).Scan(&kind, &identity, &title, &display, &siteURL)
+		WHERE s.user_id = $1 AND ro.id = $2`, userID, remoteID).Scan(&kind, &identity, &title, &display, &siteURL, &manifest)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	e := &blyg.BlogrollEntry{Text: identity, XMLURL: identity + "feed.xml", HTMLURL: identity}
+	e := &blyg.BlogrollEntry{Text: identity, XMLURL: blyg.SurfaceOf(identity, manifest).FeedURL(), HTMLURL: identity}
 	if kind == "l0" {
 		e.XMLURL, e.HTMLURL = identity, identity
 		if siteURL != nil && *siteURL != "" {
@@ -407,6 +409,11 @@ func (r *Reader) GetItem(ctx context.Context, userID, remoteID int64, itemID str
 	if err != nil {
 		return nil, err
 	}
+	var manifest []byte
+	if err := r.Pool.QueryRow(ctx, `SELECT manifest FROM remote_origins WHERE id = $1`, remoteID).Scan(&manifest); err != nil {
+		return nil, err
+	}
+	surface := blyg.SurfaceOf(it.Origin, manifest)
 	rows, err := r.Pool.Query(ctx, `SELECT version, doc FROM imported_pins WHERE remote_origin_id = $1 AND item_id = $2 ORDER BY version`,
 		remoteID, itemID)
 	if err != nil {
@@ -419,7 +426,7 @@ func (r *Reader) GetItem(ctx context.Context, userID, remoteID int64, itemID str
 		if err := rows.Scan(&p.Version, &doc); err != nil {
 			return nil, err
 		}
-		p.Doc, p.URL = doc, blyg.PinURL(it.Origin, itemID, p.Version)
+		p.Doc, p.URL = doc, surface.PinURL(itemID, p.Version)
 		it.Pins = append(it.Pins, p)
 	}
 	return it, rows.Err()

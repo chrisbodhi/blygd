@@ -247,7 +247,7 @@ func TestWithdrawalRetainsOnlyPins(t *testing.T) {
 	// No poll fetches a document at the version it holds, so the endcap's
 	// own version is applied directly, as any fetch of it would be.
 	a.Kind, a.Version, a.ContentMD = "fragment", 3, "second words, replayed"
-	if _, err := g.r.ApplyDocument(ctx, g.sid, g.b.Origin(), idA, []byte(g.b.Doc(a)), g.b.Origin()+"items/"+idA+".json"); err != nil {
+	if _, err := g.r.ApplyDocument(ctx, g.sid, blyg.Surface{Origin: g.b.Origin()}, idA, []byte(g.b.Doc(a)), g.b.Origin()+"items/"+idA+".json"); err != nil {
 		t.Fatal(err)
 	}
 	if ra = g.row(idA); ra.state != "withdrawn" || ra.hasDoc || ra.version != 3 || !strings.Contains(ra.discrepancy, "endcap") {
@@ -496,5 +496,111 @@ func TestFeedOrderAndReads(t *testing.T) {
 	}
 	if err := g.r.MarkRead(ctx, g.uid, g.sid, "nope", true); err != ErrNotFound {
 		t.Errorf("marking an unknown item: %v", err)
+	}
+}
+
+// relocate moves the rig's blyg onto a templated surface (§6.1), with query
+// strings, as a CMS behind a JSON API would serve it.
+func (g *rig) relocate() {
+	g.b.Feed = "api?route=/feed"
+	g.b.Index = "api?route=/items"
+	g.b.ItemTmpl = "api?route=/items/{id}"
+	g.b.PinTmpl = g.b.S.URL + "/elsewhere/pins/{id}/{n}" // absolute, on purpose
+}
+
+func TestImportFromARelocatedSurface(t *testing.T) {
+	g := newRig(t)
+	ctx := context.Background()
+	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	const page = "https://www.example.com/2026/10/a-post/"
+	a := &testblyg.Item{ID: idA, Kind: "fragment", Version: 1, ContentMD: "words", Page: page, Pinned: []int{1}, Updated: now}
+	g.b.Items = []*testblyg.Item{a}
+	g.relocate()
+	g.b.SetPin(a, 1, "words")
+	g.subscribe()
+	g.poll()
+
+	r := g.row(idA)
+	if r == nil || r.version != 1 {
+		t.Fatalf("item not imported through the item template: %+v", r)
+	}
+	// §5.8: an absolute page is taken as given, never prefixed.
+	if r.page != page {
+		t.Errorf("page %q, want %q", r.page, page)
+	}
+	it, err := g.r.GetItem(ctx, g.uid, g.sid, idA)
+	if err != nil || len(it.Pins) != 1 || it.Pins[0].URL != g.b.S.URL+"/elsewhere/pins/"+idA+"/1" {
+		t.Fatalf("pin through the pin template: %+v %v", it, err)
+	}
+	for _, p := range []string{"/blyg/feed.xml", "/blyg/items/index.json", "/blyg/items/" + idA + ".json", "/blyg/items/" + idA + "/v1.json"} {
+		if n := g.b.S.Hits(p); n != 0 {
+			t.Errorf("fetched the default path %s %d times; the manifest relocates it", p, n)
+		}
+	}
+	e, err := g.r.BlogrollEntry(ctx, g.uid, g.sid)
+	if err != nil || e.XMLURL != g.b.Origin()+"api?route=/feed" {
+		t.Errorf("blogroll xmlUrl: %+v %v", e, err)
+	}
+
+	// The default path does not speak for a relocated origin (§12.2, §6.1).
+	if _, err := g.r.ApplyDocument(ctx, g.sid, g.b.Surface(), idA, []byte(g.b.Doc(a)), g.b.Origin()+"items/"+idA+".json"); err == nil {
+		t.Error("adopted a document from the default path under an item template")
+	}
+	if err := g.r.ApplyPin(ctx, g.sid, g.b.Surface(), idA, 1, []byte(g.b.Pin(a, 1, "words")), g.b.Origin()+"items/"+idA+"/v1.json"); err == nil {
+		t.Error("retained a pin from the default path under a pin template")
+	}
+}
+
+func TestManifestRefreshRelocatesTheSurface(t *testing.T) {
+	g := newRig(t)
+	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	a := &testblyg.Item{ID: idA, Kind: "fragment", Version: 1, ContentMD: "one", Updated: now}
+	g.b.Items = []*testblyg.Item{a}
+	g.subscribe()
+	g.poll()
+	if r := g.row(idA); r == nil || r.version != 1 {
+		t.Fatalf("v1: %+v", r)
+	}
+
+	// The blyg moves onto templates and edits. Its old default files stay
+	// behind at v1, so only a reader that read the new manifest sees v2.
+	g.relocate()
+	a.Version, a.ContentMD = 2, "two"
+	g.b.Publish()
+	g.reconcileNext()
+	g.poll()
+	if r := g.row(idA); r == nil || r.version != 2 {
+		t.Fatalf("after relocation: %+v; the reconciliation should read the refreshed manifest's surface", r)
+	}
+}
+
+func TestManifestNamedByRelIsReReadThere(t *testing.T) {
+	g := newRig(t)
+	ctx := context.Background()
+	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	g.b.Items = []*testblyg.Item{{ID: idA, Kind: "fragment", Version: 1, ContentMD: "a", Updated: now}}
+	g.b.ManifestPath = "/blyg/manifest"
+	g.b.Publish()
+	g.b.S.Set("/post/", `<html><head><link rel="blyg" href="/blyg/manifest"></head></html>`)
+	sid, res, err := g.r.Subscribe(ctx, g.uid, g.b.S.URL+"/post/")
+	if err != nil || res.Identity != g.b.Origin() {
+		t.Fatalf("§12.1 step 4: %+v %v", res, err)
+	}
+	g.sid = sid
+	g.poll()
+
+	g.b.Title = "Renamed"
+	g.b.Publish()
+	g.reconcileNext()
+	g.poll()
+	var title string
+	if err := g.r.Pool.QueryRow(ctx, `SELECT title FROM remote_origins WHERE id = $1`, g.sid).Scan(&title); err != nil || title != "Renamed" {
+		t.Errorf("title %q %v: the manifest was not re-read where it was found", title, err)
+	}
+	if n := g.b.S.Hits("/blyg/blyg.json"); n != 0 {
+		t.Errorf("probed /blyg/blyg.json %d times; the manifest lives at /blyg/manifest", n)
+	}
+	if g.row(idA) == nil {
+		t.Error("nothing imported")
 	}
 }

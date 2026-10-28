@@ -31,7 +31,9 @@ type remote struct {
 	id                 int64
 	kind               string
 	identity           string
+	manifestURL        string
 	manifestETag       string
+	surface            blyg.Surface // where the manifest says the files are (§6.1)
 	feedETag, feedLM   string
 	indexETag, indexLM string
 	newestGUID         string
@@ -95,15 +97,18 @@ func (r *Reader) lease(ctx context.Context, which string, args ...any) ([]remote
 	rows, err := r.Pool.Query(ctx, `UPDATE remote_origins
 		SET next_poll_at = now() + interval '`+leaseFor+`', poll_lease_until = now() + interval '`+leaseFor+`'
 		WHERE id IN (`+which+`)
-		RETURNING id, kind, identity_url, coalesce(manifest_etag, ''), coalesce(feed_etag, ''), coalesce(feed_last_modified, ''),
+		RETURNING id, kind, identity_url, coalesce(manifest_url, identity_url || 'blyg.json'), manifest, coalesce(manifest_etag, ''),
+			coalesce(feed_etag, ''), coalesce(feed_last_modified, ''),
 			coalesce(index_etag, ''), coalesce(index_last_modified, ''), coalesce(feed_newest_guid, ''), reconciled_at, poll_failures`, args...)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (remote, error) {
 		var o remote
-		err := row.Scan(&o.id, &o.kind, &o.identity, &o.manifestETag, &o.feedETag, &o.feedLM,
+		var manifest []byte
+		err := row.Scan(&o.id, &o.kind, &o.identity, &o.manifestURL, &manifest, &o.manifestETag, &o.feedETag, &o.feedLM,
 			&o.indexETag, &o.indexLM, &o.newestGUID, &o.reconciledAt, &o.failures)
+		o.surface = blyg.SurfaceOf(o.identity, manifest)
 		return o, err
 	})
 }
@@ -233,6 +238,8 @@ func (r *Reader) httpFailure(what string, resp *fetch.Response) pollResult {
 
 // pollBlyg is §13.2: the feed is a cheap trigger, the archive index is the
 // reconciliation surface, and only fetched item documents advance state.
+// Every URL comes from the manifest's surface (§4, §6.1): the defaults when
+// it names none.
 func (r *Reader) pollBlyg(ctx context.Context, o remote) pollResult {
 	var res pollResult
 	budget := r.maxFetches()
@@ -243,10 +250,11 @@ func (r *Reader) pollBlyg(ctx context.Context, o remote) pollResult {
 
 	// ── the trigger
 	reconcile := o.reconciledAt == nil || r.now().Sub(*o.reconciledAt) >= r.reconcileEvery()
-	feedResp, err := r.get(ctx, o.identity+"feed.xml", fetch.Conditional{ETag: o.feedETag, LastModified: o.feedLM},
+	feedURL := o.surface.FeedURL()
+	feedResp, err := r.get(ctx, feedURL, fetch.Conditional{ETag: o.feedETag, LastModified: o.feedLM},
 		"application/rss+xml, application/xml;q=0.9")
 	if err != nil {
-		return pollResult{failed: true, err: "feed.xml: " + err.Error()}
+		return pollResult{failed: true, err: "feed " + feedURL + ": " + err.Error()}
 	}
 	want := map[string]bool{} // ids whose documents to fetch
 	switch feedResp.Status {
@@ -258,7 +266,7 @@ func (r *Reader) pollBlyg(ctx context.Context, o remote) pollResult {
 			// An unparseable feed skips the trigger and goes straight to
 			// an index diff (§13.2).
 			reconcile = true
-			res.err = "feed.xml did not parse; reconciled from the index"
+			res.err = "the feed did not parse; reconciled from the index"
 			break
 		}
 		inWindow := false
@@ -283,7 +291,7 @@ func (r *Reader) pollBlyg(ctx context.Context, o remote) pollResult {
 			reconcile = true
 		}
 	default:
-		return r.httpFailure("feed.xml", feedResp)
+		return r.httpFailure("feed "+feedURL, feedResp)
 	}
 
 	for id := range want {
@@ -304,7 +312,7 @@ func (r *Reader) pollBlyg(ctx context.Context, o remote) pollResult {
 
 	// ── reconciliation
 	if reconcile && !res.more {
-		r.refreshManifest(ctx, o, &res)
+		r.refreshManifest(ctx, &o, &res)
 		r.reconcile(ctx, o, local, want, &budget, &res)
 		if !res.more && !res.failed {
 			r.recheck(ctx, o, &budget, &res)
@@ -343,13 +351,14 @@ func (r *Reader) recheck(ctx context.Context, o remote, budget *int, res *pollRe
 	}
 }
 
-// reconcile diffs items/index.json against local state (§13.2). The index
+// reconcile diffs the archive index against local state (§13.2). The index
 // validators are saved only when the diff completes, so a diff cut short
 // by the fetch budget resumes on the next poll instead of trusting a 304.
 func (r *Reader) reconcile(ctx context.Context, o remote, local map[string]int, done map[string]bool, budget *int, res *pollResult) {
-	resp, err := r.get(ctx, o.identity+"items/index.json", fetch.Conditional{ETag: o.indexETag, LastModified: o.indexLM}, "application/json")
+	indexURL := o.surface.IndexURL()
+	resp, err := r.get(ctx, indexURL, fetch.Conditional{ETag: o.indexETag, LastModified: o.indexLM}, "application/json")
 	if err != nil {
-		res.err = "items/index.json: " + err.Error()
+		res.err = "archive index " + indexURL + ": " + err.Error()
 		return
 	}
 	switch resp.Status {
@@ -361,21 +370,21 @@ func (r *Reader) reconcile(ctx context.Context, o remote, local map[string]int, 
 		// the subscription is lossy (§13.2).
 		res.lossy = new(bool)
 		*res.lossy = true
-		res.err = "items/index.json is missing: following the feed window only, so items can be missed (§13.2)"
+		res.err = "the archive index " + indexURL + " is missing: following the feed window only, so items can be missed (§13.2)"
 		return
 	case 200:
 	default:
 		if resp.Status == 429 || resp.Status == 503 {
 			res.retryAfter = fetch.RetryAfter(resp.Header, r.now())
 		}
-		res.err = fmt.Sprintf("items/index.json returned %d", resp.Status)
+		res.err = fmt.Sprintf("the archive index %s returned %d", indexURL, resp.Status)
 		return
 	}
 	var idx struct {
 		Items []json.RawMessage `json:"items"`
 	}
 	if err := json.Unmarshal(resp.Body, &idx); err != nil {
-		res.err = "items/index.json did not parse: " + err.Error()
+		res.err = "the archive index did not parse: " + err.Error()
 		return
 	}
 	for _, raw := range idx.Items {
@@ -405,31 +414,34 @@ func (r *Reader) reconcile(ctx context.Context, o remote, local map[string]int, 
 	res.reconciled = true
 }
 
-// refreshManifest re-reads blyg.json during reconciliation, for its title
-// and the §12.2 site check. It never changes the identity.
-func (r *Reader) refreshManifest(ctx context.Context, o remote, res *pollResult) {
-	resp, err := r.get(ctx, o.identity+"blyg.json", fetch.Conditional{ETag: o.manifestETag}, "application/json")
+// refreshManifest re-reads the manifest where resolution found it, during
+// reconciliation, for its title, the §12.2 site check and the surface the
+// rest of the poll reads (§6.1). It never changes the identity.
+func (r *Reader) refreshManifest(ctx context.Context, o *remote, res *pollResult) {
+	resp, err := r.get(ctx, o.manifestURL, fetch.Conditional{ETag: o.manifestETag}, "application/json")
 	if err != nil || resp.Status == 304 {
 		return
 	}
-	if resp.Status != 200 || resp.FinalURL != o.identity+"blyg.json" {
-		res.err = fmt.Sprintf("blyg.json returned %d from %s; if this persists the blyg may have moved: re-resolve it (§12.2)", resp.Status, resp.FinalURL)
+	if resp.Status != 200 || resp.FinalURL != o.manifestURL {
+		res.err = fmt.Sprintf("the manifest %s returned %d from %s; if this persists the blyg may have moved: re-resolve it (§12.2)",
+			o.manifestURL, resp.Status, resp.FinalURL)
 		return
 	}
 	mr := manifestResolution(resp)
 	if mr == nil {
-		res.err = "blyg.json no longer parses as a manifest"
+		res.err = "the manifest " + o.manifestURL + " no longer parses as a manifest"
 		return
 	}
 	res.manifest, res.manifestETag = mr.Manifest, strp(mr.ManifestETag)
 	res.title, res.siteDiscrepancy = strp(mr.Title), strp(mr.SiteDiscrepancy)
+	o.surface = blyg.SurfaceOf(o.identity, mr.Manifest)
 }
 
 // fetchItem fetches and applies one item document, then any pins it newly
 // names. It returns true when the origin asked us to stop (429/503).
 func (r *Reader) fetchItem(ctx context.Context, o remote, id string, budget *int, res *pollResult) bool {
 	*budget--
-	u := blyg.ItemDocURL(o.identity, id)
+	u := o.surface.ItemURL(id)
 	resp, err := r.get(ctx, u, fetch.Conditional{}, "application/json")
 	if err != nil {
 		res.err, res.incomplete = u+": "+err.Error(), true
@@ -448,7 +460,7 @@ func (r *Reader) fetchItem(ctx context.Context, o remote, id string, budget *int
 		res.incomplete = resp.Status >= 500
 		return false
 	}
-	ar, err := r.ApplyDocument(ctx, o.id, o.identity, id, resp.Body, resp.FinalURL)
+	ar, err := r.ApplyDocument(ctx, o.id, o.surface, id, resp.Body, resp.FinalURL)
 	if err != nil {
 		res.err = err.Error()
 		return false
@@ -470,7 +482,7 @@ func (r *Reader) fetchItem(ctx context.Context, o remote, id string, budget *int
 			return false
 		}
 		*budget--
-		pu := blyg.PinURL(o.identity, id, v)
+		pu := o.surface.PinURL(id, v)
 		presp, err := r.get(ctx, pu, fetch.Conditional{}, "application/json")
 		if err != nil {
 			res.err = pu + ": " + err.Error()
@@ -484,7 +496,7 @@ func (r *Reader) fetchItem(ctx context.Context, o remote, id string, budget *int
 			r.note(ctx, o.id, id, fmt.Sprintf("changelog marks v%d pinned, but %s returned %d (§8 rule 1)", v, pu, presp.Status))
 			continue
 		}
-		if err := r.ApplyPin(ctx, o.id, o.identity, id, v, presp.Body, presp.FinalURL); err != nil {
+		if err := r.ApplyPin(ctx, o.id, o.surface, id, v, presp.Body, presp.FinalURL); err != nil {
 			res.err = err.Error()
 		}
 	}

@@ -183,10 +183,17 @@ their own.
 **Resolution** (§12.1) is `reader.Resolve`: the six steps in order, at
 most six fetches, under a 45 s overall deadline because a subscribe
 request waits on it. The identity is the URL the manifest was fetched
-from, after redirects, minus `blyg.json` (§12.2). A manifest `site` that
-disagrees is stored as `site_discrepancy` and never adopted. A failure
-returns the trail of URLs tried. Only the HTML `<link rel="blyg">` is
-read; the optional HTTP `Link` header is not.
+from, after redirects, minus its last path segment (§12.2), and that URL
+is kept as `manifest_url` so polls re-read the manifest where it was
+found. A `rel="blyg"` target whose body parses as a manifest is the
+manifest; otherwise it is a base URL probed for `blyg.json`, as at 0.3
+(§12.1 step 4). A manifest at a URL with a query string has no identity
+and is refused (#64). A manifest `site` that disagrees is stored as
+`site_discrepancy` and never adopted. A failure returns the trail of URLs
+tried. Only the HTML `<link rel="blyg">` is read; the optional HTTP `Link`
+header is not. Step 4 can now cost two fetches, so a page with a dead rel
+link spends the bound on the conventional mounts before step 6 can
+autodiscover its feed. Both the order and the bound are the spec's.
 
 **Identity changes are never automatic.** `POST
 /api/subscriptions/{id}/resolve` re-runs resolution and only reports.
@@ -202,12 +209,17 @@ cannot hammer an origin for everyone), and while another poll of it
 runs. `poll_lease_until` marks a poll in flight.
 
 **The poller** leases due remote origins with the mention workers'
-pattern, and only origins someone subscribes to. One poll of one blyg:
+pattern, and only origins someone subscribes to. Every URL it fetches
+comes from the stored manifest through `blyg.Surface`: `feed` and `items`
+as given, item and pin documents from the `item` and `pin` templates, and
+the 0.3 paths where the manifest names none (§4, §6.1). A reconciliation
+re-reads the manifest first, and the rest of that poll uses the surface
+it names. One poll of one blyg:
 
-1. Conditional GET of `feed.xml`. Entries are triggers: an id we lack, or
+1. Conditional GET of the feed. Entries are triggers: an id we lack, or
    a version above ours, queues a document fetch. The feed never writes
    state (§13.2).
-2. Reconcile against `items/index.json` when due: on first poll, every
+2. Reconcile against the archive index when due: on first poll, every
    24 h, when the newest guid from last time has left the window, or when
    the feed does not parse. Any entry whose version differs from ours is
    fetched. A 404 index marks the subscription `lossy`.
@@ -225,8 +237,12 @@ interval (§12.3). A poll failure never changes item state.
 
 **Applying a document** (`ApplyDocument`):
 
-- It must come from exactly `{origin}items/{id}.json`, after redirects.
-  The same rule as Webmention verification (§15.4).
+- It must come from exactly the surface's URL for it,
+  `{origin}items/{id}.json` or the `item` template's expansion, after
+  redirects. The same rule as Webmention verification (§15.4). Retained
+  pins likewise come from the `pin` template's expansion. A relative
+  `page` is resolved against the origin; an absolute one is kept as given
+  (§5.8).
 - Unknown kinds are ignored. The document is stored verbatim as `jsonb`:
   key order and whitespace are not kept, every value is.
 - A lower version than the watermark is not adopted. It sets

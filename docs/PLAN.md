@@ -225,11 +225,29 @@ its own, and the version string moves last.
      query-string templates, so tests have something to subscribe to.
    - Our own surface does not change. We keep the default paths and emit
      no template keys, as §6.1 recommends.
+
+   *(Done, 2026-10-28: migration 004 stores where each manifest was found,
+   and polls re-read it there. The poller, importer, retained-pin URLs and
+   blogroll `xmlUrl` all take URLs from the stored manifest, and a
+   reconciliation uses the surface its refreshed manifest names. A manifest
+   at a query-string URL is refused (#64). An absolute `page` already
+   resolved correctly; it now has a test. A dead `rel="blyg"` link now costs
+   two fetches, which can spend the bound of 6 before step 6. Plane 1 still
+   builds remote pin and document URLs from the defaults (the fork pin
+   check, fork copying, the attribution link's fallback, a fork's
+   rendered link). Each needs the target's manifest, fetched outside the
+   mirror, so they move to step 4.)*
 4. **Sending mentions:** with no `page` held, the fallback target is the
    target's item document, expanded from its `item` template, and never
    the `f/{id}/` / `t/{id}/` convention (§15.2, #85). The outbox writes the
    convention today and the send worker swaps in the page; the swap moves
    to the item document, from the manifest the worker already reads.
+   - Plane 1's other remote URLs follow the target's templates too: the
+     fork pin check and fork copy (`outbox.go`, `threads.go`) fetch
+     `pin`, and the attribution link's fallback (`quoteLink`) and a fork's
+     rendered link name `item` and `pin`. Each fetches
+     `{origin}blyg.json` outside the transaction, as the verifier does,
+     and falls back to the defaults when it has no template.
 5. **Emitting the new constructs:**
    - Disclosed links (§10.3a, #79, which reverses #32): each resolved
      `[[id]]` adds a `links[]` entry, and a remote one sends a `link`
@@ -264,6 +282,17 @@ Left for later, all optional in the spec:
 - Re-sending a version's mentions when it is pinned (§15.2, #73).
 - §16.9 `pinned_at` and `cid`, and §16.10 image sizes: ruled shapes, not
   yet normative.
+
+Not in the spec at all:
+
+- **Running `[TK]` generation.** `[TK]` is the reference client's
+  authoring grammar, not protocol: the spec defines only the wire result,
+  `generated[]` and the `blyg-tk-gen` spans (§5.7). blygd parses the
+  grammar, strips scopes to their output and discloses each one, but runs
+  no model. A `[TK]instruction[=][/TK]` scope publishes only once a client
+  has written the output in. Generating it server-side would need a model
+  provider, per-user keys and a review step before publish, so it
+  starts with a design note.
 
 ## Interop (2026-10-10)
 

@@ -67,7 +67,23 @@ func TestResolveSteps(t *testing.T) {
 			map[string]page{
 				"https://ex.com/about":           {body: `<html><head><link rel="blyg" href="/notes/"></head></html>`},
 				"https://ex.com/notes/blyg.json": {body: manifest},
-			}, "blyg", "https://ex.com/notes/", 3},
+			}, "blyg", "https://ex.com/notes/", 4},
+		{"rel=blyg naming the manifest itself (§12.1 step 4)", "https://ex.com/2026/10/a-post/",
+			map[string]page{
+				"https://ex.com/2026/10/a-post/":          {body: `<html><head><link rel="blyg" href="/wp-json/blyg/v1/manifest"></head></html>`},
+				"https://ex.com/wp-json/blyg/v1/manifest": {body: manifest},
+			}, "blyg", "https://ex.com/wp-json/blyg/v1/", 3},
+		{"a manifest at a query-string URL is out of scope (#64)", "https://ex.com/post",
+			map[string]page{
+				"https://ex.com/post":                          {body: `<html><head><link rel="blyg" href="/?rest_route=/blyg/v1/manifest"></head></html>`},
+				"https://ex.com/?rest_route=/blyg/v1/manifest": {body: manifest},
+				"https://ex.com/blyg/blyg.json":                {body: manifest},
+			}, "blyg", "https://ex.com/blyg/", 5},
+		{"a feed naming a query-string manifest stays L0", "https://ex.com/rss",
+			map[string]page{
+				"https://ex.com/rss":   {body: `<rss version="2.0" xmlns:blyg="https://blygger.org/ns/0.1"><channel><blyg:manifest>https://ex.com/m?x=1</blyg:manifest></channel></rss>`},
+				"https://ex.com/m?x=1": {body: manifest},
+			}, "l0", "https://ex.com/rss", 6},
 		{"conventional /blyg/ mount", "https://ex.com/some/page",
 			map[string]page{"https://ex.com/some/page": {body: `<html></html>`}, "https://ex.com/blyg/blyg.json": {body: manifest}},
 			"blyg", "https://ex.com/blyg/", 4},
@@ -78,7 +94,7 @@ func TestResolveSteps(t *testing.T) {
 			"l0", "https://legacy.example/rss", 5},
 		{"autodiscovered feed is L0, within six fetches", "https://legacy.example/home",
 			map[string]page{
-				"https://legacy.example/home": {body: `<html><head><link rel="blyg" href="/nope/"><link rel="alternate" type="application/rss+xml" href="/rss"></head></html>`},
+				"https://legacy.example/home": {body: `<html><head><link rel="alternate" type="application/rss+xml" href="/rss"></head></html>`},
 				"https://legacy.example/rss":  {body: `<rss version="2.0"><channel><title>L</title></channel></rss>`},
 			}, "l0", "https://legacy.example/rss", 6},
 		{"a manifest-looking body without the blyg key is not a manifest", "https://ex.com/x/",
@@ -94,6 +110,15 @@ func TestResolveSteps(t *testing.T) {
 			}
 			if res.Kind != c.kind || res.Identity != c.identity {
 				t.Fatalf("got %s %s, want %s %s (asked %v)", res.Kind, res.Identity, c.kind, c.identity, f.asked)
+			}
+			if c.kind == "blyg" {
+				last := f.asked[len(f.asked)-1]
+				if p := c.pages[last]; p.final != "" {
+					last = p.final
+				}
+				if res.ManifestURL != last {
+					t.Errorf("manifest URL %q, want where the last fetch ended (asked %v)", res.ManifestURL, f.asked)
+				}
 			}
 			if len(f.asked) > c.maxAsked || len(f.asked) > MaxResolveFetches || len(res.Trail) != len(f.asked) {
 				t.Errorf("asked %d URLs (want ≤ %d): %v", len(f.asked), c.maxAsked, f.asked)
@@ -138,6 +163,18 @@ func TestResolveSiteDiscrepancyAndFailure(t *testing.T) {
 		if strings.HasPrefix(u, "https://c.example/") {
 			t.Errorf("fetched %s", u)
 		}
+	}
+
+	// A dead rel link costs two fetches at 0.4 (the target, then
+	// {target}blyg.json), so with both conventional mounts probed the bound
+	// is spent before step 6 can autodiscover a feed. The order and the
+	// bound are both the spec's.
+	f = &mapFetcher{pages: map[string]page{
+		"https://legacy.example/home": {body: `<html><head><link rel="blyg" href="/nope/"><link rel="alternate" type="application/rss+xml" href="/rss"></head></html>`},
+		"https://legacy.example/rss":  {body: `<rss version="2.0"><channel><title>L</title></channel></rss>`},
+	}}
+	if _, err := Resolve(context.Background(), f, "https://legacy.example/home"); !errors.As(err, &re) || len(f.asked) != MaxResolveFetches {
+		t.Errorf("dead rel link: %v after %v", err, f.asked)
 	}
 
 	if _, err := Resolve(context.Background(), f, "ftp://x/"); err == nil {

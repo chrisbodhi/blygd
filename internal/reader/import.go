@@ -105,16 +105,29 @@ type ApplyResult struct {
 }
 
 // errNotFromOrigin means a document was not fetched from the identity
-// origin's own path for it. It does not speak for the origin (§12.2).
+// origin's own URL for it: the default path, or the manifest's template
+// expanded (§6.1). It does not speak for the origin (§12.2).
 var errNotFromOrigin = errors.New("document was not served from its origin's own URL")
+
+// fromOrigin reports whether a final URL is exactly the one the surface
+// names, compared normalized.
+func fromOrigin(final, want string) bool {
+	if final == want {
+		return true
+	}
+	a, err1 := blyg.NormalizeURL(final)
+	b, err2 := blyg.NormalizeURL(want)
+	return err1 == nil && err2 == nil && a == b
+}
 
 // ApplyDocument applies one fetched item document to the mirror (§13.1–
 // §13.4). It runs one short transaction and touches the network not at
 // all: the caller fetched first. Only a fetched document ever advances
 // state (§13.2).
-func (r *Reader) ApplyDocument(ctx context.Context, remoteID int64, origin, itemID string, body []byte, finalURL string) (ApplyResult, error) {
-	if finalURL != blyg.ItemDocURL(origin, itemID) {
-		return ApplyResult{}, fmt.Errorf("%w: wanted %s, got %s", errNotFromOrigin, blyg.ItemDocURL(origin, itemID), finalURL)
+func (r *Reader) ApplyDocument(ctx context.Context, remoteID int64, s blyg.Surface, itemID string, body []byte, finalURL string) (ApplyResult, error) {
+	origin := s.Origin
+	if want := s.ItemURL(itemID); !fromOrigin(finalURL, want) {
+		return ApplyResult{}, fmt.Errorf("%w: wanted %s, got %s", errNotFromOrigin, want, finalURL)
 	}
 	var d importedDoc
 	if err := json.Unmarshal(body, &d); err != nil {
@@ -247,9 +260,9 @@ type pinDocHead struct {
 
 // ApplyPin stores a fetched pin document (§13.4: the only content a reader
 // may retain past withdrawal). Pins are write-once here as at the origin.
-func (r *Reader) ApplyPin(ctx context.Context, remoteID int64, origin, itemID string, version int, body []byte, finalURL string) error {
-	if finalURL != blyg.PinURL(origin, itemID, version) {
-		return fmt.Errorf("%w: wanted %s, got %s", errNotFromOrigin, blyg.PinURL(origin, itemID, version), finalURL)
+func (r *Reader) ApplyPin(ctx context.Context, remoteID int64, s blyg.Surface, itemID string, version int, body []byte, finalURL string) error {
+	if want := s.PinURL(itemID, version); !fromOrigin(finalURL, want) {
+		return fmt.Errorf("%w: wanted %s, got %s", errNotFromOrigin, want, finalURL)
 	}
 	var h pinDocHead
 	if err := json.Unmarshal(body, &h); err != nil {

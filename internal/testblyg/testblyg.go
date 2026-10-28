@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -44,7 +45,8 @@ func New(t *testing.T) *Server {
 	return s
 }
 
-// Set serves body at path with 200.
+// Set serves body at path with 200. A path may carry a query string, which
+// is then part of what it matches.
 func (s *Server) Set(path, body string) { s.SetResponse(path, Response{Status: 200, Body: body}) }
 
 // SetResponse serves r at path.
@@ -76,10 +78,14 @@ func (s *Server) LastCondition(path string) string {
 }
 
 func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
+	key := r.URL.Path
+	if r.URL.RawQuery != "" {
+		key += "?" + r.URL.RawQuery
+	}
 	s.mu.Lock()
-	s.hits[r.URL.Path]++
-	s.condition[r.URL.Path] = r.Header.Get("If-None-Match")
-	f, ok := s.files[r.URL.Path]
+	s.hits[key]++
+	s.condition[key] = r.Header.Get("If-None-Match")
+	f, ok := s.files[key]
 	s.mu.Unlock()
 	if !ok {
 		http.NotFound(w, r)
@@ -128,10 +134,42 @@ type Blyg struct {
 	NoIndex bool
 	// FeedWindow caps the feed's entries; 0 means every item.
 	FeedWindow int
+	// Feed, Index, ItemTmpl and PinTmpl relocate the surface: the
+	// manifest's feed, items, item and pin values (§6.1), origin-relative
+	// or absolute, query strings allowed. Empty means the default path, and
+	// the manifest names item and pin only when set.
+	Feed, Index, ItemTmpl, PinTmpl string
+	// ManifestPath serves the manifest somewhere other than
+	// Mount+"blyg.json", as a rel="blyg" link may name it (§12.1 step 4).
+	// The identity stays Mount, so ManifestPath should sit directly under
+	// it.
+	ManifestPath string
 }
 
 // Origin is the blyg's identity origin.
 func (b *Blyg) Origin() string { return b.S.URL + b.Mount }
+
+// Surface is where this blyg's files are, as its manifest says.
+func (b *Blyg) Surface() blyg.Surface {
+	return blyg.Surface{Origin: b.Origin(), Feed: b.Feed, Items: b.Index, Item: b.ItemTmpl, Pin: b.PinTmpl}
+}
+
+// Path is the server key for an absolute URL on this blyg's server: its
+// path and any query.
+func (b *Blyg) Path(u string) string { return strings.TrimPrefix(u, b.S.URL) }
+
+// ManifestURL is where the manifest is served.
+func (b *Blyg) ManifestURL() string {
+	if b.ManifestPath != "" {
+		return b.S.URL + b.ManifestPath
+	}
+	return b.Origin() + "blyg.json"
+}
+
+// SetPin serves a pinned version document where the surface puts it.
+func (b *Blyg) SetPin(it *Item, v int, contentMD string) {
+	b.S.Set(b.Path(b.Surface().PinURL(it.ID, v)), b.Pin(it, v, contentMD))
+}
 
 // Doc renders an item document.
 func (b *Blyg) Doc(it *Item) string {
@@ -178,10 +216,18 @@ func (b *Blyg) Publish() {
 	if site == "" {
 		site = b.Origin()
 	}
-	b.S.Set(b.Mount+"blyg.json", fmt.Sprintf(`{"blyg": "0.3", "level": 1, "site": %q, "title": %q, "feed": "feed.xml", "items": "items/index.json"}`, site, b.Title))
+	sf := b.Surface()
+	keys := fmt.Sprintf(`"feed": %q, "items": %q`, or(b.Feed, blyg.DefaultFeed), or(b.Index, blyg.DefaultItems))
+	if b.ItemTmpl != "" {
+		keys += fmt.Sprintf(`, "item": %q`, b.ItemTmpl)
+	}
+	if b.PinTmpl != "" {
+		keys += fmt.Sprintf(`, "pin": %q`, b.PinTmpl)
+	}
+	b.S.Set(b.Path(b.ManifestURL()), fmt.Sprintf(`{"blyg": "0.3", "level": 1, "site": %q, "title": %q, %s}`, site, b.Title, keys))
 	var idx, entries []string
 	for _, it := range b.Items {
-		b.S.Set(b.Mount+"items/"+it.ID+".json", b.Doc(it))
+		b.S.Set(b.Path(sf.ItemURL(it.ID)), b.Doc(it))
 		idx = append(idx, fmt.Sprintf(`{"id": %q, "kind": %q, "created": "%s", "updated": "%s", "version": %d}`,
 			it.ID, it.Kind, blyg.Time(it.Updated), blyg.Time(it.Updated), it.Version))
 		entries = append(entries, `<item><guid isPermaLink="false">blyg:`+it.ID+":v"+strconv.Itoa(it.Version)+`</guid>`+
@@ -196,11 +242,18 @@ func (b *Blyg) Publish() {
 		entries = entries[:b.FeedWindow]
 	}
 	if b.NoIndex {
-		b.S.Delete(b.Mount + "items/index.json")
+		b.S.Delete(b.Path(sf.IndexURL()))
 	} else {
-		b.S.Set(b.Mount+"items/index.json", `{"updated": "2026-10-01T00:00:00Z", "items": [`+strings.Join(idx, ", ")+`]}`)
+		b.S.Set(b.Path(sf.IndexURL()), `{"updated": "2026-10-01T00:00:00Z", "items": [`+strings.Join(idx, ", ")+`]}`)
 	}
-	b.S.Set(b.Mount+"feed.xml", `<?xml version="1.0" encoding="UTF-8"?><rss version="2.0" xmlns:blyg="`+blyg.Namespace+`"><channel>`+
-		`<title>`+b.Title+`</title><link>`+b.Origin()+`</link><blyg:manifest>`+b.Origin()+`blyg.json</blyg:manifest>`+
+	b.S.Set(b.Path(sf.FeedURL()), `<?xml version="1.0" encoding="UTF-8"?><rss version="2.0" xmlns:blyg="`+blyg.Namespace+`"><channel>`+
+		`<title>`+b.Title+`</title><link>`+b.Origin()+`</link><blyg:manifest>`+html.EscapeString(b.ManifestURL())+`</blyg:manifest>`+
 		strings.Join(entries, "")+`</channel></rss>`)
+}
+
+func or(v, def string) string {
+	if v == "" {
+		return def
+	}
+	return v
 }
