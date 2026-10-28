@@ -17,7 +17,19 @@ func TestIsPublic(t *testing.T) {
 			t.Errorf("%s reported public", s)
 		}
 	}
-	for _, s := range []string{"93.184.216.34", "1.1.1.1", "2606:4700:4700::1111"} {
+	// IPv6 forms that reach or embed a private address.
+	for _, s := range []string{
+		"::127.0.0.1", "::7f00:1", "::a00:1", // IPv4-compatible
+		"64:ff9b::7f00:1", "64:ff9b:1::1", // NAT64
+		"::ffff:10.0.0.1", "::ffff:169.254.169.254", // IPv4-mapped
+		"100::1", "fec0::1", "2001:db8::1", "3fff::1", // not routable
+		"2002:7f00:1::1", "2001:0:4136:e378:8000:63bf:3fff:fdd2", // 6to4, Teredo
+	} {
+		if IsPublic(netip.MustParseAddr(s)) {
+			t.Errorf("%s reported public", s)
+		}
+	}
+	for _, s := range []string{"93.184.216.34", "1.1.1.1", "2606:4700:4700::1111", "2a00:1450:4001::1", "2620:fe::fe"} {
 		if !IsPublic(netip.MustParseAddr(s)) {
 			t.Errorf("%s reported non-public", s)
 		}

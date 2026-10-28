@@ -212,7 +212,21 @@ func (c *Client) httpClient(lim Limits) *http.Client {
 
 var cgnat = netip.MustParsePrefix("100.64.0.0/10")
 var benchmarking = netip.MustParsePrefix("198.18.0.0/15")
-var nat64 = netip.MustParsePrefix("64:ff9b::/96")
+
+// blockedV6 are IPv6 ranges that are not global unicast, or that embed an
+// IPv4 address a relay would forward to. The stdlib predicates above do not
+// cover them.
+var blockedV6 = []netip.Prefix{
+	netip.MustParsePrefix("::/96"),          // IPv4-compatible (deprecated): ::127.0.0.1
+	netip.MustParsePrefix("64:ff9b::/96"),   // NAT64 (RFC 6052)
+	netip.MustParsePrefix("64:ff9b:1::/48"), // local-use NAT64 (RFC 8215)
+	netip.MustParsePrefix("100::/64"),       // discard-only (RFC 6666)
+	netip.MustParsePrefix("2001::/32"),      // Teredo
+	netip.MustParsePrefix("2001:db8::/32"),  // documentation
+	netip.MustParsePrefix("2002::/16"),      // 6to4
+	netip.MustParsePrefix("3fff::/20"),      // documentation (RFC 9637)
+	netip.MustParsePrefix("fec0::/10"),      // site-local (deprecated)
+}
 
 // IsPublic reports whether ip is a globally routable unicast address.
 func IsPublic(ip netip.Addr) bool {
@@ -230,9 +244,15 @@ func IsPublic(ip netip.Addr) bool {
 		ip.IsInterfaceLocalMulticast(),
 		ip.IsMulticast(),
 		cgnat.Contains(ip),
-		benchmarking.Contains(ip),
-		nat64.Contains(ip):
+		benchmarking.Contains(ip):
 		return false
+	}
+	if ip.Is6() {
+		for _, p := range blockedV6 {
+			if p.Contains(ip) {
+				return false
+			}
+		}
 	}
 	if ip.Is4() {
 		b := ip.As4()
