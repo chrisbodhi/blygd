@@ -2731,6 +2731,11 @@
       "GenSource": {
         "type": "object",
         "properties": {
+          "origin": {
+            "type": "string",
+            "format": "uri",
+            "description": "Identity origin of another origin's item; omitted for an own item (§5.7 rule 1)."
+          },
           "id": {
             "type": "string",
             "pattern": "^[0-9a-hjkmnp-tv-z]{26}$",
@@ -2739,12 +2744,16 @@
           "version": {
             "type": "integer",
             "minimum": 1
+          },
+          "cited": {
+            "$ref": "#/components/schemas/Cited"
           }
         },
         "required": [
           "id",
           "version"
         ],
+        "description": "A generation source (§5.7 rule 1): a reference to an item version the generator drew on. It resolves like a directive, so it may be another origin's item (rule 8).",
         "additionalProperties": false
       },
       "Generated": {
@@ -2838,6 +2847,13 @@
             "items": {
               "$ref": "#/components/schemas/Generated"
             }
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Link"
+            },
+            "description": "One entry per resolved [[id]] link, in document order (§10.3a). Absent when the version has none, and on a withdrawal endcap."
           },
           "pinned_at": {
             "type": [
@@ -4295,6 +4311,26 @@
           "kind",
           "value"
         ]
+      },
+      "Link": {
+        "type": "object",
+        "properties": {
+          "origin": {
+            "type": "string",
+            "format": "uri",
+            "description": "The target's identity origin; omitted for an own item (§10.3a)."
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9a-hjkmnp-tv-z]{26}$",
+            "description": "Item id (§5.1): 26 characters of lowercase Crockford base32."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "description": "A links[] entry (§10.3a): the item a resolved [[id]] link names. Not a reference: no version, no cited.",
+        "additionalProperties": false
       }
     },
     "responses": {

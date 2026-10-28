@@ -284,6 +284,24 @@ its own, and the version string moves last.
      `origin` and `cited`, and a remote source sends a `source` mention.
      It goes through `studio.Imports` like a quote: the door stays as
      narrow as it is.
+
+   *(Done, 2026-10-28: migration 006 adds `item_versions.links` and
+   extends the version guard to it, which tightens the trigger.
+   - **Labels:** one scanner reads both forms. A link's label is its
+     anchor text, and a directive's is baked as `data-blyg-label` and used
+     in a fork's attribution.
+   - **`links[]`:** one entry per link, in document order, read from the
+     wire text, because generated blocks render out of order.
+   - **Remote sources:** they resolve like directives and freeze `cited`.
+     The outbox sends `source` and `link` mentions. When a version both
+     quotes and draws on one target, it sends one mention, as the quote
+     (§15.2). A link carries no target version, so keeping it across a
+     republish re-sends nothing.
+   - **What else changed:** `openapi.json` gains `Link` and `links`, and
+     `GenSource` gains `origin` and `cited`.
+   - **The reference:** blygger-studio 0.48.2 parses labels but emits
+     neither `links[]` nor `data-blyg-label`, so parity has no labelled
+     cases yet.)*
 6. **Bump** `ProtocolVersion` to `"0.4"`, move DESIGN.md's spec citation,
    and rerun `make parity` and `make interop` against a reference that
    speaks 0.4.

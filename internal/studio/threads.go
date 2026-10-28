@@ -76,7 +76,7 @@ type resolver struct {
 	origin  *Origin
 	self    string
 	imports map[string][]Snapshot
-	quoted  map[string]*Snapshot // remote quotes, for their cited (§5.9)
+	quoted  map[string]*Snapshot // remote targets, for the cited of quotes and sources (§5.9)
 }
 
 func (r *resolver) resolve(id string, use blyg.Use) (*blyg.Target, error) {
@@ -99,9 +99,9 @@ func (r *resolver) resolve(id string, use blyg.Use) (*blyg.Target, error) {
 		return r.local(id, use, *kind, version, withdrawn, page, html, pinned)
 	case !errors.Is(err, pgx.ErrNoRows):
 		return nil, err
-	case use == blyg.UseSource:
-		return nil, &blyg.Unresolved{Reason: "a generation source must be one of this origin's published items (§5.7 rule 1)"}
 	}
+	// A generation source resolves exactly as a directive does (§5.7 rule
+	// 8), so it may be an imported item.
 	return r.imported(id)
 }
 

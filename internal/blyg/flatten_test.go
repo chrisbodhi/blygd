@@ -122,3 +122,20 @@ func TestFlattenForkFallsBackToHTML(t *testing.T) {
 		t.Fatalf("fallback:\n%s\nwant:\n%s", md, want)
 	}
 }
+
+// A directive's label is the attribution's anchor text in a fork (§10.2,
+// decision #81), with where the quote came from beside it. A label cannot
+// hold ]], so a line that tries is literal.
+func TestFlattenForkUsesTheDirectiveLabel(t *testing.T) {
+	if id, _, _ := directiveAt("![[" + remoteID + " | their [notes]]]"); id != "" {
+		t.Error("a label ran past its first ]]")
+	}
+	src := pinned(t, "![["+remoteID+" | their [notes] here]]\n\nMine.")
+	md, exact := FlattenFork(src, quoteLink)
+	if !exact {
+		t.Fatalf("expected an exact copy:\n%s", md)
+	}
+	if !strings.Contains(md, "> — quoted from [their \\[notes\\] here](https://pi.test/items/"+remoteID+".json), pi.test · v1\n") {
+		t.Fatalf("attribution:\n%s", md)
+	}
+}

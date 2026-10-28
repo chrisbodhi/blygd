@@ -13,19 +13,69 @@ import (
 // The bracket grammar of §10.1. It is permanent protocol surface: a line
 // that is only `![[id]]` is a transclusion directive, `![[id@vN]]` on its
 // own line is reserved, and `[[id]]` anywhere outside code is a plain link.
-// A line ends at LF or CRLF alike (§10.1): callers split on LF, so a line
-// may carry its CR, and the CR stays in content_md.
+// Either form may carry a label after the id, `[[id | text]]` (decision
+// #70). A line ends at LF or CRLF alike (§10.1): callers split on LF, so a
+// line may carry its CR, and the CR stays in content_md.
 const idClass = `[0-9a-hjkmnp-tv-z]{26}`
 
 var (
-	directiveLine = regexp.MustCompile(`^[ \t]*!\[\[(` + idClass + `)\]\][ \t]*\r?$`)
-	reservedLine  = regexp.MustCompile(`^[ \t]*!\[\[` + idClass + `@v\d+\]\][ \t]*\r?$`)
-	// Go has no lookbehind; a match preceded by '!' is the directive form
-	// written inline, which is inert text (§10.1), and callers skip it.
-	inlineLink = regexp.MustCompile(`\[\[(` + idClass + `)\]\]`)
-	quoteLine  = regexp.MustCompile(`^[ \t]*>`)
-	quoteMark  = regexp.MustCompile(`^[ \t]*> ?`)
+	reservedLine = regexp.MustCompile(`^[ \t]*!\[\[` + idClass + `@v\d+\]\][ \t]*\r?$`)
+	quoteLine    = regexp.MustCompile(`^[ \t]*>`)
+	quoteMark    = regexp.MustCompile(`^[ \t]*> ?`)
 )
+
+// findLinks finds the inline bracket form, labels included: `[[id]]`, or
+// `[[id | label]]` with the label running to the first `]]` on its line
+// (§10.1). Each match is {start, end, idStart, idEnd, labelStart,
+// labelEnd}, the label pair -1 when there is none; the label is untrimmed.
+// A match preceded by '!' is the directive form written inline, which is
+// inert text (§10.1), and callers skip it. Brackets whose first 26
+// characters are not an id, or with anything but a pipe after the id, are
+// literal.
+func findLinks(s string) [][]int {
+	var out [][]int
+	for i := 0; ; {
+		j := strings.Index(s[i:], "[[")
+		if j < 0 {
+			return out
+		}
+		at := i + j
+		i = at + 1
+		idStart, idEnd := at+2, at+2+IDLen
+		if idEnd > len(s) || !ValidID(s[idStart:idEnd]) {
+			continue
+		}
+		if strings.HasPrefix(s[idEnd:], "]]") {
+			out = append(out, []int{at, idEnd + 2, idStart, idEnd, -1, -1})
+			i = idEnd + 2
+			continue
+		}
+		k := idEnd
+		for k < len(s) && (s[k] == ' ' || s[k] == '\t') {
+			k++
+		}
+		if k >= len(s) || s[k] != '|' {
+			continue
+		}
+		line := s[k+1:]
+		if nl := strings.IndexByte(line, '\n'); nl >= 0 {
+			line = line[:nl]
+		}
+		if end := strings.Index(line, "]]"); end >= 0 {
+			out = append(out, []int{at, k + 1 + end + 2, idStart, idEnd, k + 1, k + 1 + end})
+			i = k + 1 + end + 2
+		}
+	}
+}
+
+// linkLabel is a findLinks match's label, trimmed; "" when it has none. An
+// empty label is no label (§10.1).
+func linkLabel(s string, m []int) string {
+	if m[4] < 0 {
+		return ""
+	}
+	return strings.TrimSpace(s[m[4]:m[5]])
+}
 
 // span is a half-open byte range.
 type span struct{ start, end int }
@@ -131,14 +181,15 @@ func oneBlockquote(lines []string) bool {
 	return first != nil && first.Kind() == ast.KindBlockquote && first.NextSibling() == nil
 }
 
-// directiveAt reports the directive id on a line, and the offset of its
-// '!' within the line, or "" when the line is not a directive.
-func directiveAt(line string) (string, int) {
-	m := directiveLine.FindStringSubmatchIndex(line)
-	if m == nil {
-		return "", 0
+// directiveAt reports the directive id on a line, its label, and the offset
+// of its '!' within the line; the id is "" when the line is not a
+// directive.
+func directiveAt(line string) (id, label string, at int) {
+	id, label, ok := labelledDirective(line)
+	if !ok {
+		return "", "", 0
 	}
-	return line[m[2]:m[3]], strings.IndexByte(line, '!')
+	return id, label, strings.IndexByte(line, '!')
 }
 
 // HasThreadGrammar reports whether content_md contains a live directive,
@@ -151,11 +202,11 @@ func HasThreadGrammar(md string) bool {
 		if reservedLine.MatchString(l) && !inSpans(code, starts[i]+strings.IndexByte(l, '!')) {
 			return true
 		}
-		if id, at := directiveAt(l); id != "" && !inSpans(code, starts[i]+at) {
+		if id, _, at := directiveAt(l); id != "" && !inSpans(code, starts[i]+at) {
 			return true
 		}
 	}
-	for _, m := range inlineLink.FindAllStringIndex(md, -1) {
+	for _, m := range findLinks(md) {
 		if (m[0] == 0 || md[m[0]-1] != '!') && !inSpans(code, m[0]) {
 			return true
 		}

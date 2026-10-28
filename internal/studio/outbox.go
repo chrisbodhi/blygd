@@ -78,10 +78,12 @@ type outRef struct {
 	targetVersion int
 }
 
-// remoteRefs lists the remote references of a newly published version:
-// cross-origin stub_of, transclusions[] entries carrying an origin, and a
-// cross-origin forked_from; plus a {url} stub. Same-origin references never
-// generate mentions.
+// remoteRefs lists the remote references of a newly published version
+// (§15.2): a cross-origin forked_from, stub_of, transclusions[],
+// generated[].sources[] and links[] entries carrying an origin, plus a {url}
+// stub. Same-origin references never generate mentions. A link names a
+// page, not a version, so its row has no target version and a republish
+// that keeps it re-sends nothing.
 func remoteRefs(own string, it *Item, v *Version) []outRef {
 	var out []outRef
 	add := func(rel string, ref blyg.Reference) {
@@ -136,6 +138,24 @@ func remoteRefs(own string, it *Item, v *Version) []outRef {
 			}
 		}
 	}
+	if v.Generated != nil {
+		var gen []blyg.Generated
+		if json.Unmarshal(v.Generated, &gen) == nil {
+			for _, g := range gen {
+				for _, s := range g.Sources {
+					add("source", blyg.Reference{Origin: s.Origin, ID: s.ID, Version: s.Version}) // §5.7 rule 9
+				}
+			}
+		}
+	}
+	if v.Links != nil {
+		var links []blyg.Link
+		if json.Unmarshal(v.Links, &links) == nil {
+			for _, l := range links {
+				add("link", blyg.Reference{Origin: l.Origin, ID: l.ID}) // §10.3a: a notice
+			}
+		}
+	}
 	return out
 }
 
@@ -150,8 +170,10 @@ func enqueueOutbound(ctx context.Context, tx pgx.Tx, o *Origin, it *Item, v *Ver
 	seen := map[string]bool{}
 	for _, r := range remoteRefs(o.BaseURL, it, v) {
 		// One row per target. A stub usually quotes its target too; the
-		// first relation wins (fork, then stub, then transclusion), so the
-		// row says stub. Verification checks every relation anyway (§15.4).
+		// first relation wins (fork, stub, transclusion, source, link), so
+		// the row says stub. Verification checks every relation anyway
+		// (§15.4), and a version that both quotes and draws on a target
+		// may send one mention for it (§15.2).
 		if seen[r.key] {
 			continue
 		}

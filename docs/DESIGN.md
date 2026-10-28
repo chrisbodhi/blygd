@@ -316,6 +316,19 @@ and it runs inside the publish transaction:
    links are spliced back as absolute anchors. A link inside another
    link's text becomes its label, and one inside a URL or a tag goes back
    to the author's literal.
+4. Each resolved link is disclosed in `links[]`, one entry per link in
+   document order (§10.3a, #79). Generated blocks render apart from the
+   prose around them, so the order is read from the wire `content_md` by
+   the same grammar. A remote entry sends a `link` mention, a notice. A
+   markdown link to a blyg page is never an entry.
+
+**Labels** (§10.1, #70 and #81) follow the id and a pipe and run to the
+first `]]` on the line, so a label may hold a pipe or a single bracket but
+never `]]`; a line that tries is literal. Brackets with anything but a pipe
+after the id are literal too. On a link the label is the anchor text. On a
+directive it is baked as `data-blyg-label`, escaped, and nothing else
+sees it: not `transclusions[]`, not the target. Fork flattening uses it
+as the attribution's anchor text, with the host and version beside it.
 
 Code spans and code blocks are found with goldmark's own parser, so the
 grammar is inert in exactly the places the renderer shows code (§10.1).
@@ -346,8 +359,12 @@ client's `cited`, dated, with its excerpt held to 200 characters.
 **Generated provenance** (§5.7). blygd runs no model, so it reads the
 reference client's `[TK]` grammar as the client's declaration, and
 discloses every scope. `[TK]instruction[=]output[/TK]` takes its sources
-from the instruction's `![[id]]`s, which must be own published items
-(rule 1). The model and time come from `PATCH /api/items/{id}
+from the instruction's `![[id]]`s, labels allowed. A source resolves
+exactly as a directive does, so it may be another origin's item (rule
+8). It goes through `studio.Imports` like a quote: only its id, version,
+origin and a frozen `cited` reach plane 1, never its words. A remote
+source carries its origin and `cited`, and sends a `source` mention,
+which is a response (rule 9). The model and time come from `PATCH /api/items/{id}
 {generation: [{model, at}]}`, by scope position.
 `[TK]impyrt <model>=text[/TK]` is text generated elsewhere (rule 7). A
 publish with `note_generated: true` marks the changelog note as
@@ -671,8 +688,9 @@ HTML page, CSS and vanilla JS, with no build step. It talks only to
 - Fork flattening puts a blank line after each flattened quote. The
   reference does not, and the prose after a quote then joins it by lazy
   continuation.
-- A remote `[[id]]` anchor is labelled the way the reference labels it
-  (leading heading, else a quoted excerpt), using our own excerpt rule.
+- An unlabelled `[[id]]` anchor is labelled the way the reference labels
+  it (leading heading, else a quoted excerpt), using our own excerpt
+  rule. A label the author wrote always wins (§10.1).
 - Feed-title excerpts treat inline tags as zero-width. The reference turns
   every tag into a space, giving "**x**." → "x .".
 - The mirror is shared between users, so a discrepancy (§13.3) is

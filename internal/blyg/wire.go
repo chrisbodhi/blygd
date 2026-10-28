@@ -23,6 +23,14 @@ type Reference struct {
 	Cited    *Cited    `json:"cited,omitempty"`
 }
 
+// Link is one links[] entry (§10.3a): the item a plain internal link
+// names. It is not a reference: a link names a page, not a version, so it
+// has no version and no cited.
+type Link struct {
+	Origin string `json:"origin,omitempty"`
+	ID     string `json:"id"`
+}
+
 // Cited is the human half of a citation (§5.9): frozen when the reference
 // was made, self-asserted, never verified. retrieved is REQUIRED.
 type Cited struct {
@@ -92,6 +100,7 @@ type ItemDoc struct {
 	StubOf        json.RawMessage  `json:"stub_of,omitempty"`
 	ForkedFrom    json.RawMessage  `json:"forked_from,omitempty"`
 	Generated     json.RawMessage  `json:"generated,omitempty"`
+	Links         []Link           `json:"links,omitempty"` // §10.3a; an endcap omits it
 	Changelog     []ChangelogEntry `json:"changelog"`
 }
 

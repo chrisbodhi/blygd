@@ -220,6 +220,9 @@ func itemDoc(o *Origin, it *Item, vs []*Version) *blyg.ItemDoc {
 	if latest.Kind != "withdrawn" {
 		doc.StubOf = canon[blyg.StubOf](latest.StubOf)
 		doc.Generated = canon[[]blyg.Generated](latest.Generated)
+		if latest.Links != nil {
+			_ = json.Unmarshal(latest.Links, &doc.Links) // §10.3a
+		}
 	}
 	return doc
 }

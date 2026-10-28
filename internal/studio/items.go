@@ -72,14 +72,15 @@ type Version struct {
 	Transclusions json.RawMessage `json:"transclusions,omitempty"`
 	StubOf        json.RawMessage `json:"stub_of,omitempty"`
 	Generated     json.RawMessage `json:"generated,omitempty"`
+	Links         json.RawMessage `json:"links,omitempty"`
 	PinnedAt      *time.Time      `json:"pinned_at"`
 }
 
-const versionCols = `item_id, version, kind, at, note, note_generated, content_md, content_html, content_hash, author, transclusions, stub_of, generated, pinned_at`
+const versionCols = `item_id, version, kind, at, note, note_generated, content_md, content_html, content_hash, author, transclusions, stub_of, generated, links, pinned_at`
 
 func scanVersion(row pgx.Row) (*Version, error) {
 	var v Version
-	err := row.Scan(&v.ItemID, &v.Version, &v.Kind, &v.At, &v.Note, &v.NoteGenerated, &v.ContentMD, &v.ContentHTML, &v.ContentHash, &v.Author, &v.Transclusions, &v.StubOf, &v.Generated, &v.PinnedAt)
+	err := row.Scan(&v.ItemID, &v.Version, &v.Kind, &v.At, &v.Note, &v.NoteGenerated, &v.ContentMD, &v.ContentHTML, &v.ContentHash, &v.Author, &v.Transclusions, &v.StubOf, &v.Generated, &v.Links, &v.PinnedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, notFound("version not found")
 	}
@@ -499,18 +500,35 @@ func (s *Studio) Publish(ctx context.Context, originID int64, id string, opts Pu
 			}
 		}
 		if len(c.Generated) > 0 {
+			for gi := range c.Generated {
+				for si, src := range c.Generated[gi].Sources {
+					// §5.7 rule 1: a remote source MAY carry its human half,
+					// frozen now, as a remote transclusion does.
+					if snap := rs.quoted[src.Origin+" "+src.ID]; src.Origin != "" && snap != nil {
+						c.Generated[gi].Sources[si].Cited = cited(snap, at)
+					}
+				}
+			}
 			b, err := json.Marshal(c.Generated)
 			if err != nil {
 				return err
 			}
 			generated = string(b)
 		}
+		var links any
+		if len(c.Links) > 0 {
+			b, err := json.Marshal(c.Links)
+			if err != nil {
+				return err
+			}
+			links = string(b)
+		}
 		next := it.Version + 1
 		v, err := scanVersion(tx.QueryRow(ctx, `INSERT INTO item_versions
-			(item_id, version, kind, at, note, note_generated, content_md, content_html, content_hash, author, transclusions, stub_of, generated)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12::jsonb, $13::jsonb) RETURNING `+versionCols,
+			(item_id, version, kind, at, note, note_generated, content_md, content_html, content_hash, author, transclusions, stub_of, generated, links)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb) RETURNING `+versionCols,
 			id, next, it.Kind, at, note, note != nil && opts.NoteGenerated, md, c.ContentHTML, blyg.ContentHash(md),
-			nullableJSON(o.Byline), transclusions, stubOf, generated))
+			nullableJSON(o.Byline), transclusions, stubOf, generated, links))
 		if err != nil {
 			return err
 		}

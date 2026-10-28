@@ -56,7 +56,7 @@ func FlattenFork(src ForkSource, link QuoteLink) (md string, exact bool) {
 	var out []string
 	q, a := 0, 0
 	for i := 0; i < len(lines); i++ {
-		if id, at := directiveAt(lines[i]); id != "" && !inSpans(code, starts[i]+at) {
+		if id, _, at := directiveAt(lines[i]); id != "" && !inSpans(code, starts[i]+at) {
 			if q >= len(quotes) {
 				return fallback()
 			}
@@ -78,7 +78,7 @@ func FlattenFork(src ForkSource, link QuoteLink) (md string, exact bool) {
 		line, unmatched := lines[i], false
 		var b strings.Builder
 		last := 0
-		for _, m := range inlineLink.FindAllStringSubmatchIndex(line, -1) {
+		for _, m := range findLinks(line) {
 			if (m[0] > 0 && line[m[0]-1] == '!') || inSpans(code, starts[i]+m[0]) {
 				continue
 			}
@@ -402,7 +402,12 @@ func (f *flattener) flattenQuote(n *html.Node, origin string) string {
 		label += " · v" + version
 	}
 	attribution := "— quoted from " + label
-	if id != "" {
+	switch quoter := nodeAttr(n, "data-blyg-label"); {
+	case id != "" && quoter != "":
+		// The quoter's name for the item is the anchor text (§10.2,
+		// decision #81); where it came from still shows beside it.
+		attribution = "— quoted from [" + escapeMD(quoter) + "](" + f.link(origin, id) + "), " + label
+	case id != "":
 		attribution = "— quoted from [" + label + "](" + f.link(origin, id) + ")"
 	}
 	return quoteMD(body + "\n\n" + attribution)

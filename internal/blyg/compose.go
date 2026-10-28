@@ -17,8 +17,8 @@ type Use int
 
 const (
 	UseDirective Use = iota // ![[id]]: bakes a snapshot (§10.2)
-	UseLink                 // [[id]]: renders an anchor and says nothing on the wire (§10.1)
-	UseSource               // an id named by a [TK] instruction: own items only (§5.7 rule 1)
+	UseLink                 // [[id]]: renders an anchor and a links[] entry (§10.1, §10.3a)
+	UseSource               // an id named by a [TK] instruction: a generation source (§5.7 rules 1, 8)
 )
 
 // Target is a resolved id: the snapshot the publisher holds (§10.2).
@@ -32,6 +32,10 @@ type Target struct {
 	// Pinned reports whether Version is pinned at its origin. §10.2 asks a
 	// studio to say when a directive resolves to an unpinned remote item.
 	Pinned bool
+	// Label is the author's label at this use (§10.1, decision #70): a
+	// link's anchor text, or a directive's data-blyg-label. Resolution
+	// ignores it.
+	Label string
 }
 
 // Unresolved is a resolver's refusal: a publish error the author can fix,
@@ -57,10 +61,14 @@ type Generated struct {
 	At      string      `json:"at,omitempty"`
 }
 
-// GenSource names an own item's version a generator drew on (§5.7 rule 1).
+// GenSource names an item version a generator drew on (§5.7 rule 1): a
+// reference, origin omitted for an own item and present for another
+// origin's, as in transclusions[].
 type GenSource struct {
+	Origin  string `json:"origin,omitempty"`
 	ID      string `json:"id"`
 	Version int    `json:"version"`
+	Cited   *Cited `json:"cited,omitempty"`
 }
 
 // Problem is one reason a draft cannot be published as it stands.
@@ -87,6 +95,7 @@ type Composed struct {
 	Transclusions []Reference // §10.3, directive order
 	Quoted        []*Target   // parallel to Transclusions
 	Generated     []Generated // §5.7, scope order
+	Links         []Link      // §10.3a, document order
 	Problems      []Problem   // non-empty means do not publish
 }
 
@@ -122,7 +131,7 @@ func Compose(in ComposeInput) (*Composed, error) {
 	c.out.ContentMD = stripped
 	for _, sp := range spans {
 		for _, l := range strings.Split(stripped[sp.start:sp.end], "\n") {
-			if id, _ := directiveAt(l); id != "" || reservedLine.MatchString(l) {
+			if id, _, _ := directiveAt(l); id != "" || reservedLine.MatchString(l) {
 				// §5.7 rule 3: generated prose and quotation are disjoint.
 				c.problem(strings.TrimSpace(l), "a directive inside generated text: move it outside the [TK] scope")
 			}
@@ -142,14 +151,48 @@ func Compose(in ComposeInput) (*Composed, error) {
 		return nil, c.err
 	}
 	c.out.ContentHTML = body
+	c.out.Links = c.linksInOrder(stripped)
 	return c.out, nil
+}
+
+// linksInOrder is links[]: one entry per resolved link, in document order
+// (§10.3a). Rendering visits generated blocks out of order, so the order is
+// read from the wire content_md, by the same grammar substituteLinks used:
+// outside code, not the directive form, and in a thread not a directive
+// line or the selection attached to one.
+func (c *composer) linksInOrder(md string) []Link {
+	lines := strings.Split(md, "\n")
+	starts := lineOffsets(lines)
+	code := codeSpans(md)
+	var out []Link
+	for i := 0; i < len(lines); i++ {
+		if c.in.Thread {
+			if id, _, at := directiveAt(lines[i]); id != "" && !inSpans(code, starts[i]+at) {
+				if _, next, ok := attachedQuote(lines, i); ok {
+					i = next - 1
+				}
+				continue
+			}
+		}
+		l := lines[i]
+		for _, m := range findLinks(l) {
+			if (m[0] > 0 && l[m[0]-1] == '!') || inSpans(code, starts[i]+m[0]) {
+				continue
+			}
+			if t := c.linked[l[m[2]:m[3]]]; t != nil {
+				out = append(out, Link{Origin: t.Origin, ID: t.ID})
+			}
+		}
+	}
+	return out
 }
 
 type composer struct {
 	in     ComposeInput
 	out    *Composed
 	err    error
-	blocks map[string]string // block sentinel token → rendered generated block
+	linked map[string]*Target // each [[id]] resolved, by id
+	blocks map[string]string  // block sentinel token → rendered generated block
 	inline bool
 	seq    int
 }
@@ -182,8 +225,9 @@ func (c *composer) generated(scopes []tkScope) {
 			g.Model = s.model
 		} else {
 			for _, id := range s.sourceIDs {
+				// §5.7 rule 8: a source resolves like a directive.
 				if t, ok := c.resolve(id, UseSource, "![["+id+"]]"); ok {
-					g.Sources = append(g.Sources, GenSource{t.ID, t.Version})
+					g.Sources = append(g.Sources, GenSource{Origin: t.Origin, ID: t.ID, Version: t.Version})
 				}
 			}
 			if i < len(c.in.Generation) {
@@ -229,7 +273,7 @@ func (c *composer) refuseDirectives(md string) {
 	lines := strings.Split(md, "\n")
 	starts := lineOffsets(lines)
 	for i, l := range lines {
-		if id, at := directiveAt(l); id != "" && !inSpans(code, starts[i]+at) {
+		if id, _, at := directiveAt(l); id != "" && !inSpans(code, starts[i]+at) {
 			c.problem(strings.TrimSpace(l), "only threads transclude (§10): publish this as a thread, or use [["+id+"]] to link")
 		} else if reservedLine.MatchString(l) && !inSpans(code, starts[i]+strings.IndexByte(l, '!')) {
 			c.problem(strings.TrimSpace(l), "explicit versions (![[id@vN]]) are reserved in 0.3 (§10.1)")
@@ -256,7 +300,7 @@ func (c *composer) thread(md string) string {
 			c.problem(strings.TrimSpace(l), "explicit versions (![[id@vN]]) are reserved in 0.3 (§10.1)")
 			continue
 		}
-		id, at := directiveAt(l)
+		id, label, at := directiveAt(l)
 		if id == "" || inSpans(code, starts[i]+at) {
 			prose = append(prose, l)
 			continue
@@ -268,10 +312,13 @@ func (c *composer) thread(md string) string {
 		quote, next, partial := attachedQuote(lines, i)
 		i = next - 1
 		directive := strings.TrimSpace(l)
-		t, ok := c.resolve(id, UseDirective, directive)
+		resolved, ok := c.resolve(id, UseDirective, directive)
 		if !ok {
 			continue
 		}
+		t := &Target{}
+		*t = *resolved
+		t.Label = label
 		snapshot := t.ContentHTML
 		if t.Origin != "" {
 			// Defensive (§5.2): a remote snapshot should already be
@@ -313,6 +360,11 @@ func bakeOpen(class string, t *Target) string {
 		// Remote sources only, so an own-origin bake is byte-identical to
 		// its 0.2 form (§10.2).
 		s += ` data-blyg-origin="` + escapeHTML(t.Origin) + `"`
+	}
+	if t.Label != "" {
+		// The quoter's name for the item, verbatim and escaped, for an
+		// attribution line and nothing else (§10.2, decision #81).
+		s += ` data-blyg-label="` + escapeHTML(t.Label) + `"`
 	}
 	return s + ">\n"
 }
@@ -357,13 +409,14 @@ type linkSub struct {
 }
 
 // substituteLinks swaps each live [[id]] for a sentinel token. A link that
-// does not resolve is a publish error (§10.1) and stays literal.
+// does not resolve is a publish error (§10.1) and stays literal. The anchor
+// text is the author's label when there is one.
 func (c *composer) substituteLinks(md string) (string, map[string]linkSub) {
 	code := codeSpans(md)
 	subs := map[string]linkSub{}
 	var b strings.Builder
 	last := 0
-	for _, m := range inlineLink.FindAllStringSubmatchIndex(md, -1) {
+	for _, m := range findLinks(md) {
 		if (m[0] > 0 && md[m[0]-1] == '!') || inSpans(code, m[0]) {
 			continue
 		}
@@ -372,10 +425,18 @@ func (c *composer) substituteLinks(md string) (string, map[string]linkSub) {
 		if !ok {
 			continue
 		}
+		if c.linked == nil {
+			c.linked = map[string]*Target{}
+		}
+		c.linked[t.ID] = t
 		b.WriteString(md[last:m[0]])
 		token := linkSentinel + strconv.Itoa(c.seq) + linkSentinel
 		c.seq++
-		label := escapeHTML(anchorText(t))
+		text := linkLabel(md, m)
+		if text == "" {
+			text = anchorText(t)
+		}
+		label := escapeHTML(text)
 		subs[token] = linkSub{
 			anchor:  `<a href="` + escapeHTML(t.Page) + `">` + label + `</a>`,
 			label:   label,

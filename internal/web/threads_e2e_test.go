@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -513,4 +514,103 @@ func TestAPIDescribedOperations(t *testing.T) {
 	sid := itoa(bob.subscribe(t, alice.origin))
 	expect(t, bob.api("PUT", "/reader/items/"+sid+"/"+f+"/read", nil), 204)
 	expect(t, bob.api("DELETE", "/reader/items/"+sid+"/"+f+"/read", nil), 204)
+}
+
+// Protocol 0.4's new disclosures, end to end between two origins: a
+// labelled [[id]] link lands in links[] and sends a link mention, which the
+// receiver files as a notice; a [TK] source on another origin's item lands
+// in generated[] with its origin and cited, and sends a source mention,
+// which is a response (§10.3a, §5.7 rules 8 and 9, §15.5).
+func TestLinksAndSourcesNotify(t *testing.T) {
+	e := newEnv(t, mention.DefaultRateLimits)
+	alice, bob := e.user("alice"), e.user("bob")
+	ctx := context.Background()
+	run := func() {
+		t.Helper()
+		if _, err := e.workers.SendBatch(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.workers.VerifyBatch(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	linked := alice.draft(t, map[string]any{"content_md": "Worth a link."})
+	alice.publish(t, linked, 200)
+	drawn := alice.draft(t, map[string]any{"content_md": "Worth drawing on."})
+	alice.publish(t, drawn, 200)
+	bob.subscribe(t, alice.origin)
+	own := bob.draft(t, map[string]any{"content_md": "Bob's own."})
+	bob.publish(t, own, 200)
+
+	item := bob.draft(t, map[string]any{"kind": "thread", "content_md": "See [[" + linked + " | Alice's note]] and [[" + own + "]].\n\n" +
+		"![[" + drawn + " | what Alice said]]\n\n" +
+		"[TK]summarize ![[" + drawn + "]][=]A summary.[/TK]\n"})
+	bob.publish(t, item, 200)
+
+	d := bob.itemDoc(t, item)
+	links, _ := json.Marshal(d.Links)
+	if want := `[{"origin":"` + alice.origin + `","id":"` + linked + `"},{"id":"` + own + `"}]`; string(links) != want {
+		t.Errorf("links[]: %s, want %s", links, want)
+	}
+	if !strings.Contains(d.ContentHTML, `>Alice&#39;s note</a>`) || !strings.Contains(d.ContentHTML, `data-blyg-label="what Alice said"`) {
+		t.Errorf("labels: %s", d.ContentHTML)
+	}
+	var gen []blyg.Generated
+	if err := json.Unmarshal(d.Generated, &gen); err != nil || len(gen) != 1 || len(gen[0].Sources) != 1 {
+		t.Fatalf("generated: %s %v", d.Generated, err)
+	}
+	if s := gen[0].Sources[0]; s.Origin != alice.origin || s.ID != drawn || s.Version != 1 || s.Cited == nil || s.Cited.Retrieved == "" {
+		t.Errorf("remote source: %+v", s)
+	}
+
+	// One mention per target: drawn is quoted and drawn on, and the quote
+	// wins; linked gets a link mention. bob's own item gets none.
+	run()
+	rels := map[string]string{}
+	for _, o := range bob.api("GET", "/outbound", nil).json(t)["outbound"].([]any) {
+		m := o.(map[string]any)
+		rels[fmt.Sprint(m["target_url"])] = fmt.Sprint(m["relation"]) + "/" + fmt.Sprint(m["status"])
+	}
+	if len(rels) != 2 || rels[alice.origin+"f/"+linked+"/"] != "link/sent" || rels[alice.origin+"f/"+drawn+"/"] != "transclusion/sent" {
+		t.Fatalf("outbound: %v", rels)
+	}
+	classes := map[string]string{}
+	for _, m := range alice.api("GET", "/mentions", nil).json(t)["mentions"].([]any) {
+		m := m.(map[string]any)
+		classes[fmt.Sprint(m["target_item_id"])] = fmt.Sprint(m["relation"]) + "/" + fmt.Sprint(m["class"])
+	}
+	if classes[linked] != "link/notice" || classes[drawn] != "transclusion/response" {
+		t.Fatalf("received: %v", classes)
+	}
+
+	// A source alone is its own relation, and a response.
+	only := bob.draft(t, map[string]any{"content_md": "[TK]riff on ![[" + linked + "]][=]A riff.[/TK]"})
+	bob.publish(t, only, 200)
+	run()
+	found := false
+	for _, m := range alice.api("GET", "/mentions?class=response", nil).json(t)["mentions"].([]any) {
+		m := m.(map[string]any)
+		if m["source_item_id"] == only {
+			found = m["relation"] == "source"
+		}
+	}
+	if !found {
+		t.Error("a remote source's mention did not verify as a source response")
+	}
+
+	// A republish that keeps the link re-sends nothing; links[] is part of
+	// the version, which the schema keeps.
+	bob.edit(t, item, "See [["+linked+"]] again.")
+	bob.publish(t, item, 200)
+	if n, _ := e.workers.SendBatch(ctx); n != 0 {
+		t.Errorf("an unchanged link was re-sent (%d)", n)
+	}
+	if _, err := e.pool.Exec(ctx, `UPDATE item_versions SET links = '[]' WHERE item_id = $1 AND version = 1`, item); err == nil {
+		t.Error("the schema let a published version's links change")
+	}
+	// An endcap omits it.
+	expect(t, bob.api("POST", "/items/"+item+"/withdraw", nil), 200)
+	if d := bob.itemDoc(t, item); d.Links != nil {
+		t.Errorf("endcap links: %+v", d.Links)
+	}
 }

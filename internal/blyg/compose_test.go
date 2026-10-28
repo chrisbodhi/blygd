@@ -21,9 +21,6 @@ func fakeResolve(id string, use Use) (*Target, error) {
 			ContentHTML: "<p>Stigmergy is what a protocol looks like\nfrom inside.</p>\n<p>Second &amp; last.</p>\n",
 			Page:        "https://ex.test/me/f/" + ownID + "/"}, nil
 	case remoteID:
-		if use == UseSource {
-			return nil, &Unresolved{"not an own item"}
-		}
 		return &Target{ID: remoteID, Kind: "fragment", Version: 1, Origin: "https://pi.test/",
 			ContentHTML: `<p>See <a href="notes/">notes</a> and <img src="/m.png" alt=""></p>`,
 			Page:        "https://pi.test/f/" + remoteID + "/"}, nil
@@ -281,11 +278,11 @@ func TestGeneratedSpanAcrossParagraphsStaysNested(t *testing.T) {
 
 func TestTKProblems(t *testing.T) {
 	cases := map[string]string{
-		"x [TK]never closed":                         "never closed",
-		"[TK]a [TK]b[/TK]":                           "cannot nest",
-		"[TK]write something[/TK]":                   "no output",
-		"[TK]impyrt=a\n![[" + ownID + "]]\nb[/TK]":   "inside generated text",
-		"[TK]from ![[" + remoteID + "]][=]text[/TK]": "not an own item",
+		"x [TK]never closed":                        "never closed",
+		"[TK]a [TK]b[/TK]":                          "cannot nest",
+		"[TK]write something[/TK]":                  "no output",
+		"[TK]impyrt=a\n![[" + ownID + "]]\nb[/TK]":  "inside generated text",
+		"[TK]from ![[" + draftID + "]][=]text[/TK]": "unknown item",
 	}
 	for md, want := range cases {
 		out := compose(t, md, true)
@@ -395,5 +392,77 @@ func TestPageHTML(t *testing.T) {
 	own := compose(t, "Hi *there* [x](https://o.test/a?b=1&c=2) `code`\n\n- one\n\n> q", false).ContentHTML
 	if string(PageHTML(own)) != own {
 		t.Errorf("own HTML changed:\n%s\n%s", own, PageHTML(own))
+	}
+}
+
+// Labels (§10.1, decision #70): after the id and a pipe, up to the first
+// ]] on the line, trimmed, an empty one no label. On a link it is the anchor
+// text; on a directive it is baked as data-blyg-label (decision #81).
+func TestLabels(t *testing.T) {
+	out := compose(t, "See [["+ownID+" | the <opening> fragment]], [["+headedID+"|a | b]] and [["+ownID+" | ]].", false)
+	clean(t, out)
+	for _, want := range []string{
+		`<a href="https://ex.test/me/f/` + ownID + `/">the &lt;opening&gt; fragment</a>`,
+		`<a href="https://ex.test/me/t/` + headedID + `/">a | b</a>`,
+		`<a href="https://ex.test/me/f/` + ownID + `/">“Stigmergy is what`,
+	} {
+		if !strings.Contains(out.ContentHTML, want) {
+			t.Errorf("missing %s in\n%s", want, out.ContentHTML)
+		}
+	}
+	// Anything but a pipe after the id is literal text, not a link.
+	out = compose(t, "Not a link: [["+ownID+" the label]].", false)
+	clean(t, out)
+	if strings.Contains(out.ContentHTML, "<a ") || len(out.Links) != 0 {
+		t.Errorf("a bracket without a pipe became a link: %s", out.ContentHTML)
+	}
+
+	out = compose(t, "![["+remoteID+" | their \"notes\"]]\n\n![["+ownID+"]]\n> from inside.", true)
+	clean(t, out)
+	if !strings.Contains(out.ContentHTML, `data-blyg-origin="https://pi.test/" data-blyg-label="their &quot;notes&quot;">`) {
+		t.Errorf("directive label not baked: %s", out.ContentHTML)
+	}
+	if strings.Contains(out.ContentHTML, "data-blyg-label=\"\"") || strings.Count(out.ContentHTML, "data-blyg-label") != 1 {
+		t.Errorf("an unlabelled directive got a label: %s", out.ContentHTML)
+	}
+	// It reaches nothing else: not transclusions[] (§10.1).
+	if b, _ := json.Marshal(out.Transclusions); strings.Contains(string(b), "notes") {
+		t.Errorf("the label reached transclusions[]: %s", b)
+	}
+	if HasOwnWords(out.ContentMD, out.ContentHTML) {
+		t.Error("a labelled directive is not the author's own words")
+	}
+}
+
+// links[] (§10.3a): one entry per resolved link, document order, origin
+// for a remote target only; not the directive form, not code, not the
+// selection attached to a directive. A link in a generated block keeps its
+// place though the block renders apart.
+func TestLinksAreDisclosed(t *testing.T) {
+	md := "A [[" + ownID + "]] and `[[" + headedID + "]]` and inline ![[" + headedID + "]].\n\n" +
+		"[TK]x[=]B [[" + remoteID + " | theirs]].[/TK]\n\n" +
+		"![[" + ownID + "]]\n> from inside.\n\n" +
+		"C [[" + headedID + "]], again [[" + ownID + "]]."
+	out := compose(t, md, true, GenMeta{})
+	clean(t, out)
+	got, _ := json.Marshal(out.Links)
+	want := `[{"id":"` + ownID + `"},{"origin":"https://pi.test/","id":"` + remoteID + `"},{"id":"` + headedID + `"},{"id":"` + ownID + `"}]`
+	if string(got) != want {
+		t.Fatalf("links:\n%s\nwant\n%s", got, want)
+	}
+	if out := compose(t, "No links here.", false); len(out.Links) != 0 {
+		t.Errorf("links without links: %+v", out.Links)
+	}
+}
+
+// A [TK] source resolves like a directive, so another origin's item may be
+// one, labelled or not (§5.7 rules 1 and 8).
+func TestRemoteGenerationSource(t *testing.T) {
+	out := compose(t, "[TK]draw on ![["+remoteID+" | their essay]] and ![["+ownID+"]][=]Woven.[/TK]", false, GenMeta{Model: "m"})
+	clean(t, out)
+	g, _ := json.Marshal(out.Generated)
+	want := `[{"sources":[{"origin":"https://pi.test/","id":"` + remoteID + `","version":1},{"id":"` + ownID + `","version":3}],"model":"m"}]`
+	if string(g) != want {
+		t.Fatalf("generated:\n%s\nwant\n%s", g, want)
 	}
 }

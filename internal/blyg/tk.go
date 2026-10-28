@@ -21,7 +21,6 @@ import (
 var (
 	impyrtInline      = regexp.MustCompile(`(?i)^\s*impyrt(?:[ \t]+([^\s=]+))?[ \t]*=`)
 	impyrtInstruction = regexp.MustCompile(`(?i)^impyrt(?:[ \t]+(\S+))?$`)
-	sourceRef         = regexp.MustCompile(`!\[\[(` + idClass + `)\]\]`)
 	blankBefore       = regexp.MustCompile(`(^\s*|\n[ \t]*\n)[ \t]*$`)
 	blankAfter        = regexp.MustCompile(`^[ \t]*(\n[ \t]*\n|\s*$)`)
 )
@@ -89,10 +88,13 @@ func parseScopes(md string) ([]tkScope, []string) {
 		}
 		if !s.imported {
 			seen := map[string]bool{}
-			for _, m := range sourceRef.FindAllStringSubmatch(md[open+4:instrEnd], -1) {
-				if !seen[m[1]] {
-					seen[m[1]] = true
-					s.sourceIDs = append(s.sourceIDs, m[1])
+			// A source is written as a directive, label allowed, anywhere
+			// in the instruction.
+			instr := md[open+4 : instrEnd]
+			for _, m := range findLinks(instr) {
+				if id := instr[m[2]:m[3]]; m[0] > 0 && instr[m[0]-1] == '!' && !seen[id] {
+					seen[id] = true
+					s.sourceIDs = append(s.sourceIDs, id)
 				}
 			}
 		}
