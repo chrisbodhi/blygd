@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -81,11 +82,14 @@ type querier interface {
 // conclude. After it is used up the claim fails.
 var verifyRetry = []time.Duration{time.Minute, 10 * time.Minute, time.Hour}
 
-// Run runs both loops until ctx ends.
+// Run runs the verify, send and prune loops until ctx ends, and returns
+// once each has stopped.
 func (wk *Workers) Run(ctx context.Context) {
-	go batch.Loop(ctx, wk.idle(), wk.VerifyBatch, wk.Log.With("worker", "verify"))
-	go batch.Loop(ctx, wk.idle(), wk.SendBatch, wk.Log.With("worker", "send"))
-	go batch.Loop(ctx, 10*time.Minute, wk.pruneClaims, wk.Log.With("worker", "prune"))
+	var wg sync.WaitGroup
+	wg.Go(func() { batch.Loop(ctx, wk.idle(), wk.VerifyBatch, wk.Log.With("worker", "verify")) })
+	wg.Go(func() { batch.Loop(ctx, wk.idle(), wk.SendBatch, wk.Log.With("worker", "send")) })
+	wg.Go(func() { batch.Loop(ctx, 10*time.Minute, wk.pruneClaims, wk.Log.With("worker", "prune")) })
+	wg.Wait()
 }
 
 func (wk *Workers) idle() time.Duration {

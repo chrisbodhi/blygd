@@ -19,9 +19,9 @@ import (
 
 	"github.com/chrisbodhi/blygd/internal/account"
 	"github.com/chrisbodhi/blygd/internal/blyg"
+	"github.com/chrisbodhi/blygd/internal/config"
 	"github.com/chrisbodhi/blygd/internal/events"
 	"github.com/chrisbodhi/blygd/internal/fetch"
-	"github.com/chrisbodhi/blygd/internal/hopper"
 	"github.com/chrisbodhi/blygd/internal/mention"
 	"github.com/chrisbodhi/blygd/internal/reader"
 	"github.com/chrisbodhi/blygd/internal/studio"
@@ -49,23 +49,19 @@ func newEnv(t *testing.T, limits mention.RateLimits) *env {
 	srv.Start()
 	t.Cleanup(srv.Close)
 
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	fc := &fetch.Client{AllowPrivate: true, UserAgent: "blygd-test"}
-	st := &studio.Studio{Pool: pool, Generator: "blygd/test", Level: 2, Fetch: fc, FragmentCap: 2000}
-	accts := &account.Accounts{Pool: pool}
-	rd := &reader.Reader{Pool: pool, Fetch: fc, Log: log, ReconcileEvery: 1000 * time.Hour}
-	st.Imports = rd
-	hoppers := &hopper.Store{Pool: pool}
-	hub := &events.Hub{Pool: pool, Log: log}
+	// The production wiring, configured as a test needs: private addresses
+	// reachable (the server is on 127.0.0.1), no request budgets, and the
+	// given mention limits.
+	app := New(&config.Config{PublicURL: srv.URL + "/", AllowPrivate: true, Level: 2, FragmentCap: 2000},
+		pool, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	app.Receiver.Limits = limits
+	app.Reader.ReconcileEvery = 1000 * time.Hour
+	srv.Config.Handler = app.Handler
 	hubCtx, stopHub := context.WithCancel(context.Background())
 	t.Cleanup(stopHub)
-	go hub.Run(hubCtx)
-	api := &API{Pool: pool, Accounts: accts, Studio: st, Hoppers: hoppers, Reader: rd, Events: hub, Log: log}
-	surface := &Surface{Studio: st, Receiver: &mention.Receiver{Pool: pool, Limits: limits}, Hoppers: hoppers, Scheme: "http", Log: log}
-	srv.Config.Handler = Router(api, surface, log)
-	fc.Local, fc.LocalBase = surface, srv.URL+"/"
-	return &env{t: t, srv: srv, pool: pool, studio: st, accts: accts, workers: &mention.Workers{Pool: pool, Fetch: fc, Log: log, Display: st.ChangeDisplay},
-		reader: rd, fetch: fc, api: api, surface: surface, hub: hub}
+	go app.Hub.Run(hubCtx)
+	return &env{t: t, srv: srv, pool: pool, studio: app.Studio, accts: app.Accounts, workers: app.Workers,
+		reader: app.Reader, fetch: app.Fetch, api: app.API, surface: app.Surface, hub: app.Hub}
 }
 
 type user struct {

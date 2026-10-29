@@ -17,14 +17,13 @@ import (
 	"github.com/chrisbodhi/blygd/internal/fetch"
 )
 
-// Run polls until ctx ends.
+// Run polls until ctx ends, and returns once the last batch has.
 func (r *Reader) Run(ctx context.Context) {
 	idle := r.Idle
 	if idle <= 0 {
 		idle = 10 * time.Second
 	}
-	log := r.Log.With("worker", "poll")
-	go batch.Loop(ctx, idle, r.PollBatch, log)
+	batch.Loop(ctx, idle, r.PollBatch, r.Log.With("worker", "poll"))
 }
 
 // remote is one leased remote origin.

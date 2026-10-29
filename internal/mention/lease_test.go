@@ -67,3 +67,55 @@ func TestVerifyBatchStaysWithinItsLease(t *testing.T) {
 		t.Fatalf("worked %d: %d settled, %d released and due, %d pending with an attempt spent", n, done, released, spent)
 	}
 }
+
+// Run returns only once its batches have, and a claim that the shutdown
+// interrupts is handed back due with its attempt refunded (architecture
+// review P5): stopping the process is not the source's failure.
+func TestShutdownHandsBackTheClaimInFlight(t *testing.T) {
+	pool := testdb.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	inFlight := make(chan struct{}, 1)
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		inFlight <- struct{}{}
+		<-r.Context().Done()
+	}))
+	defer slow.Close()
+
+	if _, err := pool.Exec(ctx, `WITH u AS (INSERT INTO users (handle) VALUES ('alice') RETURNING id),
+		o AS (INSERT INTO origins (owner_id, base_url) SELECT id, 'http://alice.test/' FROM u RETURNING id),
+		i AS (INSERT INTO items (id, origin_id, authored_kind) SELECT $1, id, 'fragment' FROM o RETURNING id, origin_id)
+		INSERT INTO inbound_mentions (origin_id, target_item_id, source_url, target_url, status,
+			next_attempt_at, source_host, source_domain)
+		SELECT origin_id, id, $2, 'http://alice.test/items/' || id || '.json', 'pending', now(), '127.0.0.1', '127.0.0.1' FROM i`,
+		blyg.NewID(), slow.URL+"/source"); err != nil {
+		t.Fatal(err)
+	}
+
+	wk := &Workers{Pool: pool, Fetch: &fetch.Client{AllowPrivate: true}, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	done := make(chan struct{})
+	go func() {
+		wk.Run(ctx)
+		close(done)
+	}()
+	select {
+	case <-inFlight:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the verifier never fetched the source")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Run did not return after its context ended")
+	}
+	var attempts int
+	var due bool
+	if err := pool.QueryRow(context.Background(), `SELECT attempts, next_attempt_at <= now() FROM inbound_mentions
+		WHERE status = 'pending'`).Scan(&attempts, &due); err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 0 || !due {
+		t.Fatalf("after shutdown: %d attempts spent, due again now: %v", attempts, due)
+	}
+}

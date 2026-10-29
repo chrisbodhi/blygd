@@ -98,3 +98,29 @@ func TestEachKeepsWithinTheLease(t *testing.T) {
 		t.Fatalf("after an error: ran %v, rest %v, %v", ran, rest, err)
 	}
 }
+
+// A claim the caller's context ends under is handed back with those not
+// started; a claim that fails on its own is not.
+func TestEachHandsBackTheClaimAShutdownInterrupts(t *testing.T) {
+	l := Lease{Until: time.Now().Add(time.Hour), ClaimMax: time.Minute}
+	ctx, cancel := context.WithCancel(context.Background())
+	rest, err := Each(ctx, l, []int{0, 1, 2}, func(ctx context.Context, c int) error {
+		if c == 1 {
+			cancel()
+			return ctx.Err()
+		}
+		return nil
+	})
+	if err == nil || len(rest) != 2 || rest[0] != 1 {
+		t.Errorf("interrupted at 1: handed back %v (%v), want [1 2]", rest, err)
+	}
+	rest, err = Each(context.Background(), l, []int{0, 1, 2}, func(ctx context.Context, c int) error {
+		if c == 1 {
+			return errors.New("source refused")
+		}
+		return nil
+	})
+	if err == nil || len(rest) != 1 || rest[0] != 2 {
+		t.Errorf("failed at 1: handed back %v (%v), want [2]", rest, err)
+	}
+}

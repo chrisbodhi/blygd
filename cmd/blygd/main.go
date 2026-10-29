@@ -29,12 +29,6 @@ import (
 	"github.com/chrisbodhi/blygd/internal/account"
 	"github.com/chrisbodhi/blygd/internal/config"
 	"github.com/chrisbodhi/blygd/internal/db"
-	"github.com/chrisbodhi/blygd/internal/events"
-	"github.com/chrisbodhi/blygd/internal/fetch"
-	"github.com/chrisbodhi/blygd/internal/hopper"
-	"github.com/chrisbodhi/blygd/internal/mention"
-	"github.com/chrisbodhi/blygd/internal/reader"
-	"github.com/chrisbodhi/blygd/internal/studio"
 	"github.com/chrisbodhi/blygd/internal/web"
 )
 
@@ -79,14 +73,12 @@ func run(log *slog.Logger, args []string) error {
 		return err
 	}
 
-	fc := &fetch.Client{UserAgent: cfg.Generator() + " (+" + cfg.GeneratorURL + ")", AllowPrivate: cfg.AllowPrivate}
-	st := &studio.Studio{Pool: pool, Generator: cfg.Generator(), GeneratorURL: cfg.GeneratorURL,
-		Level: cfg.Level, Fetch: fc, FragmentCap: cfg.FragmentCap, MediaMax: cfg.MediaMax}
-	accts := &account.Accounts{Pool: pool}
+	app := web.New(cfg, pool, log)
+	st, accts := app.Studio, app.Accounts
 
 	switch {
 	case args[0] == "serve":
-		return serve(ctx, log, cfg, pool, st, accts, fc)
+		return serve(ctx, log, cfg, app)
 	case len(args) >= 3 && args[0] == "user" && args[1] == "add":
 		title := strings.Join(args[3:], " ")
 		_, originID, secret, err := accts.CreateUser(ctx, args[2], cfg.PublicURL, title)
@@ -232,35 +224,24 @@ func ensureSchema(ctx context.Context, log *slog.Logger, cfg *config.Config, poo
 	return nil
 }
 
-func serve(ctx context.Context, log *slog.Logger, cfg *config.Config, pool *pgxpool.Pool, st *studio.Studio, accts *account.Accounts, fc *fetch.Client) error {
+func serve(ctx context.Context, log *slog.Logger, cfg *config.Config, app *web.App) error {
 	if cfg.AllowPrivate {
 		log.Warn("BLYGD_ALLOW_PRIVATE_FETCH is on: Webmention sources can reach private addresses. Development only.")
 	}
-	receiver := &mention.Receiver{Pool: pool, Limits: mention.DefaultRateLimits}
-	rd := &reader.Reader{Pool: pool, Fetch: fc, Log: log,
-		ManualPollFloor: time.Duration(cfg.PollFloor) * time.Second}
-	st.Imports = rd // §10.2 step 2: imported snapshots reach a publish only through this
-	hoppers := &hopper.Store{Pool: pool}
-	hub := &events.Hub{Pool: pool, Log: log}
-	go hub.Run(ctx)
-	api := &web.API{Pool: pool, Accounts: accts, Studio: st, Hoppers: hoppers, Reader: rd, Events: hub, Log: log}
-	if cfg.RateLimits {
-		api.Limits = web.NewLimits(cfg.TrustProxy)
-	} else {
+	if !cfg.RateLimits {
 		log.Warn("BLYGD_RATE_LIMITS is off: no request budgets. Test harnesses only.")
 	}
-	surface := &web.Surface{Studio: st, Receiver: receiver, Hoppers: hoppers, Scheme: cfg.Scheme(), TrustProxy: cfg.TrustProxy, Log: log}
-	// Same-instance reads, forks and mentions are answered in-process, from
-	// the surface any remote client would see (and outside its budgets).
-	fc.Local, fc.LocalBase = surface, cfg.PublicURL
-
-	workers := &mention.Workers{Pool: pool, Fetch: fc, Log: log, Display: st.ChangeDisplay}
-	workers.Run(ctx)
-	rd.Run(ctx)
+	ctx, stop := context.WithCancel(ctx)
+	defer stop()
+	background := make(chan struct{})
+	go func() {
+		app.Run(ctx)
+		close(background)
+	}()
 
 	srv := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           web.Router(api, surface, log),
+		Handler:           app.Handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
@@ -274,12 +255,21 @@ func serve(ctx context.Context, log *slog.Logger, cfg *config.Config, pool *pgxp
 		log.Info("listening", "addr", cfg.Listen, "public", cfg.PublicURL)
 		errc <- srv.ListenAndServe()
 	}()
+	var err error
 	select {
-	case err := <-errc:
-		return err
+	case err = <-errc:
 	case <-ctx.Done():
+		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		err = srv.Shutdown(shutdown)
 	}
-	shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	return srv.Shutdown(shutdown)
+	// The workers stop with ctx; wait for them, so the pool closes under no
+	// batch. A listener that failed on its own has not ended ctx, so end it.
+	stop()
+	select {
+	case <-background:
+	case <-time.After(15 * time.Second):
+		log.Warn("background work still running after 15s; closing the pool under it")
+	}
+	return err
 }

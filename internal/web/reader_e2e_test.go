@@ -8,18 +8,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chrisbodhi/blygd/internal/fetch"
 	"github.com/chrisbodhi/blygd/internal/mention"
 	"github.com/chrisbodhi/blygd/internal/testblyg"
 )
 
-// sameInstanceOnly gives the reader, the studio and the mention workers a
-// client that refuses every private address, as production does: the test
-// server is on 127.0.0.1, so whatever still works was answered in-process.
-func (e *env) sameInstanceOnly() {
-	fc := &fetch.Client{UserAgent: "blygd-test", Local: e.surface, LocalBase: e.srv.URL + "/"}
-	e.reader.Fetch, e.studio.Fetch, e.workers.Fetch = fc, fc, fc
-}
+// sameInstanceOnly makes the instance's client refuse every private
+// address, as production does: the test server is on 127.0.0.1, so
+// whatever still works was answered in-process.
+func (e *env) sameInstanceOnly() { e.fetch.AllowPrivate = false }
 
 func (e *env) poll(sid int) {
 	e.t.Helper()

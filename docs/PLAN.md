@@ -461,6 +461,30 @@ them.
    backoff type is left undone, since the three schedules answer
    different specs. `TestEachKeepsWithinTheLease` and
    `TestVerifyBatchStaysWithinItsLease` cover the change.)*
+7. **Two composition roots** (P4). `newEnv` re-wired by hand what `serve`
+   wired, so a dependency added in one place left the e2e suite testing
+   a different graph.
+   *(Done, 2026-10-29. `web.New(cfg, pool, log)` builds the whole
+   instance, including its fetch client and the in-process local route.
+   `serve`, the other commands and `newEnv` all call it. Tests adjust it
+   with a `config.Config`, plus the few knobs the config doesn't hold
+   (mention limits, reconcile interval). `sameInstanceOnly` is now one
+   field on the shared client. `cmd/blygd` may import only `account`,
+   `config`, `db` and `web`, so `archtest` fails if main starts wiring
+   again.)*
+8. **Fire-and-forget workers** (P5). `Workers.Run` and `Reader.Run`
+   started goroutines with no handle, and `serve` closed the pool while
+   batches could still be querying. A claim cut off by the shutdown kept
+   its spent attempt and waited out its lease.
+   *(Done, 2026-10-29. Both `Run`s block until their loops return, and
+   `App.Run` waits for them and the event hub. `serve` stops the
+   listener, then waits up to 15 s for the background work before the
+   pool closes. `batch.Each` counts a claim interrupted by its context
+   ending as not started, so it is released due with its attempt
+   refunded. A send interrupted after its POST is therefore sent again
+   later, and the receiver re-verifies it as an update (§15.4 rule 6).
+   `TestShutdownHandsBackTheClaimInFlight` and
+   `TestEachHandsBackTheClaimAShutdownInterrupts` cover the change.)*
 
 ## Interop (2026-10-10)
 

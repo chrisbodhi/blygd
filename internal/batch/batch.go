@@ -55,7 +55,9 @@ type Lease struct {
 
 // Each runs fn on claims in order, within l. It returns the claims it did
 // not start, for the caller to release with their attempt refunded, and
-// fn's first error, after which it starts no more.
+// fn's first error, after which it starts no more. A claim that ctx's end
+// interrupts counts as not started: shutting down is not the claim's
+// failure, so it should not cost an attempt.
 func Each[T any](ctx context.Context, l Lease, claims []T, fn func(context.Context, T) error) ([]T, error) {
 	now := l.Now
 	if now == nil {
@@ -68,6 +70,9 @@ func Each[T any](ctx context.Context, l Lease, claims []T, fn func(context.Conte
 		cctx, cancel := context.WithTimeout(ctx, l.ClaimMax)
 		err := fn(cctx, c)
 		cancel()
+		if err != nil && ctx.Err() != nil {
+			return claims[i:], err
+		}
 		if err != nil {
 			return claims[i+1:], err
 		}

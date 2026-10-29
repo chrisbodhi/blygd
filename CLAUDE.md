@@ -95,7 +95,7 @@ internal/apperr      what kind of failure an error is; internal/web maps kinds t
 internal/surface     locates another origin's surface from its manifest (§6.1)
 internal/account     users, scoped tokens
 internal/hopper      hopper CRUD over references; public hopper view (§13.5, live)
-internal/web         HTTP: origin surface, /api, /studio (embedded plain client), router; end-to-end tests
+internal/web         HTTP: origin surface, /api, /studio (embedded plain client), router; New, the composition root; end-to-end tests
 internal/testdb      per-test databases
 internal/testblyg    a fake static blyg for import tests
 internal/archtest    source-reading tests of the house rules: import graph, SQL by plane, HTTP, transactions
