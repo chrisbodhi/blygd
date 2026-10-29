@@ -136,15 +136,15 @@ Left for later:
   - **Route by host only.** A custom origin is served only when the
     request's host and path match its `base_url`: no `/{handle}/`
     fallback, and no other path to its pages.
-  - **Close the local shortcut.** `reader.LocalFirst` answers this
-    instance's origins from the database without the network, trusting
-    `base_url` instead of DNS. That is safe today only because every
-    origin's host is `BLYGD_PUBLIC_URL`'s. It must treat an origin as
-    local only when its host is the instance's own or its custom
-    `base_url` is verified, and go through the network otherwise. Without
-    this, another tenant subscribing to `https://blyg.google.com/` would
-    read the impostor's items, and so would quotes and snapshots. Test it:
-    an unverified `base_url` must not be read locally.
+  - **Close the local shortcut.** Without this, another tenant
+    subscribing to `https://blyg.google.com/` would read the impostor's
+    items, and so would quotes and snapshots.
+    *(Done by construction, 2026-10-29. `reader.LocalFirst` is gone.
+    `fetch.Client.Local` answers in-process only for `BLYGD_PUBLIC_URL`'s
+    own scheme and host, so a custom-domain origin is fetched over the
+    network. If custom domains should also be served in-process once
+    verified, that is a deliberate widening, with a test that an
+    unverified `base_url` is not.)*
   - An export is just files, and anyone can hand-write a manifest
     claiming any site. It speaks for an origin only where DNS serves it,
     which is why the checks above live in serving and reading, not in
@@ -417,6 +417,19 @@ them.
    name what the renderer writes. Tests check that the reader's default
    `Surface` and the receiver's path patterns agree with them. Every
    rule was broken on purpose and its test failed.)*
+4. **Same-instance fetches dialed the public address** (P2). Only the
+   reader went local. The studio's pin checks and copies and the mention
+   workers' sends and verifications went out over the network to this
+   same instance, and behind a private reverse proxy the address guard
+   refused them. A fork's pin check then counted as "could not confirm"
+   and published anyway.
+   *(Done, 2026-10-29. `fetch.Client` gains `Local` and `LocalBase`. A
+   request for the instance's own scheme and host goes to the
+   origin-surface handler in-process, through the client's usual
+   redirects and limits, outside the public request budgets. The receiver's
+   own mention limits still apply. `reader.LocalFirst` is removed. The
+   two same-instance e2e tests run with private addresses refused, so
+   they pass only in-process; turning the path off fails both.)*
 
 ## Interop (2026-10-10)
 

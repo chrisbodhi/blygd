@@ -53,7 +53,7 @@ func newEnv(t *testing.T, limits mention.RateLimits) *env {
 	fc := &fetch.Client{AllowPrivate: true, UserAgent: "blygd-test"}
 	st := &studio.Studio{Pool: pool, Generator: "blygd/test", Level: 2, Fetch: fc, FragmentCap: 2000}
 	accts := &account.Accounts{Pool: pool}
-	rd := &reader.Reader{Pool: pool, Fetch: &reader.LocalFirst{Studio: st, Remote: fc}, Log: log, ReconcileEvery: 1000 * time.Hour}
+	rd := &reader.Reader{Pool: pool, Fetch: fc, Log: log, ReconcileEvery: 1000 * time.Hour}
 	st.Imports = rd
 	hoppers := &hopper.Store{Pool: pool}
 	hub := &events.Hub{Pool: pool, Log: log}
@@ -63,6 +63,7 @@ func newEnv(t *testing.T, limits mention.RateLimits) *env {
 	api := &API{Pool: pool, Accounts: accts, Studio: st, Hoppers: hoppers, Reader: rd, Events: hub, Log: log}
 	surface := &Surface{Studio: st, Receiver: &mention.Receiver{Pool: pool, Limits: limits}, Hoppers: hoppers, Scheme: "http", Log: log}
 	srv.Config.Handler = Router(api, surface, log)
+	fc.Local, fc.LocalBase = surface, srv.URL+"/"
 	return &env{t: t, srv: srv, pool: pool, studio: st, accts: accts, workers: &mention.Workers{Pool: pool, Fetch: fc, Log: log, Display: st.ChangeDisplay},
 		reader: rd, fetch: fc, api: api, surface: surface, hub: hub}
 }
@@ -295,8 +296,12 @@ func TestPublishLifecycle(t *testing.T) {
 	expect(t, alice.api("GET", "/items/"+d2, nil), 404)
 }
 
+// Both tenants are on one instance, and no private address may be dialed,
+// as behind a private reverse proxy: every fetch here, the pin check, the
+// endpoint discovery, the send and the verification, is answered in-process.
 func TestForkMentionRoundTrip(t *testing.T) {
 	e := newEnv(t, mention.DefaultRateLimits)
+	e.sameInstanceOnly()
 	ctx := context.Background()
 	alice, bob := e.user("alice"), e.user("bob")
 
@@ -308,6 +313,10 @@ func TestForkMentionRoundTrip(t *testing.T) {
 	expect(t, bob.api("POST", "/items/"+early+"/publish", nil), 422)
 
 	expect(t, alice.api("POST", "/items/"+src+"/versions/1/pin", nil), 200)
+	copied := bob.draft(t, map[string]any{"forked_from": map[string]any{"origin": alice.origin, "id": src, "version": 1}})
+	if md := bob.api("GET", "/items/"+copied, nil).json(t)["draft_md"]; md != "An idea worth forking." {
+		t.Fatalf("a copying fork reads the pin: %v", md)
+	}
 	fork := bob.draft(t, map[string]any{"content_md": "An idea worth forking, forked.",
 		"forked_from": map[string]any{"origin": alice.origin, "id": src, "version": 1}})
 	r := bob.api("POST", "/items/"+fork+"/publish", nil)

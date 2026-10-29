@@ -282,10 +282,15 @@ that leave the window are kept.
 saw this version)`, a stored generated column. Edits resurface; a
 future-dated origin sorts no later than now.
 
-**Same-instance subscriptions** go through `reader.LocalFirst`, which
-serves URLs inside an own origin from `surface_files` with the same
-status codes and ETags as HTTP. The importer sees exactly the bytes a
-remote reader would.
+**Same-instance fetches** (subscriptions, forks, mentions in both
+directions) are answered in-process. `fetch.Client.Local` hands any
+request for `BLYGD_PUBLIC_URL`'s own scheme and host to the origin-surface
+handler, the one a remote client reaches, minus the public request
+budgets. The importer sees exactly the bytes a remote reader would, the
+sender's POST reaches the real receiver, and nothing depends on whether
+the instance can dial its own public address. Behind a private reverse
+proxy, it can't. Only that one host is local, so an origin on any other
+host is fetched over the network and vouched for by DNS.
 
 **Outbound targets** (§15.2, #85): the publish transaction, which reads
 neither the mirror nor the network, writes the target's default item

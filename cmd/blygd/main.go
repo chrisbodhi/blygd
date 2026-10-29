@@ -237,7 +237,7 @@ func serve(ctx context.Context, log *slog.Logger, cfg *config.Config, pool *pgxp
 		log.Warn("BLYGD_ALLOW_PRIVATE_FETCH is on: Webmention sources can reach private addresses. Development only.")
 	}
 	receiver := &mention.Receiver{Pool: pool, Limits: mention.DefaultRateLimits}
-	rd := &reader.Reader{Pool: pool, Fetch: &reader.LocalFirst{Studio: st, Remote: fc}, Log: log,
+	rd := &reader.Reader{Pool: pool, Fetch: fc, Log: log,
 		ManualPollFloor: time.Duration(cfg.PollFloor) * time.Second}
 	st.Imports = rd // §10.2 step 2: imported snapshots reach a publish only through this
 	hoppers := &hopper.Store{Pool: pool}
@@ -250,6 +250,9 @@ func serve(ctx context.Context, log *slog.Logger, cfg *config.Config, pool *pgxp
 		log.Warn("BLYGD_RATE_LIMITS is off: no request budgets. Test harnesses only.")
 	}
 	surface := &web.Surface{Studio: st, Receiver: receiver, Hoppers: hoppers, Scheme: cfg.Scheme(), TrustProxy: cfg.TrustProxy, Log: log}
+	// Same-instance reads, forks and mentions are answered in-process, from
+	// the surface any remote client would see (and outside its budgets).
+	fc.Local, fc.LocalBase = surface, cfg.PublicURL
 
 	workers := &mention.Workers{Pool: pool, Fetch: fc, Log: log, Display: st.ChangeDisplay}
 	workers.Run(ctx)

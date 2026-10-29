@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"net/url"
 	"strconv"
@@ -38,6 +39,14 @@ type Client struct {
 	// development only: in production it turns every Webmention endpoint
 	// into a probe of your own network.
 	AllowPrivate bool
+	// Local answers requests for this instance's own URLs, those under
+	// LocalBase's scheme and host, in-process: one tenant reading,
+	// forking or mentioning another gets exactly what a remote client
+	// would, without leaving the process. Behind a private reverse proxy
+	// the dial would be refused, and a public round trip is waste. Set
+	// both or neither.
+	Local     http.Handler
+	LocalBase string
 }
 
 // Response is a fully read, bounded response.
@@ -191,7 +200,7 @@ func (c *Client) httpClient(lim Limits) *http.Client {
 			return nil
 		}
 	}
-	transport := &http.Transport{
+	var transport http.RoundTripper = &http.Transport{
 		// No environment proxy: a proxy would fetch on our behalf and the
 		// address check above would be checking the proxy, not the target.
 		Proxy:                 nil,
@@ -200,6 +209,11 @@ func (c *Client) httpClient(lim Limits) *http.Client {
 		ResponseHeaderTimeout: lim.Timeout,
 		MaxIdleConns:          10,
 		IdleConnTimeout:       30 * time.Second,
+	}
+	if c.Local != nil {
+		if base, err := url.Parse(c.LocalBase); err == nil && base.Host != "" {
+			transport = &local{base: base, h: c.Local, next: transport}
+		}
 	}
 	return &http.Client{
 		Transport: transport,
@@ -216,6 +230,45 @@ func (c *Client) httpClient(lim Limits) *http.Client {
 			return nil
 		},
 	}
+}
+
+// local serves requests for this instance in-process and passes the rest
+// on. Redirects, bounds and body limits stay the client's, as for any
+// response.
+type local struct {
+	base *url.URL
+	h    http.Handler
+	next http.RoundTripper
+}
+
+func (l *local) RoundTrip(req *http.Request) (*http.Response, error) {
+	if !sameHost(req.URL, l.base) {
+		return l.next.RoundTrip(req)
+	}
+	in := req.Clone(req.Context())
+	in.Host, in.RequestURI, in.RemoteAddr = req.URL.Host, req.URL.RequestURI(), "127.0.0.1:0"
+	if in.Body == nil {
+		in.Body = http.NoBody
+	}
+	rec := httptest.NewRecorder()
+	l.h.ServeHTTP(rec, in)
+	resp := rec.Result()
+	resp.Request = req
+	return resp, nil
+}
+
+// sameHost compares scheme, host and port, with each scheme's default port.
+func sameHost(a, b *url.URL) bool {
+	port := func(u *url.URL) string {
+		if p := u.Port(); p != "" {
+			return p
+		}
+		if u.Scheme == "https" {
+			return "443"
+		}
+		return "80"
+	}
+	return strings.EqualFold(a.Scheme, b.Scheme) && strings.EqualFold(a.Hostname(), b.Hostname()) && port(a) == port(b)
 }
 
 var cgnat = netip.MustParsePrefix("100.64.0.0/10")

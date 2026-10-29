@@ -84,7 +84,7 @@ internal/db          pool + embedded tern migrations (migrations/, migrations.su
 internal/studio      plane 1: item lifecycle, pins, outbox, render-on-publish
 internal/mention     §15: receiver, verifier, sender, lease workers
 internal/reader      §12–13: resolution, importer, poller, reading overlay
-internal/fetch       bounded, SSRF-guarded HTTP client; refuses to run inside a transaction
+internal/fetch       bounded, SSRF-guarded HTTP client; answers this instance in-process; refuses to run inside a transaction
 internal/tx          starts every transaction, and marks its context
 internal/surface     locates another origin's surface from its manifest (§6.1)
 internal/account     users, scoped tokens

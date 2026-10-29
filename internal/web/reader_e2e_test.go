@@ -2,7 +2,6 @@ package web
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"html"
 	"strings"
@@ -11,16 +10,15 @@ import (
 
 	"github.com/chrisbodhi/blygd/internal/fetch"
 	"github.com/chrisbodhi/blygd/internal/mention"
-	"github.com/chrisbodhi/blygd/internal/reader"
 	"github.com/chrisbodhi/blygd/internal/testblyg"
 )
 
-// refuse is a remote fetcher that fails every request, to prove a
-// same-instance subscription never leaves the process.
-type refuse struct{}
-
-func (refuse) GetIf(context.Context, string, fetch.Limits, string, fetch.Conditional) (*fetch.Response, error) {
-	return nil, errors.New("network used for a same-instance origin")
+// sameInstanceOnly gives the reader, the studio and the mention workers a
+// client that refuses every private address, as production does: the test
+// server is on 127.0.0.1, so whatever still works was answered in-process.
+func (e *env) sameInstanceOnly() {
+	fc := &fetch.Client{UserAgent: "blygd-test", Local: e.surface, LocalBase: e.srv.URL + "/"}
+	e.reader.Fetch, e.studio.Fetch, e.workers.Fetch = fc, fc, fc
 }
 
 func (e *env) poll(sid int) {
@@ -48,7 +46,7 @@ func feedItems(t *testing.T, u *user, query string) []map[string]any {
 func TestSameInstanceSubscription(t *testing.T) {
 	e := newEnv(t, mention.DefaultRateLimits)
 	alice, bob := e.user("alice"), e.user("bob")
-	e.reader.Fetch = &reader.LocalFirst{Studio: e.studio, Remote: refuse{}}
+	e.sameInstanceOnly()
 
 	id := alice.draft(t, map[string]any{"content_md": "Hello from *alice*"})
 	expect(t, alice.api("POST", "/items/"+id+"/publish", nil), 200)

@@ -13,6 +13,6 @@ import (
 func TestReaderNeverTouchesPlaneOne(t *testing.T) {
 	archtest.Check(t, ".", archtest.Rule{
 		Banned: regexp.MustCompile(`(?i)\b(FROM|JOIN|INTO|UPDATE)\s+(items|item_versions|media|surface_files)\b`),
-		Why:    "this queries plane 1 directly: read a local origin through LocalFirst",
+		Why:    "this queries plane 1 directly: read a local origin through its surface, as fetch.Client does",
 	})
 }

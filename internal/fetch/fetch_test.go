@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -126,5 +127,35 @@ func TestNoFetchInsideATransaction(t *testing.T) {
 	}
 	if _, err := c.Get(context.Background(), srv.URL, VerifyLimits, ""); err != nil || hits != 1 {
 		t.Fatalf("fetch outside: %v, %d requests", err, hits)
+	}
+}
+
+// This instance's own URLs are answered in-process, so a same-instance
+// read or mention works where the dial would be refused; everything else
+// still dials, and is still guarded.
+func TestLocalIsAnsweredInProcess(t *testing.T) {
+	var got []string
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm() //nolint:errcheck
+		got = append(got, r.Method+" "+r.Host+r.URL.RequestURI()+" "+r.PostForm.Get("source"))
+		if r.URL.Path == "/old" {
+			http.Redirect(w, r, "/new", http.StatusFound)
+			return
+		}
+		w.Write([]byte("local")) //nolint:errcheck
+	})
+	c := &Client{Local: h, LocalBase: "http://127.0.0.1:18090/"}
+	resp, err := c.Get(context.Background(), "http://127.0.0.1:18090/old?x=1", VerifyLimits, "")
+	if err != nil || string(resp.Body) != "local" || resp.FinalURL != "http://127.0.0.1:18090/new" {
+		t.Fatalf("local GET: %+v %v", resp, err)
+	}
+	if _, err := c.PostForm(context.Background(), "http://127.0.0.1:18090/wm", url.Values{"source": {"s"}}, VerifyLimits); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"GET 127.0.0.1:18090/old?x=1 ", "GET 127.0.0.1:18090/new ", "POST 127.0.0.1:18090/wm s"}; strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("handler saw %q", got)
+	}
+	if _, err := c.Get(context.Background(), "http://127.0.0.1:18091/", VerifyLimits, ""); !errors.Is(err, ErrBlockedAddr) {
+		t.Fatalf("another port is not this instance, and must dial (and be refused): %v", err)
 	}
 }
