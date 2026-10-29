@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/chrisbodhi/blygd/internal/account"
+	"github.com/chrisbodhi/blygd/internal/apperr"
 	"github.com/chrisbodhi/blygd/internal/blyg"
 	"github.com/chrisbodhi/blygd/internal/events"
 	"github.com/chrisbodhi/blygd/internal/hopper"
@@ -168,27 +169,48 @@ func (a *API) guard(rt route) http.Handler {
 	})
 }
 
+// kinds maps each apperr.Kind to its status and error code.
+var kinds = map[apperr.Kind]struct {
+	status int
+	code   string
+}{
+	apperr.BadRequest: {http.StatusBadRequest, "invalid"},
+	apperr.NotFound:   {http.StatusNotFound, "not_found"},
+	apperr.Invalid:    {http.StatusUnprocessableEntity, "invalid"},
+	apperr.Conflict:   {http.StatusConflict, "conflict"},
+}
+
+// handleErr is the one place an error becomes a response. Handlers return
+// what the domain gave them. Anything with no kind (a cancelled request, a
+// database that went away) is the server's fault: 500.
 func (a *API) handleErr(w http.ResponseWriter, r *http.Request, err error) {
 	var he *httpError
 	var se *studio.Error
+	var ke apperr.Kinded
+	var re *reader.ResolveError
+	var soon *reader.TooSoon
 	var pgErr *pgconn.PgError
 	switch {
 	case errors.As(err, &he):
 		writeError(w, he.status, he.code, he.msg)
-	case errors.As(err, &se):
-		status := map[string]int{"not_found": 404, "invalid": 422, "conflict": 409}[se.Code]
-		if status == 0 {
-			status = 500
+	case errors.As(err, &re):
+		// §12.1 step 6: a failed resolution reports its trail.
+		trail := re.Trail
+		if trail == nil {
+			trail = []string{}
 		}
-		if len(se.Problems) > 0 {
-			writeJSON(w, status, map[string]any{"error": se.Code, "message": se.Msg, "problems": se.Problems})
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "unresolved", "message": re.Reason, "trail": trail})
+	case errors.As(err, &soon):
+		secs := int(time.Until(soon.Until).Seconds()) + 1
+		w.Header().Set("Retry-After", strconv.Itoa(max(secs, 1)))
+		writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "too_soon", "message": soon.Reason, "retry_at": soon.Until.UTC()})
+	case errors.As(err, &ke) && kinds[ke.ErrorKind()].status != 0:
+		k := kinds[ke.ErrorKind()]
+		if errors.As(err, &se) && len(se.Problems) > 0 {
+			writeJSON(w, k.status, map[string]any{"error": k.code, "message": se.Msg, "problems": se.Problems})
 			return
 		}
-		writeError(w, status, se.Code, se.Msg)
-	case errors.Is(err, hopper.ErrNotFound):
-		writeError(w, 404, "not_found", "not found")
-	case errors.Is(err, hopper.ErrExists):
-		writeError(w, 409, "conflict", err.Error())
+		writeError(w, k.status, k.code, ke.Error())
 	case errors.As(err, &pgErr) && pgErr.Code == "23505":
 		writeError(w, 409, "conflict", "already exists")
 	case errors.As(err, &pgErr) && pgErr.Code == "P0001":
@@ -592,11 +614,7 @@ func (a *API) createHopper(w http.ResponseWriter, r *http.Request) error {
 	}
 	h, err := a.Hoppers.Create(r.Context(), principal(r.Context()).UserID, in.Name)
 	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) {
-			return err
-		}
-		return badRequest(err.Error())
+		return err
 	}
 	writeJSON(w, 201, h)
 	return nil
@@ -640,11 +658,7 @@ func (a *API) patchHopper(w http.ResponseWriter, r *http.Request) error {
 	var h *hopper.Hopper
 	if in.Name != nil {
 		if h, err = a.Hoppers.Rename(r.Context(), p.UserID, id, *in.Name); err != nil {
-			var pgErr *pgconn.PgError
-			if errors.Is(err, hopper.ErrNotFound) || errors.As(err, &pgErr) {
-				return err
-			}
-			return badRequest(err.Error())
+			return err
 		}
 	}
 	if in.Public != nil {
@@ -938,11 +952,7 @@ func (a *API) mintToken(w http.ResponseWriter, r *http.Request) error {
 	expires := p.ExpiryFor(want) // never past the minting token's own expiry
 	secret, id, err := a.Accounts.Mint(r.Context(), p.UserID, in.Name, in.Scopes, expires)
 	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) {
-			return err
-		}
-		return badRequest(err.Error())
+		return err
 	}
 	writeJSON(w, 201, map[string]any{"id": id, "token": secret, "scopes": in.Scopes, "expires_at": expires,
 		"note": "This is the only time the token is shown."})

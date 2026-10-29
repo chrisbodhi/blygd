@@ -23,17 +23,18 @@ const module = "github.com/chrisbodhi/blygd/"
 // SQL, and this says which other packages' SQL can run on its behalf.
 var imports = map[string][]string{
 	"cmd/blygd":         {"account", "config", "db", "events", "fetch", "hopper", "mention", "reader", "studio", "web"}, // the composition root
-	"internal/web":      {"account", "blyg", "events", "hopper", "limit", "mention", "reader", "studio"},
-	"internal/studio":   {"blyg", "fetch", "surface", "tx"}, // writes the surface: nothing that reads the mirror
-	"internal/reader":   {"batch", "blyg", "events", "fetch", "studio", "tx"},
+	"internal/web":      {"account", "apperr", "blyg", "events", "hopper", "limit", "mention", "reader", "studio"},
+	"internal/studio":   {"apperr", "blyg", "fetch", "surface", "tx"}, // writes the surface: nothing that reads the mirror
+	"internal/reader":   {"apperr", "batch", "blyg", "events", "fetch", "studio", "tx"},
 	"internal/mention":  {"batch", "blyg", "events", "fetch", "studio", "surface", "tx"},
-	"internal/hopper":   {"blyg", "tx"},
-	"internal/account":  {"blyg", "tx"},
+	"internal/hopper":   {"apperr", "blyg", "tx"},
+	"internal/account":  {"apperr", "blyg", "tx"},
 	"internal/config":   {"blyg"},
 	"internal/surface":  {"blyg", "fetch"},
 	"internal/fetch":    {"tx"},
 	"internal/blyg":     {}, // the protocol is pure
 	"internal/tx":       {},
+	"internal/apperr":   {},
 	"internal/db":       {},
 	"internal/batch":    {},
 	"internal/events":   {},

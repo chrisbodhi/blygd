@@ -11,12 +11,13 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/chrisbodhi/blygd/internal/apperr"
 	"github.com/chrisbodhi/blygd/internal/blyg"
 	"github.com/chrisbodhi/blygd/internal/tx"
 )
 
 // ErrNotFound covers subscriptions and items the user cannot see.
-var ErrNotFound = errors.New("not found")
+var ErrNotFound = apperr.New(apperr.NotFound, "not found")
 
 // Notice travels with every response that carries imported HTML. §14: a
 // reader MUST sanitize or sandbox fetched content_html before rendering
@@ -174,10 +175,10 @@ func (r *Reader) attach(ctx context.Context, userID int64, res *Resolution, from
 
 // ErrSameIdentity means a move was asked for to where the subscription
 // already is.
-var ErrSameIdentity = errors.New("same identity")
+var ErrSameIdentity = apperr.New(apperr.Conflict, "same identity")
 
 // ErrTooManySubscriptions: the user is at Reader.MaxSubscriptions.
-var ErrTooManySubscriptions = errors.New("subscription limit reached")
+var ErrTooManySubscriptions = apperr.New(apperr.Conflict, "subscription limit reached")
 
 // Reresolve re-runs resolution for a subscription (§12.2: readers MAY, when
 // surfaces 404 persistently). It changes nothing: adopting a new origin is
@@ -393,7 +394,7 @@ func parseCursor(c string) (time.Time, int64, error) {
 	us, err1 := strconv.ParseInt(ts, 10, 64)
 	n, err2 := strconv.ParseInt(id, 10, 64)
 	if !ok || err1 != nil || err2 != nil {
-		return time.Time{}, 0, errors.New("bad cursor")
+		return time.Time{}, 0, apperr.New(apperr.BadRequest, "bad cursor")
 	}
 	return time.UnixMicro(us).UTC(), n, nil
 }

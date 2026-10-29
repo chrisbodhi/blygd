@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/chrisbodhi/blygd/internal/apperr"
 	"github.com/chrisbodhi/blygd/internal/blyg"
 	"github.com/chrisbodhi/blygd/internal/tx"
 )
@@ -89,7 +90,7 @@ type Accounts struct {
 
 var (
 	ErrUnauthorized = errors.New("missing, unknown or revoked token")
-	ErrBadHandle    = errors.New("handle must be 1–63 lowercase letters, digits or hyphens, and not reserved")
+	ErrBadHandle    = apperr.New(apperr.BadRequest, "handle must be 1–63 lowercase letters, digits or hyphens, and not reserved")
 )
 
 const tokenPrefix = "blygd_"
@@ -160,14 +161,14 @@ func (a *Accounts) Mint(ctx context.Context, userID int64, name string, scopes [
 
 func mint(ctx context.Context, tx pgx.Tx, userID int64, name string, scopes []string, expiresAt *time.Time) (string, int64, error) {
 	if strings.TrimSpace(name) == "" {
-		return "", 0, errors.New("token name is required")
+		return "", 0, apperr.New(apperr.BadRequest, "token name is required")
 	}
 	if len(scopes) == 0 {
-		return "", 0, errors.New("a token needs at least one scope")
+		return "", 0, apperr.New(apperr.BadRequest, "a token needs at least one scope")
 	}
 	for _, s := range scopes {
 		if s != ScopeAll && !slices.Contains(AllScopes, s) {
-			return "", 0, fmt.Errorf("unknown scope %q", s)
+			return "", 0, apperr.Errorf(apperr.BadRequest, "unknown scope %q", s)
 		}
 	}
 	var raw [32]byte
@@ -177,7 +178,7 @@ func mint(ctx context.Context, tx pgx.Tx, userID int64, name string, scopes []st
 	secret := tokenPrefix + strings.ToLower(tokenEncoding.EncodeToString(raw[:]))
 	var id int64
 	if expiresAt != nil && !expiresAt.After(time.Now()) {
-		return "", 0, errors.New("a token cannot expire in the past")
+		return "", 0, apperr.New(apperr.BadRequest, "a token cannot expire in the past")
 	}
 	err := tx.QueryRow(ctx, `INSERT INTO tokens (user_id, name, secret_hash, scopes, expires_at) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
 		userID, name, hashSecret(secret), scopes, expiresAt).Scan(&id)

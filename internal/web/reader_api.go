@@ -3,7 +3,6 @@ package web
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -34,39 +33,13 @@ func (a *API) readerRoutes() []route {
 	}
 }
 
-// resolveFailed reports a failed resolution with its trail (§12.1 step 6).
-func resolveFailed(w http.ResponseWriter, err error) bool {
-	var re *reader.ResolveError
-	if !errors.As(err, &re) {
-		return false
-	}
-	trail := re.Trail
-	if trail == nil {
-		trail = []string{}
-	}
-	writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": "unresolved", "message": re.Reason, "trail": trail})
-	return true
-}
-
-func (a *API) readerErr(err error) error {
-	switch {
-	case errors.Is(err, reader.ErrNotFound):
-		return &httpError{404, "not_found", "not found"}
-	case errors.Is(err, reader.ErrSameIdentity):
-		return &httpError{409, "conflict", err.Error()}
-	case errors.Is(err, reader.ErrTooManySubscriptions):
-		return &httpError{409, "conflict", err.Error()}
-	}
-	return err
-}
-
 func (a *API) subscriptionView(r *http.Request, sid int64) (*reader.Subscription, error) {
 	o, err := a.origin(r)
 	if err != nil {
 		return nil, err
 	}
 	s, err := a.Reader.GetSubscription(r.Context(), principal(r.Context()).UserID, o.ID, sid)
-	return s, a.readerErr(err)
+	return s, err
 }
 
 func (a *API) listSubscriptions(w http.ResponseWriter, r *http.Request) error {
@@ -93,11 +66,8 @@ func (a *API) subscribe(w http.ResponseWriter, r *http.Request) error {
 		return badRequest("url is required")
 	}
 	sid, res, err := a.Reader.Subscribe(r.Context(), principal(r.Context()).UserID, in.URL)
-	if resolveFailed(w, err) {
-		return nil
-	}
 	if err != nil {
-		return a.readerErr(err)
+		return err
 	}
 	s, err := a.subscriptionView(r, sid)
 	if err != nil {
@@ -146,7 +116,7 @@ func (a *API) patchSubscription(w http.ResponseWriter, r *http.Request) error {
 			return badRequest("display_title must be a string or null")
 		}
 		if err := a.Reader.SetDisplayTitle(r.Context(), p.UserID, sid, title); err != nil {
-			return a.readerErr(err)
+			return err
 		}
 	}
 	if in.InBlogroll != nil {
@@ -159,7 +129,7 @@ func (a *API) patchSubscription(w http.ResponseWriter, r *http.Request) error {
 			// title.
 			e, err := a.Reader.BlogrollEntry(r.Context(), p.UserID, sid)
 			if err != nil {
-				return a.readerErr(err)
+				return err
 			}
 			err = a.Studio.SetBlogrollEntry(r.Context(), o.ID, sid, e)
 			if err != nil {
@@ -187,7 +157,7 @@ func (a *API) unsubscribe(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if err := a.Reader.Unsubscribe(r.Context(), principal(r.Context()).UserID, sid); err != nil {
-		return a.readerErr(err)
+		return err
 	}
 	// A blogroll entry for something no longer followed is a stale public
 	// claim; withdrawing it only narrows what is public.
@@ -225,11 +195,8 @@ func (a *API) reresolve(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	cur, res, err := a.Reader.Reresolve(r.Context(), principal(r.Context()).UserID, sid, u)
-	if resolveFailed(w, err) {
-		return nil
-	}
 	if err != nil {
-		return a.readerErr(err)
+		return err
 	}
 	writeJSON(w, 200, map[string]any{"current": cur, "resolution": res, "changed": res.Identity != cur,
 		"note": "An identity change is never automatic: confirm it with POST /api/subscriptions/{id}/move (§12.2)."})
@@ -255,11 +222,8 @@ func (a *API) moveSubscription(w http.ResponseWriter, r *http.Request) error {
 	}
 	p := principal(r.Context())
 	nid, res, err := a.Reader.Move(r.Context(), p.UserID, sid, to)
-	if resolveFailed(w, err) {
-		return nil
-	}
 	if err != nil {
-		return a.readerErr(err)
+		return err
 	}
 	var notes []string
 	if old.InBlogroll {
@@ -273,7 +237,7 @@ func (a *API) moveSubscription(w http.ResponseWriter, r *http.Request) error {
 		if p.Can(account.ScopeOriginWrite) {
 			e, err := a.Reader.BlogrollEntry(r.Context(), p.UserID, nid)
 			if err != nil {
-				return a.readerErr(err)
+				return err
 			}
 			if err := a.Studio.SetBlogrollEntry(r.Context(), o.ID, nid, e); err != nil {
 				return err
@@ -300,15 +264,8 @@ func (a *API) pollSubscription(w http.ResponseWriter, r *http.Request) error {
 	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
 	defer cancel()
 	err = a.Reader.PollFor(ctx, principal(r.Context()).UserID, sid)
-	var soon *reader.TooSoon
-	if errors.As(err, &soon) {
-		secs := int(time.Until(soon.Until).Seconds()) + 1
-		w.Header().Set("Retry-After", strconv.Itoa(max(secs, 1)))
-		writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "too_soon", "message": soon.Reason, "retry_at": soon.Until.UTC()})
-		return nil
-	}
 	if err != nil {
-		return a.readerErr(err)
+		return err
 	}
 	s, err := a.subscriptionView(r, sid)
 	if err != nil {
@@ -336,9 +293,6 @@ func (a *API) readerFeed(w http.ResponseWriter, r *http.Request) error {
 	}
 	items, next, err := a.Reader.Feed(r.Context(), principal(r.Context()).UserID, q)
 	if err != nil {
-		if err.Error() == "bad cursor" {
-			return badRequest("bad cursor")
-		}
 		return err
 	}
 	writeJSON(w, 200, map[string]any{"items": items, "next": next, "notice": reader.Notice})
@@ -352,7 +306,7 @@ func (a *API) readerItem(w http.ResponseWriter, r *http.Request) error {
 	}
 	it, err := a.Reader.GetItem(r.Context(), principal(r.Context()).UserID, sid, r.PathValue("iid"))
 	if err != nil {
-		return a.readerErr(err)
+		return err
 	}
 	writeJSON(w, 200, map[string]any{"item": it, "notice": reader.Notice})
 	return nil
@@ -364,7 +318,7 @@ func (a *API) setRead(w http.ResponseWriter, r *http.Request, read bool) error {
 		return err
 	}
 	if err := a.Reader.MarkRead(r.Context(), principal(r.Context()).UserID, sid, r.PathValue("iid"), read); err != nil {
-		return a.readerErr(err)
+		return err
 	}
 	w.WriteHeader(http.StatusNoContent)
 	return nil

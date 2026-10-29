@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/chrisbodhi/blygd/internal/apperr"
 	"github.com/chrisbodhi/blygd/internal/tx"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -26,10 +27,10 @@ type Store struct {
 }
 
 // ErrNotFound covers hoppers, members and items the user cannot see.
-var ErrNotFound = errors.New("not found")
+var ErrNotFound = apperr.New(apperr.NotFound, "not found")
 
 // ErrExists is a duplicate member.
-var ErrExists = errors.New("already a member")
+var ErrExists = apperr.New(apperr.Conflict, "already a member")
 
 // Hopper is one hopper.
 type Hopper struct {
@@ -107,7 +108,7 @@ func (s *Store) List(ctx context.Context, userID int64) ([]*Hopper, error) {
 func (s *Store) Create(ctx context.Context, userID int64, name string) (*Hopper, error) {
 	name = strings.TrimSpace(name)
 	if name == "" || len(name) > 200 {
-		return nil, fmt.Errorf("name must be 1–200 characters")
+		return nil, apperr.New(apperr.BadRequest, "name must be 1–200 characters")
 	}
 	var h *Hopper
 	err := tx.Run(ctx, s.Pool, pgx.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
@@ -179,7 +180,7 @@ func (s *Store) Get(ctx context.Context, userID, id int64) (*Hopper, []Member, e
 func (s *Store) Rename(ctx context.Context, userID, id int64, name string) (*Hopper, error) {
 	name = strings.TrimSpace(name)
 	if name == "" || len(name) > 200 {
-		return nil, fmt.Errorf("name must be 1–200 characters")
+		return nil, apperr.New(apperr.BadRequest, "name must be 1–200 characters")
 	}
 	var h *Hopper
 	err := tx.Run(ctx, s.Pool, pgx.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
@@ -310,5 +311,5 @@ func freeSlug(ctx context.Context, tx pgx.Tx, userID int64, base string, except 
 			return slug, nil
 		}
 	}
-	return "", errors.New("could not find a free slug")
+	return "", apperr.New(apperr.Conflict, "could not find a free slug")
 }

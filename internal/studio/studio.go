@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/chrisbodhi/blygd/internal/apperr"
 	"github.com/chrisbodhi/blygd/internal/blyg"
 	"github.com/chrisbodhi/blygd/internal/fetch"
 	"github.com/chrisbodhi/blygd/internal/tx"
@@ -55,6 +56,19 @@ type Error struct {
 }
 
 func (e *Error) Error() string { return e.Msg }
+
+// ErrorKind implements apperr.Kinded.
+func (e *Error) ErrorKind() apperr.Kind {
+	switch e.Code {
+	case "not_found":
+		return apperr.NotFound
+	case "invalid":
+		return apperr.Invalid
+	case "conflict":
+		return apperr.Conflict
+	}
+	return 0
+}
 
 func notFound(format string, a ...any) error {
 	return &Error{Code: "not_found", Msg: fmt.Sprintf(format, a...)}

@@ -64,6 +64,11 @@ on the command line or in the environment. Each test gets a fresh database.
   bytes, so pages go through `blyg.PageHTML`, never raw `template.HTML`.
 - Every new invariant gets a test, and the test should fail when the rule
   is broken: try it.
+- **Errors say their kind.** A domain error the caller should see is an
+  `apperr` kind (or `studio.Error`, which has one). Handlers return it as
+  is, and `handleErr` picks the status. Never map a status from an
+  error's text, or treat "not a database error" as the caller's fault:
+  anything unkinded is a 500.
 - **The API is described.** Any change to an `/api/` route, its scope, or
   a request or response shape edits `internal/web/openapi.json` in the
   same change. `openapi_test.go` and the e2e suite fail until it does.
@@ -86,6 +91,7 @@ internal/mention     §15: receiver, verifier, sender, lease workers
 internal/reader      §12–13: resolution, importer, poller, reading overlay
 internal/fetch       bounded, SSRF-guarded HTTP client; answers this instance in-process; refuses to run inside a transaction
 internal/tx          starts every transaction, and marks its context
+internal/apperr      what kind of failure an error is; internal/web maps kinds to statuses in one place
 internal/surface     locates another origin's surface from its manifest (§6.1)
 internal/account     users, scoped tokens
 internal/hopper      hopper CRUD over references; public hopper view (§13.5, live)

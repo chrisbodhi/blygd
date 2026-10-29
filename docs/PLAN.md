@@ -430,6 +430,21 @@ them.
    own mention limits still apply. `reader.LocalFirst` is removed. The
    two same-instance e2e tests run with private addresses refused, so
    they pass only in-process; turning the path off fails both.)*
+5. **Four error-to-status conventions** (P1). `studio.Error` had a code
+   table, `reader` and `hopper` had sentinels with a wrapper to remember,
+   `TooSoon` and `ResolveError` had their own handlers, and the
+   bad-cursor check compared error text. Three handlers called anything
+   that wasn't a database error a 400, so a cancelled request or a lost
+   pool from `hopper.Create`, `Rename` or `Accounts.Mint` was blamed on
+   the caller.
+   *(Done, 2026-10-29. A new `internal/apperr` has four kinds: bad
+   request, not found, invalid and conflict. `studio.Error` reports one,
+   and the sentinels and validation errors in `reader`, `hopper` and
+   `account` are kinded. `handleErr` maps kinds, `ResolveError` and
+   `TooSoon` in one place, and handlers return errors as they come.
+   Anything unkinded is a 500. Statuses and codes are unchanged for every
+   kinded error. `TestHandleErr` covers each mapping, and
+   `TestServerFailuresAreNotTheCallersFault` covers the old bug.)*
 
 ## Interop (2026-10-10)
 
