@@ -570,15 +570,25 @@ thumb.
   Hardening it (2026-10-29), before the 0.3 → 0.4 deploy, which carries
   migrations 003–006:
   1. Rehearse each migrating release on a restored copy of production.
+     *(Built into 2 as the preflight, `scripts/deploy.sh --check`: the new
+     binary migrates a scratch restore of a fresh backup and rebuilds
+     every origin there. Not yet run against the real host.)*
   2. `scripts/deploy.sh`: build from a clean checkout, back up, dry-run
      the migrations on a scratch restore of that backup, install keeping
      `.prev`, check health and the running checksum, and put the old
-     binary back on failure when nothing migrated.
+     binary back on failure when nothing migrated. *(Done: the server half
+     is `deploy/upgrade.sh`, shipped from the commit being deployed. It
+     migrates between stop and start, rebuilds every origin after, and
+     adds the DEPLOYS.md row. Builds come from a clone, not a worktree:
+     Go stamps no commit into a worktree outside the repository. The
+     local half was run against a stand-in host; the server half has run
+     only through shellcheck until the first `--check`.)*
   3. The binary says what it is. *(Done: `blygd version` prints the
      commit, Go and x/net the toolchain stamped; the "listening" log line
      carries the commit; `-dirty` marks a tree with changes.)*
   4. Caddy holds requests across a restart (`lb_try_duration`) instead of
-     answering 502.
+     answering 502. *(In `deploy/Caddyfile`, 30 s; not yet tried against a
+     real restart, and it reaches the host only by hand.)*
   Then alerts (an uptime check, and a ping from each good backup), a
   provisioning script with a timed restore drill, and CI once the code
   has a host.

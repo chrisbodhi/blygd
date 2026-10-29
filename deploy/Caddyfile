@@ -10,6 +10,12 @@ blyg.example {
 	reverse_proxy 127.0.0.1:8080 {
 		# GET /api/events is SSE: do not buffer it.
 		flush_interval -1
+		# Wait out a deploy instead of answering 502: while blygd is down a
+		# refused connection is retried until it listens again. 30s covers
+		# its drain, the migrations and its start. Requests blygd already
+		# received are not retried.
+		lb_try_duration 30s
+		lb_try_interval 250ms
 	}
 
 	log {

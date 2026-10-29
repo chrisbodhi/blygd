@@ -220,49 +220,75 @@ are changing to, not these docs: CLAUDE.md says the spec wins.
 
 A new file in `internal/db/migrations/` changes the database, and that does
 not roll back with the binary (migrations are append-only and there are no
-down migrations). Look at what is pending first, on the server:
-
-```sh
-sudo -u blygd sh -c 'set -a; . /etc/blygd/blygd.env; blygd migrate status'
-```
+down migrations). That is what the preflight below is for.
 
 ### Ship it
 
+From your machine, with a committed tree (the script builds the commit,
+not your working files):
+
 ```sh
-# on your machine
+scripts/deploy.sh --check <you>@<host>     # preflight only: installs nothing
+scripts/deploy.sh <you>@<host>             # ship HEAD; or name a commit after the host
+```
+
+`scripts/deploy.sh` builds the commit from a clean clone for the host's
+architecture, copies it up with that commit's
+[`deploy/upgrade.sh`](../deploy/upgrade.sh), and runs that under `sudo`
+(it asks for your password). On the server:
+
+1. **Preflight.** A fresh backup (offsite too), restored into a scratch
+   database, `blygd_preflight`. The new binary migrates it and rebuilds
+   every origin, so the release meets real data before the live database
+   does. `--check` stops here. Run it before any release that migrates.
+2. **Migrate.** blygd stops, the new binary migrates the live database, and
+   only then is it installed (the old one is kept as `blygd.prev`) and
+   started. Caddy holds requests while it is down (`lb_try_duration`), so
+   visitors wait a few seconds rather than see a 502; open event streams
+   drop and reconnect.
+3. **Check.** `/healthz` answers, and the running process is the binary
+   that was built (its SHA-256). If not, and nothing migrated, the old
+   binary is put back and started.
+4. **Rebuild** every origin, so existing pages pick up rendering changes.
+   It rewrites only the re-renderable files: pins and item documents never
+   change (DESIGN.md "Invariants").
+
+A real deploy then adds its row to [DEPLOYS.md](DEPLOYS.md): the commit,
+toolchain, checksum and migration. Write its notes and commit it. Nothing
+else records what is live, though the server can say: `blygd version`
+prints the commit, Go and x/net, and the "listening" log line carries the
+commit. A commit ending `-dirty` was built from a tree with changes
+(untracked files included), so it is not that commit; the script refuses
+to ship one.
+
+When `deploy/Caddyfile` changes, copy the change into
+`/etc/caddy/Caddyfile` by hand (it carries your host name), then
+`sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy`.
+
+#### By hand
+
+What the script does, for when it cannot run:
+
+```sh
+# on your machine (arm64 hosts: GOARCH=arm64)
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o bin/blygd-linux ./cmd/blygd
 scp bin/blygd-linux <you>@<host>:/tmp/blygd
 
 # on the server
+sudo -u blygd sh -c 'set -a; . /etc/blygd/blygd.env; blygd migrate status'
 sudo systemctl start blygd-backup                      # a fresh dump, offsite too
 sudo cp /usr/local/bin/blygd /usr/local/bin/blygd.prev
 sudo install -m755 /tmp/blygd /usr/local/bin/blygd
-sudo systemctl restart blygd
+sudo systemctl restart blygd                           # migrates on start
 sudo journalctl -u blygd -n 30 --no-pager              # "migrated" from..to, then "listening" with its commit
 curl -4 -sI https://<host>/healthz
+sudo -u blygd sh -c 'set -a; . /etc/blygd/blygd.env; blygd rebuild <handle>'
 blygd version                                          # commit, Go and x/net, for DEPLOYS.md
 ```
 
-Then add a row to [DEPLOYS.md](DEPLOYS.md): the commit, the toolchain, and
-`shasum -a 256 bin/blygd-linux` of what you shipped. The binary names the
-commit it was built from, but a commit ending `-dirty` was built from a tree
-with changes, untracked files included, and so is not that commit: build
-from a clean checkout. The checksum is what ties the row to the file.
-
-blygd migrates on start, so expect a few seconds of downtime. To separate
-the schema change from the restart, set `BLYGD_MIGRATE_ON_START=false` in
-`blygd.env`; the new binary then refuses to start on an old schema until
-you run `blygd migrate`.
-
-If the release changes how pages render, re-render each origin so existing
-pages pick it up (it runs in a transaction):
-
-```sh
-sudo -u blygd sh -c 'set -a; . /etc/blygd/blygd.env; blygd rebuild <handle>'
-```
-
-Pins and item documents never change, rebuild or not (DESIGN.md
-"Invariants"); it rewrites only the re-renderable files.
+With `BLYGD_MIGRATE_ON_START=false` in `blygd.env`, a new binary refuses to
+start on an old schema until you run `blygd migrate`. The script migrates
+explicitly either way.
 
 ### Rolling back
 
