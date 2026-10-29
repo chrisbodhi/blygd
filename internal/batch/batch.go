@@ -41,3 +41,36 @@ func run(ctx context.Context, fn func(context.Context) (int, error), log *slog.L
 	}()
 	return fn(ctx)
 }
+
+// Lease bounds the work on claims leased together. Until is when the
+// claims come due again and another worker may take them; ClaimMax is the
+// most one claim can take. A claim starts only while ClaimMax still ends
+// before Until, and runs under ClaimMax as its deadline, so no claim is
+// ever worked after its lease has lapsed, however the batch goes.
+type Lease struct {
+	Until    time.Time
+	ClaimMax time.Duration
+	Now      func() time.Time // nil: time.Now
+}
+
+// Each runs fn on claims in order, within l. It returns the claims it did
+// not start, for the caller to release with their attempt refunded, and
+// fn's first error, after which it starts no more.
+func Each[T any](ctx context.Context, l Lease, claims []T, fn func(context.Context, T) error) ([]T, error) {
+	now := l.Now
+	if now == nil {
+		now = time.Now
+	}
+	for i, c := range claims {
+		if ctx.Err() != nil || now().Add(l.ClaimMax).After(l.Until) {
+			return claims[i:], nil
+		}
+		cctx, cancel := context.WithTimeout(ctx, l.ClaimMax)
+		err := fn(cctx, c)
+		cancel()
+		if err != nil {
+			return claims[i+1:], err
+		}
+	}
+	return nil, nil
+}

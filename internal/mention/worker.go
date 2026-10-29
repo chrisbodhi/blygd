@@ -34,6 +34,42 @@ type Workers struct {
 	// commit. The studio renders; this package never writes the surface.
 	// Nil records without rendering, for tests with no studio.
 	Display func(ctx context.Context, originID int64, change func(ctx context.Context, tx pgx.Tx) (itemID string, changed bool, err error)) error
+
+	// Tests shorten the leases and claim bounds; zero means the defaults.
+	verifyLease, verifyClaimMax, sendLease, sendClaimMax time.Duration
+}
+
+// A claim's worst case is its fetches at their limits plus room for the
+// database: a verification fetches the source, its JSON alternate and at
+// most one manifest (§15.4); a send reads the target's manifest, may
+// discover by HEAD and GET, and posts. The leases are longer than one
+// claim, and batch.Each starts a claim only while it still fits, so a
+// lease never lapses on work in progress, whatever the batch size.
+var (
+	verifyLease    = 2 * time.Minute
+	verifyClaimMax = 3*fetch.VerifyLimits.Timeout + 15*time.Second
+	sendLease      = 10 * time.Minute
+	sendClaimMax   = 5*sendLimits.Timeout + 30*time.Second
+)
+
+func or(d, def time.Duration) time.Duration {
+	if d > 0 {
+		return d
+	}
+	return def
+}
+
+// release hands back claims a batch did not start: due again now, with
+// the attempt their claim spent refunded. It runs even as ctx ends, so a
+// shutdown does not cost them a lease.
+func (wk *Workers) release(ctx context.Context, sql string, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	_, err := wk.Pool.Exec(ctx, sql, ids)
+	return err
 }
 
 // querier is what recording a verification needs from a pool or a tx.
@@ -78,14 +114,16 @@ type inboundClaim struct {
 
 // VerifyBatch verifies up to one batch of pending inbound mentions.
 func (wk *Workers) VerifyBatch(ctx context.Context) (int, error) {
+	lease := batch.Lease{Until: time.Now().Add(or(wk.verifyLease, verifyLease)), ClaimMax: or(wk.verifyClaimMax, verifyClaimMax)}
 	rows, err := wk.Pool.Query(ctx, `UPDATE inbound_mentions m
-		SET next_attempt_at = now() + interval '2 minutes', attempts = attempts + 1
+		SET next_attempt_at = now() + make_interval(secs => $2), attempts = attempts + 1
 		FROM origins o
 		WHERE o.id = m.origin_id AND m.id IN (
 			SELECT id FROM inbound_mentions
 			WHERE status = 'pending' AND next_attempt_at <= now()
 			ORDER BY next_attempt_at LIMIT $1 FOR UPDATE SKIP LOCKED)
-		RETURNING m.id, m.source_url, m.target_item_id, o.base_url, o.id, m.attempts, m.ever_verified`, wk.batch())
+		RETURNING m.id, m.source_url, m.target_item_id, o.base_url, o.id, m.attempts, m.ever_verified`,
+		wk.batch(), or(wk.verifyLease, verifyLease).Seconds())
 	if err != nil {
 		return 0, err
 	}
@@ -97,17 +135,22 @@ func (wk *Workers) VerifyBatch(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	for _, c := range claims {
+	rest, err := batch.Each(ctx, lease, claims, func(ctx context.Context, c inboundClaim) error {
 		out := Verify(ctx, wk.Fetch, c.sourceURL, Target{
 			Origin:   c.origin,
 			ItemID:   c.targetItemID,
 			IsPinned: wk.pinned(ctx, c.targetItemID),
 		})
-		if err := wk.recordInbound(ctx, c, out); err != nil {
-			return len(claims), err
-		}
+		return wk.recordInbound(ctx, c, out)
+	})
+	ids := make([]int64, len(rest))
+	for i, c := range rest {
+		ids[i] = c.id
 	}
-	return len(claims), nil
+	if rerr := wk.release(ctx, `UPDATE inbound_mentions SET next_attempt_at = now(), attempts = attempts - 1 WHERE id = ANY($1)`, ids); err == nil {
+		err = rerr
+	}
+	return len(claims) - len(rest), err
 }
 
 func (wk *Workers) pinned(ctx context.Context, itemID string) func(int) bool {
@@ -215,13 +258,15 @@ func (wk *Workers) importedPage(ctx context.Context, origin, itemID string) stri
 
 // SendBatch sends up to one batch of due outbound mentions.
 func (wk *Workers) SendBatch(ctx context.Context) (int, error) {
+	lease := batch.Lease{Until: time.Now().Add(or(wk.sendLease, sendLease)), ClaimMax: or(wk.sendClaimMax, sendClaimMax)}
 	rows, err := wk.Pool.Query(ctx, `UPDATE outbound_mentions
-		SET next_attempt_at = now() + interval '10 minutes', attempts = attempts + 1, updated_at = now()
+		SET next_attempt_at = now() + make_interval(secs => $2), attempts = attempts + 1, updated_at = now()
 		WHERE id IN (
 			SELECT id FROM outbound_mentions
 			WHERE status = 'pending' AND next_attempt_at <= now()
 			ORDER BY next_attempt_at LIMIT $1 FOR UPDATE SKIP LOCKED)
-		RETURNING id, source_url, target_url, coalesce(target_origin, ''), coalesce(target_id, ''), attempts, origin_id`, wk.batch())
+		RETURNING id, source_url, target_url, coalesce(target_origin, ''), coalesce(target_id, ''), attempts, origin_id`,
+		wk.batch(), or(wk.sendLease, sendLease).Seconds())
 	if err != nil {
 		return 0, err
 	}
@@ -233,10 +278,10 @@ func (wk *Workers) SendBatch(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	for _, c := range claims {
+	rest, err := batch.Each(ctx, lease, claims, func(ctx context.Context, c outboundClaim) error {
 		res, err := wk.sendOne(ctx, &c)
 		if err != nil {
-			return len(claims), err
+			return err
 		}
 		status, next := res.Status, any(nil)
 		if status == "retry" {
@@ -251,11 +296,19 @@ func (wk *Workers) SendBatch(ctx context.Context) (int, error) {
 			next_attempt_at = CASE WHEN $3::float8 IS NULL THEN NULL ELSE now() + make_interval(secs => $3::float8) END,
 			endpoint = coalesce(nullif($4, ''), endpoint), last_result = $5, updated_at = now()
 			WHERE id = $1`, c.id, status, next, res.Endpoint, res.Detail); err != nil {
-			return len(claims), err
+			return err
 		}
 		wk.notify(ctx, "outbound", c.originID, map[string]any{"id": c.id, "status": status, "last_result": res.Detail})
+		return nil
+	})
+	ids := make([]int64, len(rest))
+	for i, c := range rest {
+		ids[i] = c.id
 	}
-	return len(claims), nil
+	if rerr := wk.release(ctx, `UPDATE outbound_mentions SET next_attempt_at = now(), attempts = attempts - 1, updated_at = now() WHERE id = ANY($1)`, ids); err == nil {
+		err = rerr
+	}
+	return len(claims) - len(rest), err
 }
 
 // sendOne picks a blyg target's address and sends (§15.2, #85): the

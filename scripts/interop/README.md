@@ -64,6 +64,11 @@ Postgres 18 whose user may `CREATE DATABASE` (set `PSQL` and
 `BLYGD_PG_BASE` if yours differ). It creates and drops its own database,
 and leaves nothing running.
 
+The run's waits are a few minutes long in all, so a machine that sleeps
+partway fails it: on a Mac, run it as `caffeinate -i make interop …`,
+with the lid open or on power. `INTEROP_LOGS=dir` keeps both studios'
+full logs there; a failed run otherwise shows only their last lines.
+
 Two settings exist for this run only: `BLYGD_ALLOW_PRIVATE_FETCH=true`
 (both studios are on 127.0.0.1) and `BLYGD_MANUAL_POLL_FLOOR=2`. Neither
 belongs in a deployment.

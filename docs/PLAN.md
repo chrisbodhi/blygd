@@ -445,6 +445,22 @@ them.
    Anything unkinded is a 500. Statuses and codes are unchanged for every
    kinded error. `TestHandleErr` covers each mapping, and
    `TestServerFailuresAreNotTheCallersFault` covers the old bug.)*
+6. **Leases shorter than the work they cover** (D5). A verify batch held
+   10 claims for 2 minutes and could need 150 s. A send batch fit in its
+   10 minutes only by arithmetic nobody checked. A second process would
+   have claimed rows twice and spent their retries early.
+   *(Done, 2026-10-29. `batch.Each` works leased claims in order and
+   starts each one only if its worst case still ends before the lease
+   lapses. Each claim runs under that worst case as its deadline. The
+   worst cases come from the fetch limits: a verification is 3 fetches at
+   5 s plus 15 s, a send is 5 fetches at 10 s plus 30 s. Claims it doesn't
+   start, and those after an error, go back due at once with their
+   attempt refunded, even during shutdown. Lease lengths are now
+   parameters rather than SQL literals. The poller was already safe: its
+   polls run side by side, each capped by `PollDeadline`. One unified
+   backoff type is left undone, since the three schedules answer
+   different specs. `TestEachKeepsWithinTheLease` and
+   `TestVerifyBatchStaysWithinItsLease` cover the change.)*
 
 ## Interop (2026-10-10)
 

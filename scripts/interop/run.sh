@@ -29,6 +29,8 @@ cleanup() {
   for p in "${pids[@]}"; do kill "$p" 2>/dev/null || true; done
   wait 2>/dev/null || true
   "$PSQL" -q "$PG_BASE/postgres" -c "DROP DATABASE IF EXISTS $DB" >/dev/null 2>&1 || true
+  # INTEROP_LOGS=dir keeps both studios' full logs.
+  [ -n "${INTEROP_LOGS:-}" ] && mkdir -p "$INTEROP_LOGS" && cp "$WORK"/*.log "$INTEROP_LOGS"/ 2>/dev/null
   rm -rf "$REF_DIR/.blygd-interop" "$WORK"
 }
 trap cleanup EXIT
