@@ -10,6 +10,10 @@ git clone https://github.com/blygger/blygger-studio
 cd blygger-studio && npm ci && npm run build
 ```
 
+Both run the reference on your `node`, and refuse one without the Brotli
+decoder fix (CVE-2026-111497): 26.12.1, 24.22.1, 22.23.4 or later in their
+line (`scripts/check-node.sh`).
+
 npm 11 blocks dependency install scripts by default. The reference needs
 two of them, esbuild and workerd (the Workers runtime), which download
 native binaries: `npm install-scripts approve esbuild workerd && npm rebuild esbuild workerd`.

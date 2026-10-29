@@ -22,6 +22,7 @@ BLYGD_PORT=18090 REF_PORT=18787 REF_CONTROL_PORT=18788
 export REF_PORT REF_CONTROL_PORT
 export REF_PASSWORD="interop-password"
 
+"$ROOT/scripts/check-node.sh"
 [ -d "$REF_DIR/node_modules" ] || { echo "build the reference first: (cd $REF_DIR && npm ci && npm run build)"; exit 2; }
 
 pids=()

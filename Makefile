@@ -27,6 +27,7 @@ run:
 # TypeScript and our Go. Needs a built blygger-studio checkout
 # (npm ci && npm run build): make parity REFERENCE=../blygger-studio
 parity:
+	scripts/check-node.sh
 	BLYGD_REFERENCE_DIR='$(abspath $(REFERENCE))' go test -count=1 -run TestReferenceParity -v ./internal/blyg
 
 # Live interop: both studios on localhost, each subscribed to the other.
