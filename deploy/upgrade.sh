@@ -70,7 +70,7 @@ dump=$(find "$BACKUPS" -name 'blygd-*.dump' -newer "$marker" | sort | tail -1)
 say "backed up to $dump"
 
 # The release against a copy of that backup.
-dropscratch() { runuser -u postgres -- dropdb --if-exists "$SCRATCH"; }
+dropscratch() { runuser -u postgres -- env PGOPTIONS="-c client_min_messages=warning" dropdb --if-exists "$SCRATCH"; }
 dropscratch
 trap 'rm -f "$marker"; dropscratch' EXIT
 runuser -u postgres -- createdb -O blygd "$SCRATCH"
