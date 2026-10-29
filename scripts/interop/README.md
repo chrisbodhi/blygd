@@ -43,7 +43,10 @@ subscribes to the other, and `check.py` runs seven scenarios:
    item documents and pins are all off their default paths. Its item has
    no page. Both studios import it, quote it and fork its pin. The forks
    must be byte-identical. Every mention must reach Sol's endpoint naming
-   the item document (#85), and nothing may ask for a default path.
+   the item document (#85), and nothing may ask for a default path. A
+   second origin, Luna, on :18790, is the same with no `blyg.json` at all:
+   both studios read it, and blygd refuses to fork it (see DESIGN.md,
+   departures).
 7. Labels, `links[]` and remote generation sources, published by blygd
    (§10.1, §10.3a, §5.7 rules 8 and 9). The reference verifies the
    `source` mention and the labelled quote. blygd verifies the

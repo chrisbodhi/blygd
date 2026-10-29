@@ -174,11 +174,14 @@ class Sol:
     target is its item document (§15.2, #85). The webmention endpoint
     records what it is sent and verifies nothing."""
 
-    def __init__(self, port):
+    def __init__(self, port, name="sol", fixed_name=True):
+        """fixed_name=False serves no blyg.json: the manifest is only where
+        the rel="blyg" link says, as §12.2's /wp-json/… example allows."""
         self.host = f"http://127.0.0.1:{port}"
-        self.origin = self.host + "/sol/"
-        self.home = self.host + "/home/"
-        self.id = "01ks0re1c47edsvrface000001"
+        self.name = name
+        self.origin = f"{self.host}/{name}/"
+        self.home = f"{self.host}/home/"
+        self.id = "01ks0re1c47edsvrface000001" if fixed_name else "01ks0re1c47edsvrface000002"
         self.md = "Sol keeps its files where it likes.\n\nThe manifest says where."
         self.received = []  # (source, target)
         self.hits = {}
@@ -194,25 +197,26 @@ class Sol:
                "content_html": html, "content_hash": hash_}
         self.item_url = f"{self.origin}docs/{self.id}.json"
         self.pin_url = f"{self.origin}docs/{self.id}/pinned-1.json"
-        manifest = {"blyg": "0.4", "level": 1, "site": self.origin, "title": "Sol, relocated",
+        manifest = {"blyg": "0.4", "level": 1, "site": self.origin, "title": f"{name.title()}, relocated",
                     "feed": "updates.rss", "items": "docs/all.json", "item": "docs/{id}.json",
                     "pin": self.origin + "docs/{id}/pinned-{n}.json", "webmention": self.origin + "wm"}
         feed = (f'<?xml version="1.0" encoding="UTF-8"?><rss version="2.0" xmlns:blyg="https://blygger.org/ns/0.1">'
-                f'<channel><title>Sol, relocated</title><link>{self.origin}</link>'
+                f'<channel><title>{name.title()}, relocated</title><link>{self.origin}</link>'
                 f'<blyg:manifest>{self.origin}manifest.json</blyg:manifest>'
                 f'<item><guid isPermaLink="false">blyg:{self.id}:v1</guid><link>{self.item_url}</link>'
                 f'<title>Sol</title><description></description><blyg:id>{self.id}</blyg:id>'
                 f'<blyg:kind>fragment</blyg:kind><blyg:version>1</blyg:version></item></channel></rss>')
         self.files = {
-            "/home/": ("text/html", '<!doctype html><title>Sol</title><link rel="blyg" href="/sol/manifest.json"><p>Sol.</p>'),
-            "/sol/manifest.json": ("application/json", json.dumps(manifest)),
-            "/sol/blyg.json": ("application/json", json.dumps(manifest)),
-            "/sol/updates.rss": ("application/rss+xml", feed),
-            "/sol/docs/all.json": ("application/json", json.dumps({"updated": stamp, "items": [
+            "/home/": ("text/html", f'<!doctype html><title>Sol</title><link rel="blyg" href="/{name}/manifest.json"><p>Sol.</p>'),
+            f"/{name}/manifest.json": ("application/json", json.dumps(manifest)),
+            f"/{name}/updates.rss": ("application/rss+xml", feed),
+            f"/{name}/docs/all.json": ("application/json", json.dumps({"updated": stamp, "items": [
                 {"id": self.id, "kind": "fragment", "created": stamp, "updated": stamp, "version": 1}]})),
-            f"/sol/docs/{self.id}.json": ("application/json", json.dumps(doc)),
-            f"/sol/docs/{self.id}/pinned-1.json": ("application/json", json.dumps(pin)),
+            f"/{name}/docs/{self.id}.json": ("application/json", json.dumps(doc)),
+            f"/{name}/docs/{self.id}/pinned-1.json": ("application/json", json.dumps(pin)),
         }
+        if fixed_name:
+            self.files[f"/{name}/blyg.json"] = ("application/json", json.dumps(manifest))
 
     def serve(self, port):
         sol = self
@@ -241,7 +245,7 @@ class Sol:
                 self.end_headers()
 
             def do_POST(self):
-                if self.path != "/sol/wm":
+                if self.path != f"/{sol.name}/wm":
                     self.send_response(404)
                     self.end_headers()
                     return
@@ -255,7 +259,7 @@ class Sol:
 
     def default_path_hits(self):
         """Requests for where a default layout would put Sol's files."""
-        return {p: n for p, n in self.hits.items() if p.startswith(("/sol/items/", "/sol/feed.xml"))}
+        return {p: n for p, n in self.hits.items() if p.startswith((f"/{self.name}/items/", f"/{self.name}/feed.xml"))}
 
 
 # ── scenarios ─────────────────────────────────────────────────────────────
@@ -429,6 +433,25 @@ def main():
                  lambda: any(s_.startswith(prefix) and iid in s_ and t == sol.item_url for s_, t in sol.received) or None,
                  ref_tick, evidence=lambda: sol.received)
     check("nobody looked for Sol's files at the default paths", not sol.default_path_hits(), sol.default_path_hits())
+
+    # Luna is Sol with no blyg.json: its manifest is only where the rel
+    # link says. Both read it; blygd will not fork it (DESIGN.md).
+    luna = Sol(SOL_PORT + 1, "luna", fixed_name=False)
+    luna.serve(SOL_PORT + 1)
+    code, sub = blygd("POST", "/subscriptions", {"url": luna.home})
+    check("blygd resolves Luna through its rel=\"blyg\" link", code == 201 and sub["subscription"].get("origin") == luna.origin, sub)
+    blun = sub["subscription"]["id"]
+    wait("blygd imports Luna's item",
+         lambda: (blygd("GET", f"/subscriptions/{blun}")[1].get("items") == 1) or None, lambda: blygd_poll(blun))
+    code, s = ref("POST", "/api/subscriptions", {"url": luna.home, "confirm": True})
+    rlun = s.get("id")
+    wait("the reference imports Luna's item", lambda: ref("GET", f"/api/imports/{rlun}/{luna.id}")[0] == 200 or None, ref_tick)
+    src = {"origin": luna.origin, "id": luna.id, "version": 1}
+    cb, b = blygd("POST", "/items", {"forked_from": src})
+    check("blygd refuses to fork Luna, naming the missing blyg.json",
+          cb == 422 and f"{luna.origin}blyg.json" in b.get("message", ""), (cb, b))
+    cr, r = ref("POST", "/api/items", {"mode": "fork", "source": src})
+    gap("the reference forks Luna from its stored surface", cr == 201, (cr, r))
 
     # 7 ─ the 0.4 directive forms: labels, links[] and remote sources.
     section("7. labels, links and remote generation sources")

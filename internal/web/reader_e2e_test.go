@@ -275,6 +275,35 @@ func TestForkOfARelocatedSurface(t *testing.T) {
 	}
 }
 
+// An origin whose manifest is only where a rel="blyg" link names it can be
+// read but not forked: blygd finds another origin's pins through
+// {origin}blyg.json, the one fixed name (§4), and does not guess the
+// default layout when it is missing, even though the default path answers.
+func TestForkNeedsTheManifestAtItsFixedName(t *testing.T) {
+	e := newEnv(t, mention.DefaultRateLimits)
+	bob := e.user("bob")
+	remote := &testblyg.Blyg{S: testblyg.New(t), Mount: "/blyg/", Title: "Remote", ManifestPath: "/blyg/manifest.json"}
+	src := &testblyg.Item{ID: "0a00000000000000000000000b", Kind: "fragment", Version: 1, ContentMD: "fork me",
+		Pinned: []int{1}, Updated: time.Now()}
+	remote.Items = []*testblyg.Item{src}
+	remote.Publish()
+	remote.SetPin(src, 1, "fork me")
+	ref := map[string]any{"origin": remote.Origin(), "id": src.ID, "version": 1}
+
+	refused := func(r resp) {
+		t.Helper()
+		expect(t, r, 422)
+		if !strings.Contains(string(r.body), remote.Origin()+"blyg.json") {
+			t.Fatalf("the refusal should name the missing manifest: %s", r.body)
+		}
+	}
+	// Copying the pin is refused at once; a fork in the author's own words
+	// is refused when it publishes, at the pin check.
+	refused(bob.api("POST", "/items", map[string]any{"forked_from": ref}))
+	own := bob.draft(t, map[string]any{"forked_from": ref, "content_md": "my own words"})
+	refused(bob.api("POST", "/items/"+own+"/publish", nil))
+}
+
 func TestMoveNeedsConfirmedIdentity(t *testing.T) {
 	e := newEnv(t, mention.DefaultRateLimits)
 	alice, bob := e.user("alice"), e.user("bob")

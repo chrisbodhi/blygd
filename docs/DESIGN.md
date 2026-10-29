@@ -701,6 +701,19 @@ HTML page, CSS and vanilla JS, with no build step. It talks only to
   offered yet. The discrepancy is surfaced and the watermark holds.
 - Adding a subscription to the blogroll needs `origin:write` as well as
   `reader:write`, because it publishes a reading choice (§11).
+- Another origin's surface is located through `{origin}blyg.json`, the
+  one fixed name (§4), everywhere outside the reader. An origin whose
+  manifest is only where a `rel="blyg"` link names it (§12.1 step 4,
+  §12.2's `/wp-json/…` case) can be subscribed to and read, but not
+  forked: both the copy and the publish-time pin check refuse, naming the
+  missing file. Mentions to it fall back to the default layout and
+  W3C discovery, so they usually find no endpoint. The reader records
+  where it found the manifest, but plane 1 knows only the identity, and
+  passing the location through `studio.Imports` would widen the one door
+  between the planes. The reference reuses its subscription's stored
+  surface. The spec half-supports the case: §15.3 verification fetches
+  `{origin}blyg.json` too, so such an origin's own mentions fail anywhere
+  that its documents are off the default path.
 - The manifest claims `level: 2` (§3). With threads it is honest: every
   L1 and L2 publisher construct is implemented. The claim stays
   informative (§3.2).

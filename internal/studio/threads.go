@@ -400,6 +400,9 @@ func (s *Studio) forkContent(ctx context.Context, o *Origin, ref blyg.Reference)
 		if l.Transient() {
 			return "", "", invalid("could not read %sblyg.json to find the pinned file (HTTP %d); send content_md to fork without copying", l.Origin, l.Status)
 		}
+		if !l.Found() {
+			return "", "", invalid(noManifest, l.Origin, l.Status)
+		}
 		pinURL := l.PinURL(ref.ID, ref.Version) // §6.1: the `pin` template
 		resp, err := s.Fetch.Get(ctx, pinURL, fetch.VerifyLimits, "application/json")
 		if err != nil {

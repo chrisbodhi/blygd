@@ -7,8 +7,8 @@
 # Needs: a built reference checkout (npm ci && npm run build), node, python3,
 # go, and a Postgres 18 whose user may CREATE DATABASE (PSQL and
 # BLYGD_PG_BASE override the client and server). Uses ports 18090 (blygd),
-# 18787 and 18788 (the reference and its cron control), and 18789 (a static
-# relocated blyg that check.py serves itself).
+# 18787 and 18788 (the reference and its cron control), and 18789 and 18790
+# (two static relocated blygs that check.py serves itself).
 set -euo pipefail
 
 REF_DIR="$(cd "${1:?usage: run.sh path/to/blygger-studio}" && pwd)"

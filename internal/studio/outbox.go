@@ -48,6 +48,9 @@ func (s *Studio) checkForkPin(ctx context.Context, originID int64, raw json.RawM
 	if l.Transient() {
 		return []string{fmt.Sprintf("could not read %sblyg.json to find the pinned file (HTTP %d); published anyway", l.Origin, l.Status)}, "", nil
 	}
+	if !l.Found() {
+		return nil, "", invalid(noManifest, l.Origin, l.Status)
+	}
 	pinURL := l.PinURL(ref.ID, ref.Version)
 	resp, err := s.Fetch.Get(ctx, pinURL, fetch.VerifyLimits, "application/json")
 	if err != nil {
@@ -67,6 +70,11 @@ func (s *Studio) checkForkPin(ctx context.Context, originID int64, raw json.RawM
 	}
 	return nil, pinURL, nil
 }
+
+// noManifest refuses a fork of an origin with no manifest at its fixed name
+// (§4). One that a rel="blyg" link names elsewhere (§12.1 step 4) is not
+// looked for: plane 1 knows only the identity (DESIGN.md, departures).
+const noManifest = "no manifest at %sblyg.json (HTTP %d), which is where blygd finds another origin's pinned files (§4)"
 
 // outRef is one remote reference a version makes (§15.2).
 type outRef struct {

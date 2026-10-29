@@ -330,8 +330,14 @@ its own, and the version string moves last.
      can't read it without widening `studio.Imports`. The reference uses
      its subscription's stored surface. The spec also leans on the fixed
      name: §4 calls `blyg.json` at the origin protocol-fixed, and §15.3
-     verification fetches `{origin}blyg.json`. Sol therefore serves the
-     manifest at both URLs, and this case needs a decision.)*
+     verification fetches `{origin}blyg.json`. **Decided (2026-10-28):**
+     outside the reader, blygd requires `{origin}blyg.json`. A fork of
+     such an origin is refused with a message naming the missing file, and
+     DESIGN.md lists this as a departure. The spec's inconsistency is to be
+     raised upstream. Sol serves the manifest at both URLs, and
+     `check.py` adds a second origin with only the rel-named manifest:
+     the reference's fork of it is reported as a gap check, and blygd's
+     refusal is a check.)*
 
 **Open question:** §10.2 step 2 (#82) resolves against any snapshot the
 publisher holds, not only a subscribed origin's. `reader.Snapshots` joins
