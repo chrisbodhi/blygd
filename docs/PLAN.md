@@ -312,10 +312,26 @@ its own, and the version string moves last.
    `"0.3"`, which covers reading an older publisher.
    - **Against blygger-studio 0.48.2 (`b93ac12`):** parity, 56 cases with
      no unexpected differences; interop, all five scenarios, 0 failed.
-   - **Not yet covered:** interop exercises no 0.4 construct.
-     `scripts/interop/check.py` still needs scenarios for a relocated
-     surface, `link` and `source` mentions, and labels. The reference
-     emits neither `links[]` nor `data-blyg-label` yet.)*
+   - **Interop for 0.4 (2026-10-28):** two new scenarios, 0 failed.
+     Scenario 6 is a relocated surface: a static third origin that
+     `check.py` serves, reached through `rel="blyg"`, with every file
+     templated or renamed and no page. Scenario 7 covers labels,
+     `links[]` and a remote generation source. The reference verifies
+     blygd's `source` mention. It is behind on three things, which the
+     run reports as gaps rather than failures: it doesn't verify `link`
+     mentions (it answers 202 and keeps nothing), it emits no `links[]`,
+     and it bakes no `data-blyg-label`.
+   - **Found by the new scenarios:** an origin whose manifest is only
+     reachable through `rel="blyg"`, with nothing at `{origin}blyg.json`
+     (§12.2's `/wp-json/…` case), can be read by blygd but not forked or
+     notified. `surface.Locate` knows only the identity, so the pin fetch
+     and the sender fall back to the default layout. The reader records
+     the manifest's URL in `remote_origins.manifest_url`, but plane 1
+     can't read it without widening `studio.Imports`. The reference uses
+     its subscription's stored surface. The spec also leans on the fixed
+     name: §4 calls `blyg.json` at the origin protocol-fixed, and §15.3
+     verification fetches `{origin}blyg.json`. Sol therefore serves the
+     manifest at both URLs, and this case needs a decision.)*
 
 **Open question:** §10.2 step 2 (#82) resolves against any snapshot the
 publisher holds, not only a subscribed origin's. `reader.Snapshots` joins

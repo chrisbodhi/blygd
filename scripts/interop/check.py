@@ -11,15 +11,24 @@ Run by run.sh, which starts both studios and sets:
 
 Each scenario publishes on one side and checks what the other side made of
 it. Waits are conditions with a deadline, never fixed sleeps. Exit status
-is the number of failed checks (capped at 1).
+is the number of failed checks (capped at 1). A gap is a check of
+something the spec lets the reference not do yet: it is reported, and
+never fails the run.
+
+Scenario 6 needs a third origin whose surface is relocated (§6.1), which
+neither studio publishes, so this script serves one itself (SOL_PORT,
+default 18789).
 """
+import hashlib
 import json
 import os
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 BLYGD = os.environ["BLYGD_URL"].rstrip("/")
 ALICE = os.environ["BLYGD_ORIGIN"]
@@ -29,13 +38,24 @@ CONTROL = os.environ["REF_CONTROL"]
 REF_PASSWORD = os.environ.get("REF_PASSWORD", "interop-password")
 DEADLINE = 45  # seconds for any one condition
 
+SOL_PORT = int(os.environ.get("SOL_PORT", "18789"))
 failures = []
+gaps = []
 
 
 def check(name, ok, detail=""):
     print(("  PASS " if ok else "  FAIL ") + name + ("" if ok else f"\n       {detail}"))
     if not ok:
         failures.append(name)
+    return ok
+
+
+def gap(name, ok, why):
+    """A check the reference may fail without failing the run: why says
+    what it does not do yet."""
+    print(("  PASS " if ok else "  GAP  ") + name + ("" if ok else f"\n       {why}"))
+    if not ok:
+        gaps.append(name)
     return ok
 
 
@@ -138,6 +158,104 @@ def wait(what, fn, nudge=None, evidence=None, deadline=DEADLINE):
 def items(j):
     """The reference's list endpoints page under "items"."""
     return j["items"] if isinstance(j, dict) and "items" in j else j
+
+
+# ── Sol: a static blyg with a relocated surface ──────────────────────────
+
+class Sol:
+    """One pinned fragment at http://127.0.0.1:SOL_PORT/sol/, laid out
+    nowhere near the defaults (§6.1). Both studios subscribe through a home
+    page off the origin whose rel="blyg" link names /sol/manifest.json, so
+    resolution takes §12.1 step 4 and the identity comes from that URL
+    (§12.2); the same manifest is also at /sol/blyg.json, the one fixed
+    name (§4), where a studio that holds only the identity looks. Item
+    documents and pins are templated, one relative and one absolute; the
+    index and feed are renamed; and the item names no page, so a mention's
+    target is its item document (§15.2, #85). The webmention endpoint
+    records what it is sent and verifies nothing."""
+
+    def __init__(self, port):
+        self.host = f"http://127.0.0.1:{port}"
+        self.origin = self.host + "/sol/"
+        self.home = self.host + "/home/"
+        self.id = "01ks0re1c47edsvrface000001"
+        self.md = "Sol keeps its files where it likes.\n\nThe manifest says where."
+        self.received = []  # (source, target)
+        self.hits = {}
+        stamp = "2026-10-01T00:00:00Z"
+        html = "<p>Sol keeps its files where it likes.</p>\n<p>The manifest says where.</p>"
+        hash_ = "sha256:" + hashlib.sha256(self.md.encode()).hexdigest()
+        doc = {"blyg": "0.4", "id": self.id, "kind": "fragment", "origin": self.origin,
+               "created": stamp, "updated": stamp, "version": 1, "content_md": self.md,
+               "content_html": html, "content_hash": hash_, "media": [],
+               "changelog": [{"version": 1, "at": stamp, "note": None, "pinned": True}]}
+        pin = {"blyg": "0.4", "id": self.id, "kind": "fragment", "version": 1, "at": stamp,
+               "note": None, "pinned": True, "origin": self.origin, "content_md": self.md,
+               "content_html": html, "content_hash": hash_}
+        self.item_url = f"{self.origin}docs/{self.id}.json"
+        self.pin_url = f"{self.origin}docs/{self.id}/pinned-1.json"
+        manifest = {"blyg": "0.4", "level": 1, "site": self.origin, "title": "Sol, relocated",
+                    "feed": "updates.rss", "items": "docs/all.json", "item": "docs/{id}.json",
+                    "pin": self.origin + "docs/{id}/pinned-{n}.json", "webmention": self.origin + "wm"}
+        feed = (f'<?xml version="1.0" encoding="UTF-8"?><rss version="2.0" xmlns:blyg="https://blygger.org/ns/0.1">'
+                f'<channel><title>Sol, relocated</title><link>{self.origin}</link>'
+                f'<blyg:manifest>{self.origin}manifest.json</blyg:manifest>'
+                f'<item><guid isPermaLink="false">blyg:{self.id}:v1</guid><link>{self.item_url}</link>'
+                f'<title>Sol</title><description></description><blyg:id>{self.id}</blyg:id>'
+                f'<blyg:kind>fragment</blyg:kind><blyg:version>1</blyg:version></item></channel></rss>')
+        self.files = {
+            "/home/": ("text/html", '<!doctype html><title>Sol</title><link rel="blyg" href="/sol/manifest.json"><p>Sol.</p>'),
+            "/sol/manifest.json": ("application/json", json.dumps(manifest)),
+            "/sol/blyg.json": ("application/json", json.dumps(manifest)),
+            "/sol/updates.rss": ("application/rss+xml", feed),
+            "/sol/docs/all.json": ("application/json", json.dumps({"updated": stamp, "items": [
+                {"id": self.id, "kind": "fragment", "created": stamp, "updated": stamp, "version": 1}]})),
+            f"/sol/docs/{self.id}.json": ("application/json", json.dumps(doc)),
+            f"/sol/docs/{self.id}/pinned-1.json": ("application/json", json.dumps(pin)),
+        }
+
+    def serve(self, port):
+        sol = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                path = self.path.split("?")[0]
+                sol.hits[path] = sol.hits.get(path, 0) + 1
+                f = sol.files.get(path)
+                if not f:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                body = f[1].encode()
+                self.send_response(200)
+                self.send_header("Content-Type", f[0])
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_HEAD(self):
+                self.send_response(404 if self.path.split("?")[0] not in sol.files else 200)
+                self.end_headers()
+
+            def do_POST(self):
+                if self.path != "/sol/wm":
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                form = urllib.parse.parse_qs(self.rfile.read(int(self.headers.get("Content-Length") or 0)).decode())
+                sol.received.append((form.get("source", [""])[0], form.get("target", [""])[0]))
+                self.send_response(202)
+                self.end_headers()
+
+        server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    def default_path_hits(self):
+        """Requests for where a default layout would put Sol's files."""
+        return {p: n for p, n in self.hits.items() if p.startswith(("/sol/items/", "/sol/feed.xml"))}
 
 
 # ── scenarios ─────────────────────────────────────────────────────────────
@@ -277,6 +395,97 @@ def main():
     check("blygd refuses to quote the withdrawn import",
           code == 422 and any("withdrawn" in x["reason"] for x in p.get("problems", [])), (code, p))
 
+    # 6 ─ both sides read, quote and fork a relocated surface.
+    section("6. a relocated surface (§6.1)")
+    sol = Sol(SOL_PORT)
+    sol.serve(SOL_PORT)
+    code, sub = blygd("POST", "/subscriptions", {"url": sol.home})
+    check("blygd resolves Sol through its rel=\"blyg\" link", code == 201 and sub["subscription"].get("origin") == sol.origin, sub)
+    bsol = sub["subscription"]["id"]
+    wait("blygd imports Sol's item",
+         lambda: (blygd("GET", f"/subscriptions/{bsol}")[1].get("items") == 1) or None, lambda: blygd_poll(bsol),
+         evidence=lambda: {"subscription": blygd("GET", f"/subscriptions/{bsol}")[1], "sol hits": sol.hits})
+    code, it = blygd("GET", f"/reader/items/{bsol}/{sol.id}")
+    check("blygd retains Sol's pin from its pin template", [p["version"] for p in (it.get("item") or {}).get("pins") or []] == [1], it)
+    code, s = ref("POST", "/api/subscriptions", {"url": sol.home, "confirm": True})
+    check("the reference resolves Sol through its rel=\"blyg\" link", code in (200, 201) and s.get("origin") == sol.origin, s)
+    rsol = s["id"]
+    wait("the reference imports Sol's item", lambda: ref("GET", f"/api/imports/{rsol}/{sol.id}")[0] == 200 or None, ref_tick)
+
+    sq, _ = blygd_publish(f"Alice quotes Sol.\n\n![[{sol.id}]]", "thread")
+    rsq = ref_publish(f"Rae quotes Sol.\n\n![[{sol.id}]]", "thread")
+    src = {"origin": sol.origin, "id": sol.id, "version": 1}
+    cb, b = blygd("POST", "/items", {"forked_from": src})
+    cr, r = ref("POST", "/api/items", {"mode": "fork", "source": src})
+    rmd = r.get("content_md") or r.get("draft_md") or r.get("working_md")
+    check("both fork Sol's pin (201/201)", cb == 201 and cr == 201, (cb, b, cr, r))
+    check("the flattened forks of Sol are byte-identical", b.get("draft_md") == rmd,
+          f"\nblygd:\n{b.get('draft_md')}\nreference:\n{rmd}")
+    blygd("POST", f"/items/{b['id']}/publish")
+    ref("POST", f"/api/items/{r['id']}/publish", {})
+    for who, prefix, quote, fork in (("blygd", ALICE, sq, b["id"]), ("the reference", REF, rsq, r["id"])):
+        for what, iid in (("quote", quote), ("fork", fork)):
+            wait(f"{who}'s {what} reaches Sol's endpoint, naming its item document (#85)",
+                 lambda: any(s_.startswith(prefix) and iid in s_ and t == sol.item_url for s_, t in sol.received) or None,
+                 ref_tick, evidence=lambda: sol.received)
+    check("nobody looked for Sol's files at the default paths", not sol.default_path_hits(), sol.default_path_hits())
+
+    # 7 ─ the 0.4 directive forms: labels, links[] and remote sources.
+    section("7. labels, links and remote generation sources")
+    r3 = ref_publish("Rae's third: a link carries none of my words.")
+    r4 = ref_publish("Rae's fourth: models eat words and should say whose.")
+    wait("blygd imports Rae's new items",
+         lambda: all(blygd("GET", f"/reader/items/{sid}/{i}")[0] == 200 for i in (r3, r4)) or None,
+         lambda: blygd_poll(sid))
+    al, _ = blygd_publish(
+        f"Alice links [[{r3} | Rae on notices]].\n\n![[{r1} | the opening]]\n\n"
+        f"[TK]summarize ![[{r4}]][=]Models should say whose words they ate.[/TK]\n", "thread")
+    _, doc = get(f"{ALICE}items/{al}.json")
+    check("links[] names the linked item, and only it (§10.3a)", doc.get("links") == [{"origin": REF, "id": r3}], doc.get("links"))
+    check("the link label is the anchor text", f'href="{REF}f/{r3}/">Rae on notices</a>' in doc["content_html"], doc["content_html"])
+    check("the directive label is baked as data-blyg-label", 'data-blyg-label="the opening"' in doc["content_html"], doc["content_html"])
+    srcs = [s_ for g in doc.get("generated") or [] for s_ in g.get("sources") or []]
+    check("the remote source carries its origin and a frozen cited (§5.7 rule 8)",
+          len(srcs) == 1 and srcs[0].get("origin") == REF and srcs[0].get("id") == r4 and (srcs[0].get("cited") or {}).get("source") == "Rae on the reference", srcs)
+
+    def ref_mention(target):
+        ms = [m for m in items(ref("GET", "/api/mentions")[1]) if al in m["source"] and m["target_item_id"] == target]
+        return ms[0] if ms and ms[0]["status"] != "pending" else None
+    got = wait("the reference verifies blygd's source mention (§15.4)",
+               lambda: (lambda m: m if m and m["status"] == "verified" and m["relation"] == "source" else None)(ref_mention(r4)),
+               ref_tick, evidence=lambda: ref_mention(r4))
+    got = wait("the reference verifies blygd's labelled quote",
+               lambda: (lambda m: m if m and m["status"] == "verified" and m["relation"] == "transclusion" else None)(ref_mention(r1)),
+               ref_tick, evidence=lambda: ref_mention(r1))
+    def link_sent():
+        os_ = [o for o in blygd("GET", "/outbound")[1]["outbound"]
+               if o["source_item_id"] == al and o["target_url"] == f"{REF}f/{r3}/" and o["status"] != "pending"]
+        return os_[0] if os_ else None
+    o = wait("blygd sends the reference a link mention (§15.2)",
+             lambda: (lambda o: o if o and o["relation"] == "link" else None)(link_sent()))
+    # The reference keeps no row for a claim that fails, so the only thing
+    # to see is a verified one turning up.
+    m, end = None, time.time() + 15
+    while o and o["status"] == "sent" and not m and time.time() < end:
+        ref_tick()
+        m = ref_mention(r3)
+        time.sleep(1)
+    gap("the reference verifies a link mention as a notice (§15.4, #79)", bool(m) and m["status"] == "verified",
+        f"blygd's send: {o and (o['status'], o.get('last_result'))}; the reference kept {m and (m['status'], m.get('error'))}")
+
+    rl = ref_publish(f"Rae links [[{a1} | Alice on planning]].\n\n![[{a1} | Alice's claim]]\n\nAnd answers.", "thread")
+    _, rdoc = get(f"{REF}items/{rl}.json")
+    check("the reference renders a link label as the anchor text", ">Alice on planning</a>" in rdoc["content_html"], rdoc["content_html"])
+    gap("the reference discloses its link in links[] (§10.3a)", rdoc.get("links") == [{"origin": ALICE, "id": a1}],
+        f"links: {rdoc.get('links')}")
+    gap("the reference bakes its directive label (§10.2, #81)", "data-blyg-label=" in rdoc["content_html"],
+        "no data-blyg-label in its content_html")
+    wait("blygd verifies the reference's labelled quote",
+         lambda: any(m["relation"] == "transclusion" and m["status"] == "verified" and rl in m["source_url"]
+                     for m in blygd("GET", "/mentions")[1]["mentions"]) or None, ref_tick)
+
+    if gaps:
+        print(f"\n{len(gaps)} gap(s), not failures: " + "; ".join(gaps))
     print(f"\n{len(failures)} failed" + (": " + "; ".join(failures) if failures else ""))
     return 1 if failures else 0
 
