@@ -589,9 +589,12 @@ thumb.
   4. Caddy holds requests across a restart (`lb_try_duration`) instead of
      answering 502. *(In `deploy/Caddyfile`, 30 s; not yet tried against a
      real restart, and it reaches the host only by hand.)*
-  Then alerts (an uptime check, and a ping from each good backup), a
+  Shipped through it on 2026-10-29 (0.4, DEPLOYS.md). Then a
   provisioning script with a timed restore drill, and CI once the code
-  has a host.
+  has a host. Alerts (an uptime check, and a ping from each good backup)
+  are deferred while the operator is the only user: a failed backup is
+  then the one failure no one would notice, so look at
+  `systemctl list-timers blygd-backup` and the bucket now and then.
 - **Security posture: malicious and overeager requests.** Today's limits
   are local: mention receipt per host, domain and globally (§15.3), 8
   event streams per user, a 1 MiB JSON body cap, the media cap, server
