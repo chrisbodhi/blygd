@@ -333,8 +333,8 @@ its own, and the version string moves last.
      verification fetches `{origin}blyg.json`. **Decided (2026-10-28):**
      outside the reader, blygd requires `{origin}blyg.json`. A fork of
      such an origin is refused with a message naming the missing file, and
-     DESIGN.md lists this as a departure. The spec's inconsistency is to be
-     raised upstream. Sol serves the manifest at both URLs, and
+     DESIGN.md lists this as a departure. The inconsistency is raised
+     upstream as blygger-spec#21. Sol serves the manifest at both URLs, and
      `check.py` adds a second origin with only the rel-named manifest:
      the reference's fork of it is reported as a gap check, and blygd's
      refusal is a check.)*

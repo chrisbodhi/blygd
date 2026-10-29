@@ -713,7 +713,7 @@ HTML page, CSS and vanilla JS, with no build step. It talks only to
   between the planes. The reference reuses its subscription's stored
   surface. The spec half-supports the case: §15.3 verification fetches
   `{origin}blyg.json` too, so such an origin's own mentions fail anywhere
-  that its documents are off the default path.
+  that its documents are off the default path (blygger-spec#21).
 - The manifest claims `level: 2` (§3). With threads it is honest: every
   L1 and L2 publisher construct is implemented. The claim stays
   informative (§3.2).
