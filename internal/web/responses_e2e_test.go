@@ -165,9 +165,9 @@ func TestWithdrawnApprovalCommitsWithItsPage(t *testing.T) {
 		t.Fatal(err)
 	}
 	real := e.workers.Display
-	e.workers.Display = func(ctx context.Context, originID int64, change func(pgx.Tx) (string, bool, error)) error {
-		return real(ctx, originID, func(tx pgx.Tx) (string, bool, error) {
-			id, changed, err := change(tx)
+	e.workers.Display = func(ctx context.Context, originID int64, change func(context.Context, pgx.Tx) (string, bool, error)) error {
+		return real(ctx, originID, func(ctx context.Context, tx pgx.Tx) (string, bool, error) {
+			id, changed, err := change(ctx, tx)
 			if changed {
 				return "", false, errors.New("render failed")
 			}

@@ -12,6 +12,7 @@ import (
 	"golang.org/x/net/publicsuffix"
 
 	"github.com/chrisbodhi/blygd/internal/blyg"
+	"github.com/chrisbodhi/blygd/internal/tx"
 )
 
 // Responses (§15.5): verified mentions are studio signals. One shows on its
@@ -26,13 +27,13 @@ import (
 // a withdrawn approval and the page that stops showing it commit together:
 // if the render fails, the approval stands and the claim comes due again.
 // The lock order, origin then mention, is SetMentionApproval's.
-func (s *Studio) ChangeDisplay(ctx context.Context, originID int64, change func(tx pgx.Tx) (itemID string, changed bool, err error)) error {
-	return pgx.BeginTxFunc(ctx, s.Pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+func (s *Studio) ChangeDisplay(ctx context.Context, originID int64, change func(ctx context.Context, tx pgx.Tx) (itemID string, changed bool, err error)) error {
+	return tx.Run(ctx, s.Pool, pgx.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
 		o, err := lockOrigin(ctx, tx, originID)
 		if err != nil {
 			return err
 		}
-		itemID, changed, err := change(tx)
+		itemID, changed, err := change(ctx, tx)
 		if err != nil || !changed {
 			return err
 		}
@@ -43,7 +44,7 @@ func (s *Studio) ChangeDisplay(ctx context.Context, originID int64, change func(
 // SetMentionApproval shows or hides one mention on its target's page.
 // Only a verified mention can be shown.
 func (s *Studio) SetMentionApproval(ctx context.Context, originID, mentionID int64, approve bool) error {
-	return pgx.BeginTxFunc(ctx, s.Pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+	return tx.Run(ctx, s.Pool, pgx.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
 		o, err := lockOrigin(ctx, tx, originID)
 		if err != nil {
 			return err
@@ -126,7 +127,7 @@ func (s *Studio) BlockSource(ctx context.Context, originID int64, kind, value st
 		return nil, err
 	}
 	var b Block
-	err = pgx.BeginTxFunc(ctx, s.Pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+	err = tx.Run(ctx, s.Pool, pgx.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
 		o, err := lockOrigin(ctx, tx, originID)
 		if err != nil {
 			return err

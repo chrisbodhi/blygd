@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chrisbodhi/blygd/internal/tx"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -48,7 +49,7 @@ func (m memOut) remove(_ context.Context, path string) error {
 // export works only when served there. The rendering runs in one
 // read-only snapshot and writes nothing.
 func (s *Studio) Export(ctx context.Context, originID int64, w io.Writer) error {
-	return pgx.BeginTxFunc(ctx, s.Pool, pgx.TxOptions{AccessMode: pgx.ReadOnly, IsoLevel: pgx.RepeatableRead}, func(tx pgx.Tx) error {
+	return tx.Run(ctx, s.Pool, pgx.TxOptions{AccessMode: pgx.ReadOnly, IsoLevel: pgx.RepeatableRead}, func(ctx context.Context, tx pgx.Tx) error {
 		o, err := scanOrigin(tx.QueryRow(ctx, `SELECT `+originCols+` FROM origins WHERE id = $1`, originID))
 		if err != nil {
 			return err

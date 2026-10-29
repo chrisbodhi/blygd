@@ -123,7 +123,7 @@ func (s *Studio) renderItemTo(ctx context.Context, tx pgx.Tx, out surfaceOut, o 
 	if err != nil {
 		return err
 	}
-	if err := out.put(ctx, "items/"+id+".json", TypeJSON, body, true, false); err != nil {
+	if err := out.put(ctx, blyg.ItemPath(id), TypeJSON, body, true, false); err != nil {
 		return err
 	}
 
@@ -137,7 +137,7 @@ func (s *Studio) renderItemTo(ctx context.Context, tx pgx.Tx, out surfaceOut, o 
 		if err != nil {
 			return err
 		}
-		if err := out.put(ctx, fmt.Sprintf("items/%s/v%d.json", id, v.Version), TypeJSON, pb, true, true); err != nil {
+		if err := out.put(ctx, blyg.PinPath(id, v.Version), TypeJSON, pb, true, true); err != nil {
 			return err
 		}
 		// §8.4: the pin's human twin. Permanent like the JSON, but not
@@ -337,7 +337,7 @@ func (s *Studio) renderAggregatesTo(ctx context.Context, tx pgx.Tx, out surfaceO
 	if err != nil {
 		return err
 	}
-	if err := out.put(ctx, "items/index.json", TypeJSON, body, false, false); err != nil {
+	if err := out.put(ctx, blyg.DefaultItems, TypeJSON, body, false, false); err != nil {
 		return err
 	}
 
@@ -379,7 +379,7 @@ func (s *Studio) renderAggregatesTo(ctx context.Context, tx pgx.Tx, out surfaceO
 	feed := blyg.RenderFeed(blyg.FeedChannel{
 		Origin: o.BaseURL, Title: title, Description: o.Description, Level: s.Level, BuiltAt: latest,
 	}, entries)
-	if err := out.put(ctx, "feed.xml", TypeRSS, feed, false, false); err != nil {
+	if err := out.put(ctx, blyg.DefaultFeed, TypeRSS, feed, false, false); err != nil {
 		return err
 	}
 
@@ -405,7 +405,7 @@ func (s *Studio) renderAggregatesTo(ctx context.Context, tx pgx.Tx, out surfaceO
 	m := blyg.Manifest{
 		Blyg: blyg.ProtocolVersion, Level: s.Level, Generator: s.Generator, GeneratorURL: s.GeneratorURL,
 		Site: o.BaseURL, Title: title, Author: o.Author,
-		Feed: "feed.xml", Items: "items/index.json", Updated: blyg.Time(updated),
+		Feed: blyg.DefaultFeed, Items: blyg.DefaultItems, Updated: blyg.Time(updated),
 	}
 	if o.AcceptMentions {
 		m.Webmention = "webmention"
@@ -417,7 +417,7 @@ func (s *Studio) renderAggregatesTo(ctx context.Context, tx pgx.Tx, out surfaceO
 	if err != nil {
 		return err
 	}
-	if err := out.put(ctx, "blyg.json", TypeJSON, mb, false, false); err != nil {
+	if err := out.put(ctx, blyg.ManifestFile, TypeJSON, mb, false, false); err != nil {
 		return err
 	}
 

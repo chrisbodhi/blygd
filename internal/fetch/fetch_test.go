@@ -9,6 +9,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/chrisbodhi/blygd/internal/tx"
+	"github.com/jackc/pgx/v5"
 )
 
 func TestIsPublic(t *testing.T) {
@@ -94,5 +97,34 @@ func TestRetryAfter(t *testing.T) {
 		if got := RetryAfter(h, now); got != want {
 			t.Errorf("Retry-After %q: %v, want %v", v, got, want)
 		}
+	}
+}
+
+// fakeTx is enough of a transaction for tx.Run to mark a context.
+type fakeTx struct{ pgx.Tx }
+
+func (fakeTx) Commit(context.Context) error   { return nil }
+func (fakeTx) Rollback(context.Context) error { return nil }
+
+type fakeDB struct{}
+
+func (fakeDB) BeginTx(context.Context, pgx.TxOptions) (pgx.Tx, error) { return fakeTx{}, nil }
+
+// No network inside a transaction (CLAUDE.md): a fetch from a context
+// tx.Run marked is refused before it dials.
+func TestNoFetchInsideATransaction(t *testing.T) {
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits++ }))
+	defer srv.Close()
+	c := &Client{AllowPrivate: true}
+	err := tx.Run(context.Background(), fakeDB{}, pgx.TxOptions{}, func(ctx context.Context, _ pgx.Tx) error {
+		_, err := c.Get(ctx, srv.URL, VerifyLimits, "")
+		return err
+	})
+	if !errors.Is(err, ErrInTx) || hits != 0 {
+		t.Fatalf("fetch inside a transaction: %v, %d requests", err, hits)
+	}
+	if _, err := c.Get(context.Background(), srv.URL, VerifyLimits, ""); err != nil || hits != 1 {
+		t.Fatalf("fetch outside: %v, %d requests", err, hits)
 	}
 }

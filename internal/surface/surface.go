@@ -46,7 +46,7 @@ func Locate(ctx context.Context, g Getter, origin string, lim fetch.Limits) (Loc
 		origin = n
 	}
 	l := Located{Surface: blyg.Surface{Origin: origin}}
-	resp, err := g.Get(ctx, origin+"blyg.json", lim, "application/json")
+	resp, err := g.Get(ctx, origin+blyg.ManifestFile, lim, "application/json")
 	if err != nil {
 		return l, err
 	}

@@ -41,16 +41,24 @@ on the command line or in the environment. Each test gets a fresh database.
   transaction, whose results are only ever baked as a §10.2 snapshot, an
   `[[id]]` anchor, or a frozen `cited`. Do not widen it. The reverse
   holds too: `internal/reader` never queries plane-1 tables, and reads a
-  same-instance origin through its rendered surface. Tests in both
-  packages check this.
+  same-instance origin through its rendered surface. `internal/mention`
+  reads the mirror only in `importedPage` and never writes plane 1. A
+  planes test in each package checks its SQL, and `internal/archtest`
+  allow-lists who may import whom, so a new edge between packages fails
+  until its row says why.
 - **Render inside the transaction.** Any change to plane 1 re-renders its
   surface files in the same transaction. The HTTP layer never renders.
 - **Permanent things stay permanent.** Never weaken the schema's triggers
   (`internal/db/migrations/`). If a change needs one relaxed, stop and ask.
 - **No network inside a transaction.** Fetch first, then open the
-  transaction (see `Publish` and its fork-pin check).
+  transaction (see `Publish` and its fork-pin check). Every transaction
+  starts in `tx.Run`, which marks its context, and `internal/fetch`
+  refuses a marked one. Name the closure's context parameter `ctx`, so the
+  unmarked one outside is shadowed.
 - **All outbound HTTP goes through `internal/fetch`.** Never use
-  `http.DefaultClient` for a URL someone else chose.
+  `http.DefaultClient` for a URL someone else chose. `internal/archtest`
+  fails on any other client, transport or dial, and on a transaction
+  started anywhere but `tx.Run`.
 - **Store verbatim, sanitize at render** for anything imported (§14).
   That includes our own thread pages: a bake carries another origin's
   bytes, so pages go through `blyg.PageHTML`, never raw `template.HTML`.
@@ -76,11 +84,13 @@ internal/db          pool + embedded tern migrations (migrations/, migrations.su
 internal/studio      plane 1: item lifecycle, pins, outbox, render-on-publish
 internal/mention     §15: receiver, verifier, sender, lease workers
 internal/reader      §12–13: resolution, importer, poller, reading overlay
-internal/fetch       bounded, SSRF-guarded HTTP client
+internal/fetch       bounded, SSRF-guarded HTTP client; refuses to run inside a transaction
+internal/tx          starts every transaction, and marks its context
 internal/surface     locates another origin's surface from its manifest (§6.1)
 internal/account     users, scoped tokens
 internal/hopper      hopper CRUD over references; public hopper view (§13.5, live)
 internal/web         HTTP: origin surface, /api, /studio (embedded plain client), router; end-to-end tests
 internal/testdb      per-test databases
 internal/testblyg    a fake static blyg for import tests
+internal/archtest    source-reading tests of the house rules: import graph, SQL by plane, HTTP, transactions
 ```

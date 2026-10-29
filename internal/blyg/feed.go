@@ -65,7 +65,7 @@ func RenderFeed(ch FeedChannel, entries []FeedEntry) []byte {
 	el(&b, 4, "description", ch.Description)
 	el(&b, 4, "lastBuildDate", RFC822(ch.BuiltAt))
 	el(&b, 4, "blyg:level", strconv.Itoa(ch.Level))
-	el(&b, 4, "blyg:manifest", ch.Origin+"blyg.json")
+	el(&b, 4, "blyg:manifest", ch.Origin+ManifestFile)
 	for _, e := range entries {
 		b.WriteString("    <item>\n")
 		b.WriteString(`      <guid isPermaLink="false">blyg:` + e.ID + ":v" + strconv.Itoa(e.Version) + "</guid>\n")

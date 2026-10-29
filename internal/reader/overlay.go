@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/chrisbodhi/blygd/internal/blyg"
+	"github.com/chrisbodhi/blygd/internal/tx"
 )
 
 // ErrNotFound covers subscriptions and items the user cannot see.
@@ -119,7 +120,7 @@ func (r *Reader) Subscribe(ctx context.Context, userID int64, input string) (int
 // same transaction (an identity change the user confirmed, §12.2).
 func (r *Reader) attach(ctx context.Context, userID int64, res *Resolution, from *int64) (int64, error) {
 	var id int64
-	err := pgx.BeginTxFunc(ctx, r.Pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+	err := tx.Run(ctx, r.Pool, pgx.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
 		var manifest, siteURL, siteDisc any
 		if res.Manifest != nil {
 			manifest = string(res.Manifest)

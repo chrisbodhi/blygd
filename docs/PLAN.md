@@ -396,6 +396,27 @@ them.
    origins concurrently, at most `Batch` (5) at once. A user's `POST
    …/poll` still waits for its poll, now at most the deadline. The fake
    blyg gained `SetDelay`.)*
+3. **The house rules were conventions** (D3, P3). The planes tests were
+   regexes over each package's raw source, `internal/mention` had none,
+   and nothing checked the import graph, outbound HTTP or where
+   transactions start.
+   *(Done, 2026-10-29. `internal/archtest` does three things:
+   - It folds string constants into the SQL they build, using `go/ast`,
+     and fails on a table named through a variable. All four planes tests
+     use it. The new one in `mention` allows mirror reads in
+     `importedPage` only, and bans writes to plane 1.
+   - It allow-lists each package's internal imports, and states
+     outright that `studio` can't reach a package that reads the mirror.
+   - It bans HTTP clients outside `fetch`, and transactions outside
+     `tx.Run`.
+
+   `tx.Run` marks its context and `fetch` refuses a marked one, so the
+   no-network rule now holds at runtime too. All 19 transaction sites
+   moved to it, and `ChangeDisplay`'s callback now receives the marked
+   context. For P3, `blyg.ItemPath`, `blyg.PinPath` and `ManifestFile`
+   name what the renderer writes. Tests check that the reader's default
+   `Surface` and the receiver's path patterns agree with them. Every
+   rule was broken on purpose and its test failed.)*
 
 ## Interop (2026-10-10)
 

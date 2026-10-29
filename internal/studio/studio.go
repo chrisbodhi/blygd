@@ -16,6 +16,7 @@ import (
 
 	"github.com/chrisbodhi/blygd/internal/blyg"
 	"github.com/chrisbodhi/blygd/internal/fetch"
+	"github.com/chrisbodhi/blygd/internal/tx"
 )
 
 // Studio is the publishing engine.
@@ -137,7 +138,7 @@ func (s *Studio) UpdateOrigin(ctx context.Context, id int64, in OriginSettings) 
 		}
 	}
 	var out *Origin
-	err := pgx.BeginTxFunc(ctx, s.Pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+	err := tx.Run(ctx, s.Pool, pgx.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
 		if _, err := lockOrigin(ctx, tx, id); err != nil {
 			return err
 		}
@@ -165,7 +166,7 @@ func (s *Studio) UpdateOrigin(ctx context.Context, id int64, in OriginSettings) 
 // Rebuild re-renders every mutable surface file for an origin. Pins are
 // write-once and are left as they are.
 func (s *Studio) Rebuild(ctx context.Context, originID int64) error {
-	return pgx.BeginTxFunc(ctx, s.Pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+	return tx.Run(ctx, s.Pool, pgx.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
 		o, err := lockOrigin(ctx, tx, originID)
 		if err != nil {
 			return err

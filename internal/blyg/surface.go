@@ -21,8 +21,9 @@ type Surface struct {
 	Pin    string
 }
 
-// Default surface paths (§4).
+// Default surface paths (§4). ManifestFile is the one a manifest cannot move.
 const (
+	ManifestFile = "blyg.json"
 	DefaultFeed  = "feed.xml"
 	DefaultItems = "items/index.json"
 	DefaultItem  = "items/{id}.json"
@@ -60,6 +61,16 @@ func (s Surface) ItemURL(id string) string {
 // template or the default.
 func (s Surface) PinURL(id string, n int) string {
 	return s.at(expand(or(s.Pin, DefaultPin), map[string]string{"id": id, "n": strconv.Itoa(n)}))
+}
+
+// ItemPath is an item document's origin-relative path in the default
+// layout, which is the only one blygd publishes.
+func ItemPath(id string) string { return expand(DefaultItem, map[string]string{"id": id}) }
+
+// PinPath is a pinned version document's origin-relative path in the
+// default layout.
+func PinPath(id string, n int) string {
+	return expand(DefaultPin, map[string]string{"id": id, "n": strconv.Itoa(n)})
 }
 
 // Templated reports whether the surface relocates item documents.

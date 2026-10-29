@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/chrisbodhi/blygd/internal/blyg"
+	"github.com/chrisbodhi/blygd/internal/tx"
 )
 
 // Item is an own item: its studio-private draft state plus where it stands
@@ -108,7 +109,7 @@ func loadVersions(ctx context.Context, q pgx.Tx, itemID string) ([]*Version, err
 func (s *Studio) GetItem(ctx context.Context, originID int64, id string) (*Item, []*Version, error) {
 	var it *Item
 	var vs []*Version
-	err := pgx.BeginTxFunc(ctx, s.Pool, pgx.TxOptions{AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
+	err := tx.Run(ctx, s.Pool, pgx.TxOptions{AccessMode: pgx.ReadOnly}, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		it, err = scanItem(tx.QueryRow(ctx, `SELECT `+itemCols+` FROM items WHERE origin_id = $1 AND id = $2`, originID, id))
 		if err != nil {
@@ -385,7 +386,7 @@ func (s *Studio) Publish(ctx context.Context, originID int64, id string, opts Pu
 	}
 
 	res := &PublishResult{Warnings: warnings}
-	err = pgx.BeginTxFunc(ctx, s.Pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+	err = tx.Run(ctx, s.Pool, pgx.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
 		o, err := lockOrigin(ctx, tx, originID)
 		if err != nil {
 			return err
@@ -564,7 +565,7 @@ func (s *Studio) Publish(ctx context.Context, originID int64, id string, opts Pu
 // again returns the item under the same id.
 func (s *Studio) Withdraw(ctx context.Context, originID int64, id string, note *string) (*PublishResult, error) {
 	res := &PublishResult{}
-	err := pgx.BeginTxFunc(ctx, s.Pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+	err := tx.Run(ctx, s.Pool, pgx.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
 		o, err := lockOrigin(ctx, tx, originID)
 		if err != nil {
 			return err
@@ -633,7 +634,7 @@ func (s *Studio) Withdraw(ctx context.Context, originID int64, id string, note *
 // schema refuses to unpin. Pinning emits no feed event (§7).
 func (s *Studio) Pin(ctx context.Context, originID int64, id string, n int) (*Version, error) {
 	var out *Version
-	err := pgx.BeginTxFunc(ctx, s.Pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+	err := tx.Run(ctx, s.Pool, pgx.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
 		o, err := lockOrigin(ctx, tx, originID)
 		if err != nil {
 			return err

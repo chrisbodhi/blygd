@@ -18,6 +18,7 @@ import (
 	"github.com/chrisbodhi/blygd/internal/blyg"
 	"github.com/chrisbodhi/blygd/internal/events"
 	"github.com/chrisbodhi/blygd/internal/studio"
+	"github.com/chrisbodhi/blygd/internal/tx"
 )
 
 // RateLimits are §15.3 step 2's three caps, per hour. They are
@@ -104,7 +105,7 @@ func (rc *Receiver) accept(ctx context.Context, o *studio.Origin, rawSource, raw
 
 	var status int
 	var msg string
-	err = pgx.BeginTxFunc(ctx, rc.Pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+	err = tx.Run(ctx, rc.Pool, pgx.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
 		// Serialize claim accounting so concurrent claims cannot overshoot.
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(7215)`); err != nil {
 			return err
@@ -176,12 +177,8 @@ func (rc *Receiver) targetItem(ctx context.Context, originID int64, rel string) 
 		return rc.lookup(ctx, `SELECT i.id FROM items i JOIN item_versions v ON v.item_id = i.id
 			WHERE i.origin_id = $1 AND i.id = $2 AND v.version = $3 AND v.pinned_at IS NOT NULL`, originID, m[1], atoi(m[2]))
 	}
-	if strings.HasPrefix(rel, "items/") && strings.HasSuffix(rel, ".json") {
-		id := strings.TrimSuffix(strings.TrimPrefix(rel, "items/"), ".json")
-		if !blyg.ValidID(id) {
-			return "", nil
-		}
-		return rc.lookup(ctx, `SELECT id FROM items WHERE origin_id = $1 AND id = $2 AND version > 0`, originID, id)
+	if m := itemDocPath.FindStringSubmatch(rel); m != nil {
+		return rc.lookup(ctx, `SELECT id FROM items WHERE origin_id = $1 AND id = $2 AND version > 0`, originID, m[1])
 	}
 	page := rel
 	if page != "" && !strings.HasSuffix(page, "/") {
@@ -203,7 +200,10 @@ func atoi(s string) int {
 	return n
 }
 
+// The default layout's documents (blyg.ItemPath, blyg.PinPath), which is
+// the only layout blygd publishes.
 var (
+	itemDocPath = regexp.MustCompile(`^items/([0-9a-hjkmnp-tv-z]{26})\.json$`)
 	pinDocPath  = regexp.MustCompile(`^items/([0-9a-hjkmnp-tv-z]{26})/v([1-9][0-9]{0,8})\.json$`)
 	pinPagePath = regexp.MustCompile(`^(.+/)v([1-9][0-9]{0,8})/$`)
 )

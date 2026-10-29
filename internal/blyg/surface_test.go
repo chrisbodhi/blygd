@@ -39,3 +39,24 @@ func TestSurfaceDefaultsAndTemplates(t *testing.T) {
 		t.Errorf("expand: %s", got)
 	}
 }
+
+// What blygd writes (ItemPath, PinPath, the defaults) and what a reader
+// fetches from a manifest that moves nothing must be the same paths (§4).
+func TestDefaultSurfaceIsWhatWePublish(t *testing.T) {
+	const origin, id = "https://example.com/blyg/", "0a00000000000000000000000a"
+	s := Surface{Origin: origin}
+	for _, c := range [][2]string{
+		{s.ItemURL(id), origin + ItemPath(id)},
+		{s.ItemURL(id), ItemDocURL(origin, id)},
+		{s.PinURL(id, 3), origin + PinPath(id, 3)},
+		{s.PinURL(id, 3), PinURL(origin, id, 3)},
+		{s.FeedURL(), origin + DefaultFeed},
+		{s.IndexURL(), origin + DefaultItems},
+		{origin + ItemPath(id), origin + "items/" + id + ".json"},
+		{origin + PinPath(id, 3), origin + "items/" + id + "/v3.json"},
+	} {
+		if c[0] != c[1] {
+			t.Errorf("%s != %s", c[0], c[1])
+		}
+	}
+}

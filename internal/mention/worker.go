@@ -33,7 +33,7 @@ type Workers struct {
 	// response left an item (§15.5), re-renders that item before the
 	// commit. The studio renders; this package never writes the surface.
 	// Nil records without rendering, for tests with no studio.
-	Display func(ctx context.Context, originID int64, change func(tx pgx.Tx) (itemID string, changed bool, err error)) error
+	Display func(ctx context.Context, originID int64, change func(ctx context.Context, tx pgx.Tx) (itemID string, changed bool, err error)) error
 }
 
 // querier is what recording a verification needs from a pool or a tx.
@@ -136,7 +136,7 @@ func (wk *Workers) recordInbound(ctx context.Context, c inboundClaim, out Outcom
 		relation, class = out.Relation, out.Class
 	}
 	var originID int64
-	record := func(q querier) (itemID string, dropped bool, err error) {
+	record := func(ctx context.Context, q querier) (itemID string, dropped bool, err error) {
 		err = q.QueryRow(ctx, `UPDATE inbound_mentions m SET
 		-- §15.5: approval holds only while what is shown stays the same.
 		approved_at = CASE WHEN $2 = 'verified'
@@ -168,11 +168,11 @@ func (wk *Workers) recordInbound(ctx context.Context, c inboundClaim, out Outcom
 	}
 	var err error
 	if wk.Display == nil {
-		_, _, err = record(wk.Pool)
+		_, _, err = record(ctx, wk.Pool)
 	} else {
 		// An approved response that leaves the page is re-rendered off it
 		// in the transaction that withdrew the approval.
-		err = wk.Display(ctx, c.originID, func(tx pgx.Tx) (string, bool, error) { return record(tx) })
+		err = wk.Display(ctx, c.originID, func(ctx context.Context, tx pgx.Tx) (string, bool, error) { return record(ctx, tx) })
 	}
 	if err != nil {
 		return err

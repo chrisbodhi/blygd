@@ -83,11 +83,11 @@ func SameOrigin(a, b string) bool {
 }
 
 // ItemDocURL is the live document URL for an item at an origin.
-func ItemDocURL(origin, id string) string { return origin + "items/" + id + ".json" }
+func ItemDocURL(origin, id string) string { return origin + ItemPath(id) }
 
 // PinURL is the pinned version URL (§8).
 func PinURL(origin, id string, version int) string {
-	return origin + "items/" + id + "/v" + strconv.Itoa(version) + ".json"
+	return origin + PinPath(id, version)
 }
 
 // PinnedPage is the optional rendered page of a pinned version (§8.4):

@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/chrisbodhi/blygd/internal/blyg"
+	"github.com/chrisbodhi/blygd/internal/tx"
 )
 
 // Scopes. Consequential public acts are separate scopes, so a drafting tool
@@ -113,7 +114,7 @@ func (a *Accounts) CreateUser(ctx context.Context, handle, publicURL, title stri
 		return 0, 0, "", fmt.Errorf("public URL: %w", err)
 	}
 	origin := base + handle + "/"
-	err = pgx.BeginTxFunc(ctx, a.Pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+	err = tx.Run(ctx, a.Pool, pgx.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx, `INSERT INTO users (handle) VALUES ($1) RETURNING id`, handle).Scan(&userID); err != nil {
 			return err
 		}
@@ -150,7 +151,7 @@ func (a *Accounts) UserByHandle(ctx context.Context, handle string) (int64, erro
 // Mint creates a token with the given scopes for userID, expiring at
 // expiresAt, or never when it is nil.
 func (a *Accounts) Mint(ctx context.Context, userID int64, name string, scopes []string, expiresAt *time.Time) (secret string, id int64, err error) {
-	err = pgx.BeginTxFunc(ctx, a.Pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+	err = tx.Run(ctx, a.Pool, pgx.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
 		secret, id, err = mint(ctx, tx, userID, name, scopes, expiresAt)
 		return err
 	})

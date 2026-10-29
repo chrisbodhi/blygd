@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/chrisbodhi/blygd/internal/tx"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -109,7 +110,7 @@ func (s *Store) Create(ctx context.Context, userID int64, name string) (*Hopper,
 		return nil, fmt.Errorf("name must be 1–200 characters")
 	}
 	var h *Hopper
-	err := pgx.BeginTxFunc(ctx, s.Pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+	err := tx.Run(ctx, s.Pool, pgx.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
 		slug, err := freeSlug(ctx, tx, userID, Slugify(name), 0)
 		if err != nil {
 			return err
@@ -181,7 +182,7 @@ func (s *Store) Rename(ctx context.Context, userID, id int64, name string) (*Hop
 		return nil, fmt.Errorf("name must be 1–200 characters")
 	}
 	var h *Hopper
-	err := pgx.BeginTxFunc(ctx, s.Pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+	err := tx.Run(ctx, s.Pool, pgx.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
 		cur, err := scanHopper(tx.QueryRow(ctx, `SELECT `+hopperCols+` FROM hoppers h WHERE h.user_id = $1 AND h.id = $2 FOR UPDATE`, userID, id))
 		if err != nil {
 			return err

@@ -17,6 +17,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/chrisbodhi/blygd/internal/tx"
 )
 
 // Limits bound one fetch. The §15.4 RECOMMENDED values are the defaults.
@@ -51,6 +53,9 @@ var (
 	ErrTooManyHops = errors.New("too many redirects")
 	ErrBlockedAddr = errors.New("refusing to connect to a non-public address")
 	ErrNotHTTP     = errors.New("only http and https URLs are fetched")
+	// ErrInTx is a fetch from inside a database transaction, which holds
+	// locks for as long as a stranger's server cares to take (CLAUDE.md).
+	ErrInTx = errors.New("refusing to fetch inside a database transaction: fetch first, then open it")
 )
 
 // ReaderLimits bound the import side's fetches: §12.2's RECOMMENDED 5
@@ -115,6 +120,9 @@ func (c *Client) Do(ctx context.Context, method, rawURL string, body io.Reader, 
 }
 
 func (c *Client) do(ctx context.Context, method, rawURL string, body io.Reader, contentType string, lim Limits, accept string, extra http.Header) (*Response, error) {
+	if tx.Active(ctx) {
+		return nil, ErrInTx
+	}
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, err

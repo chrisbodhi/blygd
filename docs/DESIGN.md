@@ -99,6 +99,16 @@ has a test.
 | Stubs are threads | §10.6 | CHECK constraints on `items` and `item_versions` |
 | A tenant quotes only what its own subscriptions imported | §10.2 step 2 | `reader.Snapshots` joins `subscriptions`; e2e test |
 
+Three house rules are not the protocol's, and live in Go rather than the
+schema, so they are checked by reading the source (`internal/archtest`
+and a planes test in each package):
+
+| Rule | Checked by |
+|---|---|
+| Nothing that writes the surface reads the mirror | per-package SQL rules over folded string constants, failing on any table named through a variable; an import allow-list, with `studio` unable to reach `reader`, `hopper` or `mention` |
+| No network inside a transaction | every transaction starts in `tx.Run`, whose marked context `fetch` refuses at runtime; no `pgx.BeginTxFunc` or `.Begin` elsewhere |
+| All outbound HTTP goes through `fetch` | no default client, `http.Client` or `Transport` literal, or `net.Dial` outside it |
+
 ## Origins and routing
 
 - An origin is a **full base URL** (`origins.base_url`), normalized. Today

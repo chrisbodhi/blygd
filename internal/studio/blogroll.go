@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/chrisbodhi/blygd/internal/blyg"
+	"github.com/chrisbodhi/blygd/internal/tx"
 )
 
 // SetBlogrollEntry adds, replaces or (with e nil) removes the blogroll
@@ -26,7 +27,7 @@ func (s *Studio) SetBlogrollEntry(ctx context.Context, originID, subscriptionID 
 			e.Text = e.HTMLURL
 		}
 	}
-	return pgx.BeginTxFunc(ctx, s.Pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+	return tx.Run(ctx, s.Pool, pgx.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
 		o, err := lockOrigin(ctx, tx, originID)
 		if err != nil {
 			return err

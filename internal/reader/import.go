@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/chrisbodhi/blygd/internal/blyg"
+	"github.com/chrisbodhi/blygd/internal/tx"
 )
 
 // Reader is the import side and the reading overlay.
@@ -189,7 +190,7 @@ func (r *Reader) ApplyDocument(ctx context.Context, remoteID int64, s blyg.Surfa
 	}
 	now := r.now()
 
-	err := pgx.BeginTxFunc(ctx, r.Pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+	err := tx.Run(ctx, r.Pool, pgx.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
 		var watermark, version int
 		var curHash *string
 		var curState string
@@ -317,7 +318,7 @@ const (
 func (r *Reader) ApplyL0(ctx context.Context, remoteID int64, feedURL string, feed *blyg.ParsedFeed) (int, error) {
 	now := r.now()
 	changed := 0
-	err := pgx.BeginTxFunc(ctx, r.Pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+	err := tx.Run(ctx, r.Pool, pgx.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
 		seen := map[string]bool{}
 		for _, e := range feed.Entries {
 			id := blyg.L0ID(e.GUID, e.Link)

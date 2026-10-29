@@ -77,7 +77,7 @@ var errBudget = errors.New("resolution fetch budget exhausted")
 // probe is step 2's test at one base URL: GET {base}blyg.json and keep it
 // if it parses as a manifest. URLs already probed are skipped.
 func (rs *resolver) probe(base string) *Resolution {
-	u := base + "blyg.json"
+	u := base + blyg.ManifestFile
 	if rs.probed[u] {
 		return nil
 	}
