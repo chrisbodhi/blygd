@@ -91,6 +91,15 @@ func (r *Reader) GetSubscription(ctx context.Context, userID, ownOriginID, remot
 		WHERE s.user_id = $1 AND ro.id = $3`, userID, ownOriginID, remoteID))
 }
 
+// Subscribed says whether userID follows the remote origin. It answers
+// no when it cannot tell, so a doubtful event is not sent.
+func (r *Reader) Subscribed(ctx context.Context, userID, remoteID int64) bool {
+	var ok bool
+	_ = r.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM subscriptions WHERE user_id = $1 AND remote_origin_id = $2)`,
+		userID, remoteID).Scan(&ok)
+	return ok
+}
+
 // Subscribe resolves a URL (§12.1, network first) and then records the
 // subscription. Many users share one remote origin row, and so one poll.
 func (r *Reader) Subscribe(ctx context.Context, userID int64, input string) (int64, *Resolution, error) {

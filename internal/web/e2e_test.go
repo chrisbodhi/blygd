@@ -76,9 +76,6 @@ func (e *env) user(handle string) *user {
 	if err != nil {
 		e.t.Fatalf("create user: %v", err)
 	}
-	if err := e.studio.Rebuild(context.Background(), oid); err != nil {
-		e.t.Fatal(err)
-	}
 	o, _ := e.studio.GetOrigin(context.Background(), oid)
 	return &user{e: e, token: secret, origin: o.BaseURL, id: uid}
 }

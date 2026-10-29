@@ -110,10 +110,7 @@ func (a *API) visible(r *http.Request, p *account.Principal, originID int64, ev 
 		if !p.Can(account.ScopeReaderRead) || ev.RemoteOriginID == 0 {
 			return false
 		}
-		var ok bool
-		_ = a.Pool.QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM subscriptions WHERE user_id = $1 AND remote_origin_id = $2)`,
-			p.UserID, ev.RemoteOriginID).Scan(&ok)
-		return ok
+		return a.Reader.Subscribed(r.Context(), p.UserID, ev.RemoteOriginID)
 	case "mention", "outbound":
 		return p.Can(account.ScopeMentionsRead) && ev.OriginID == originID
 	}

@@ -2,13 +2,9 @@ package mention
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -87,7 +83,7 @@ func (rc *Receiver) accept(ctx context.Context, o *studio.Origin, rawSource, raw
 	if !inside {
 		return 400, "target is not within this blyg"
 	}
-	itemID, err := rc.targetItem(ctx, o.ID, rel)
+	itemID, err := studio.TargetItem(ctx, rc.Pool, o.ID, rel)
 	if err != nil {
 		return 500, "internal error"
 	}
@@ -162,60 +158,4 @@ func (rc *Receiver) accept(ctx context.Context, o *studio.Origin, rawSource, raw
 		return 500, "internal error"
 	}
 	return status, msg
-}
-
-// targetItem resolves an origin-relative path to one of this origin's
-// items, by the addresses it itself serves for it (§15.3 step 1: membership,
-// not location, decision #84): its document (items/{id}.json), its page, or
-// a pinned version's document (items/{id}/v{n}.json) or page ({page}v{n}/).
-// blygd never relocates its surface, so every such address is under the
-// base URL, and the caller's prefix check refuses nothing it serves. A
-// withdrawn target is fine (§15.3: people may respond to a withdrawal).
-// Returns "" if none.
-func (rc *Receiver) targetItem(ctx context.Context, originID int64, rel string) (string, error) {
-	if m := pinDocPath.FindStringSubmatch(rel); m != nil {
-		return rc.lookup(ctx, `SELECT i.id FROM items i JOIN item_versions v ON v.item_id = i.id
-			WHERE i.origin_id = $1 AND i.id = $2 AND v.version = $3 AND v.pinned_at IS NOT NULL`, originID, m[1], atoi(m[2]))
-	}
-	if m := itemDocPath.FindStringSubmatch(rel); m != nil {
-		return rc.lookup(ctx, `SELECT id FROM items WHERE origin_id = $1 AND id = $2 AND version > 0`, originID, m[1])
-	}
-	page := rel
-	if page != "" && !strings.HasSuffix(page, "/") {
-		page += "/"
-	}
-	if m := pinPagePath.FindStringSubmatch(page); m != nil {
-		id, err := rc.lookup(ctx, `SELECT i.id FROM items i JOIN item_versions v ON v.item_id = i.id
-			WHERE i.origin_id = $1 AND i.page = $2 AND v.version = $3 AND v.pinned_at IS NOT NULL`, originID, m[1], atoi(m[2]))
-		if id != "" || err != nil {
-			return id, err
-		}
-	}
-	return rc.lookup(ctx, `SELECT id FROM items WHERE origin_id = $1 AND page = $2 AND version > 0`, originID, page)
-}
-
-// atoi reads a version the path patterns have already bounded.
-func atoi(s string) int {
-	n, _ := strconv.Atoi(s)
-	return n
-}
-
-// The default layout's documents (blyg.ItemPath, blyg.PinPath), which is
-// the only layout blygd publishes.
-var (
-	itemDocPath = regexp.MustCompile(`^items/([0-9a-hjkmnp-tv-z]{26})\.json$`)
-	pinDocPath  = regexp.MustCompile(`^items/([0-9a-hjkmnp-tv-z]{26})/v([1-9][0-9]{0,8})\.json$`)
-	pinPagePath = regexp.MustCompile(`^(.+/)v([1-9][0-9]{0,8})/$`)
-)
-
-func (rc *Receiver) lookup(ctx context.Context, q string, args ...any) (string, error) {
-	var id string
-	err := rc.Pool.QueryRow(ctx, q, args...).Scan(&id)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("target lookup: %w", err)
-	}
-	return id, nil
 }

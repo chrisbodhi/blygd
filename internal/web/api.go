@@ -7,7 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"slices"
 	"strconv"
 	"time"
 
@@ -20,6 +19,7 @@ import (
 	"github.com/chrisbodhi/blygd/internal/blyg"
 	"github.com/chrisbodhi/blygd/internal/events"
 	"github.com/chrisbodhi/blygd/internal/hopper"
+	"github.com/chrisbodhi/blygd/internal/mention"
 	"github.com/chrisbodhi/blygd/internal/reader"
 	"github.com/chrisbodhi/blygd/internal/studio"
 )
@@ -32,6 +32,7 @@ type API struct {
 	Accounts *account.Accounts
 	Studio   *studio.Studio
 	Hoppers  *hopper.Store
+	Mentions *mention.Store
 	Reader   *reader.Reader
 	Events   *events.Hub // GET /api/events; nil means unavailable
 	Log      *slog.Logger
@@ -739,61 +740,16 @@ func (a *API) removeMember(w http.ResponseWriter, r *http.Request) error {
 
 // ── mentions ─────────────────────────────────────────────────
 
-type mentionView struct {
-	ID            int64           `json:"id"`
-	TargetItemID  string          `json:"target_item_id"`
-	SourceURL     string          `json:"source_url"`
-	TargetURL     string          `json:"target_url"`
-	Status        string          `json:"status"`
-	Relation      *string         `json:"relation"`
-	Class         *string         `json:"class"` // response or notice (§15.5), with relation
-	SourceOrigin  *string         `json:"source_origin"`
-	SourceItemID  *string         `json:"source_item_id"`
-	SourceVersion *int            `json:"source_version"`
-	SourceKind    *string         `json:"source_kind"`
-	SourceAuthor  json.RawMessage `json:"source_author"`
-	SourcePage    *string         `json:"source_page"`
-	Failure       *string         `json:"failure"`
-	ReceivedAt    time.Time       `json:"received_at"`
-	VerifiedAt    *time.Time      `json:"verified_at"`
-	SourceHost    string          `json:"source_host"`
-	ApprovedAt    *time.Time      `json:"approved_at"` // shown on the target's page (§15.5)
-	Blocked       bool            `json:"blocked"`
-}
-
 func (a *API) listMentions(w http.ResponseWriter, r *http.Request) error {
 	o, err := a.origin(r)
 	if err != nil {
 		return err
 	}
-	status := r.URL.Query().Get("status")
-	if status != "" && !slices.Contains([]string{"pending", "verified", "failed", "gone"}, status) {
-		return badRequest("unknown status")
-	}
-	// Notices (links and reposts) are held apart from responses (§15.5).
-	class := r.URL.Query().Get("class")
-	if class != "" && !slices.Contains([]string{"response", "notice"}, class) {
-		return badRequest("unknown class")
-	}
-	// Mentions from blocked sources stay out of view unless asked for.
-	withBlocked := r.URL.Query().Get("include_blocked") == "true"
-	rows, err := a.Pool.Query(r.Context(), `SELECT * FROM (SELECT m.id, m.target_item_id, m.source_url, m.target_url, m.status, m.relation, m.class,
-		m.source_origin, m.source_item_id, m.source_version, m.source_kind, m.source_author, m.source_page, m.failure, m.received_at, m.verified_at,
-		m.source_host, m.approved_at,
-		EXISTS (SELECT 1 FROM mention_blocks b WHERE b.origin_id = m.origin_id
-			AND ((b.kind = 'host' AND b.value = m.source_host) OR (b.kind = 'domain' AND b.value = m.source_domain))) AS blocked
-		FROM inbound_mentions m WHERE m.origin_id = $1 AND ($2 = '' OR m.status = $2) AND ($4 = '' OR m.class = $4)) x
-		WHERE $3 OR NOT x.blocked
-		ORDER BY x.received_at DESC LIMIT 200`, o.ID, status, withBlocked, class)
+	q := r.URL.Query()
+	ms, err := a.Mentions.Inbound(r.Context(), o.ID, mention.Filter{
+		Status: q.Get("status"), Class: q.Get("class"), WithBlocked: q.Get("include_blocked") == "true"})
 	if err != nil {
 		return err
-	}
-	ms, err := pgx.CollectRows(rows, pgx.RowToStructByPos[mentionView])
-	if err != nil {
-		return err
-	}
-	if ms == nil {
-		ms = []mentionView{}
 	}
 	writeJSON(w, 200, map[string]any{"mentions": ms})
 	return nil
@@ -879,36 +835,14 @@ func (a *API) unblock(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-type outboundView struct {
-	ID            int64     `json:"id"`
-	SourceItemID  string    `json:"source_item_id"`
-	Relation      string    `json:"relation"`
-	TargetURL     string    `json:"target_url"`
-	TargetVersion *int      `json:"target_version"`
-	Status        string    `json:"status"`
-	Endpoint      *string   `json:"endpoint"`
-	Attempts      int       `json:"attempts"`
-	LastResult    *string   `json:"last_result"`
-	UpdatedAt     time.Time `json:"updated_at"`
-}
-
 func (a *API) listOutbound(w http.ResponseWriter, r *http.Request) error {
 	o, err := a.origin(r)
 	if err != nil {
 		return err
 	}
-	rows, err := a.Pool.Query(r.Context(), `SELECT id, source_item_id, relation, target_url, target_version, status,
-		endpoint, attempts, last_result, updated_at FROM outbound_mentions WHERE origin_id = $1
-		ORDER BY updated_at DESC LIMIT 200`, o.ID)
+	out, err := a.Mentions.Outbound(r.Context(), o.ID)
 	if err != nil {
 		return err
-	}
-	out, err := pgx.CollectRows(rows, pgx.RowToStructByPos[outboundView])
-	if err != nil {
-		return err
-	}
-	if out == nil {
-		out = []outboundView{}
 	}
 	writeJSON(w, 200, map[string]any{"outbound": out})
 	return nil

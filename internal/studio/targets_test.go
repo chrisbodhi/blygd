@@ -1,4 +1,4 @@
-package mention
+package studio
 
 import (
 	"testing"
@@ -6,7 +6,7 @@ import (
 	"github.com/chrisbodhi/blygd/internal/blyg"
 )
 
-// The receiver recognizes targets by the paths the studio writes them at
+// TargetItem recognizes targets by the paths the studio writes them at
 // (§15.3 step 1), so its patterns must accept exactly blyg's.
 func TestTargetPatternsMatchThePublishedLayout(t *testing.T) {
 	id := blyg.NewID()

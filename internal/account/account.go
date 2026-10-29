@@ -86,6 +86,16 @@ func (p *Principal) Can(scope string) bool {
 // Accounts manages users and tokens.
 type Accounts struct {
 	Pool *pgxpool.Pool
+	// Origins makes a new user's origin, inside the transaction that makes
+	// the user. The studio implements it.
+	Origins OriginMaker
+}
+
+// OriginMaker creates an origin and renders its first surface in the
+// caller's transaction, so no origin is ever committed without its
+// blyg.json. Accounts know users and tokens, not the studio's tables.
+type OriginMaker interface {
+	CreateOrigin(ctx context.Context, tx pgx.Tx, ownerID int64, baseURL, title string) (int64, error)
 }
 
 var (
@@ -103,8 +113,9 @@ func hashSecret(secret string) []byte {
 }
 
 // CreateUser creates a user and their path-mounted origin at
-// publicURL + handle + "/", and mints an all-scopes owner token. The
-// secret is returned once and never stored.
+// publicURL + handle + "/", rendered, and mints an all-scopes owner
+// token, all in one transaction. The secret is returned once and never
+// stored.
 func (a *Accounts) CreateUser(ctx context.Context, handle, publicURL, title string) (userID, originID int64, secret string, err error) {
 	handle = strings.ToLower(strings.TrimSpace(handle))
 	if slices.Contains(ReservedHandles, handle) || !validHandle(handle) {
@@ -119,8 +130,7 @@ func (a *Accounts) CreateUser(ctx context.Context, handle, publicURL, title stri
 		if err := tx.QueryRow(ctx, `INSERT INTO users (handle) VALUES ($1) RETURNING id`, handle).Scan(&userID); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(ctx, `INSERT INTO origins (owner_id, base_url, title) VALUES ($1, $2, $3) RETURNING id`,
-			userID, origin, title).Scan(&originID); err != nil {
+		if originID, err = a.Origins.CreateOrigin(ctx, tx, userID, origin, title); err != nil {
 			return err
 		}
 		secret, _, err = mint(ctx, tx, userID, "owner", []string{ScopeAll}, nil) // the root credential never expires

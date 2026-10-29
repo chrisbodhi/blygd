@@ -135,6 +135,22 @@ func lockOrigin(ctx context.Context, tx pgx.Tx, id int64) (*Origin, error) {
 	return scanOrigin(tx.QueryRow(ctx, `SELECT `+originCols+` FROM origins WHERE id = $1 FOR UPDATE`, id))
 }
 
+// CreateOrigin creates an origin for ownerID and renders its surface, an
+// empty index and feed and its manifest, in tx: an origin is never seen
+// without its blyg.json (§4). It implements account.OriginMaker.
+func (s *Studio) CreateOrigin(ctx context.Context, tx pgx.Tx, ownerID int64, baseURL, title string) (int64, error) {
+	var id int64
+	if err := tx.QueryRow(ctx, `INSERT INTO origins (owner_id, base_url, title) VALUES ($1, $2, $3) RETURNING id`,
+		ownerID, baseURL, title).Scan(&id); err != nil {
+		return 0, err
+	}
+	o, err := lockOrigin(ctx, tx, id)
+	if err != nil {
+		return 0, err
+	}
+	return id, s.renderAll(ctx, tx, o)
+}
+
 // OriginSettings are the editable origin fields; nil leaves a field alone.
 type OriginSettings struct {
 	Title          *string

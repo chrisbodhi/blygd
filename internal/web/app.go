@@ -28,6 +28,7 @@ type App struct {
 	Accounts *account.Accounts
 	Reader   *reader.Reader
 	Hoppers  *hopper.Store
+	Mentions *mention.Store
 	Hub      *events.Hub
 	Receiver *mention.Receiver
 	Workers  *mention.Workers
@@ -41,14 +42,15 @@ func New(cfg *config.Config, pool *pgxpool.Pool, log *slog.Logger) *App {
 	fc := &fetch.Client{UserAgent: cfg.Generator() + " (+" + cfg.GeneratorURL + ")", AllowPrivate: cfg.AllowPrivate}
 	st := &studio.Studio{Pool: pool, Generator: cfg.Generator(), GeneratorURL: cfg.GeneratorURL,
 		Level: cfg.Level, Fetch: fc, FragmentCap: cfg.FragmentCap, MediaMax: cfg.MediaMax}
-	accts := &account.Accounts{Pool: pool}
+	accts := &account.Accounts{Pool: pool, Origins: st}
 	rd := &reader.Reader{Pool: pool, Fetch: fc, Log: log,
 		ManualPollFloor: time.Duration(cfg.PollFloor) * time.Second}
 	st.Imports = rd // §10.2 step 2: imported snapshots reach a publish only through this
 	hoppers := &hopper.Store{Pool: pool}
+	mentions := &mention.Store{Pool: pool}
 	hub := &events.Hub{Pool: pool, Log: log}
 	receiver := &mention.Receiver{Pool: pool, Limits: mention.DefaultRateLimits}
-	api := &API{Pool: pool, Accounts: accts, Studio: st, Hoppers: hoppers, Reader: rd, Events: hub, Log: log}
+	api := &API{Pool: pool, Accounts: accts, Studio: st, Hoppers: hoppers, Mentions: mentions, Reader: rd, Events: hub, Log: log}
 	if cfg.RateLimits {
 		api.Limits = NewLimits(cfg.TrustProxy)
 	}
@@ -57,7 +59,7 @@ func New(cfg *config.Config, pool *pgxpool.Pool, log *slog.Logger) *App {
 	// the surface any remote client would see (and outside its budgets).
 	fc.Local, fc.LocalBase = surface, cfg.PublicURL
 	return &App{
-		Fetch: fc, Studio: st, Accounts: accts, Reader: rd, Hoppers: hoppers, Hub: hub, Receiver: receiver,
+		Fetch: fc, Studio: st, Accounts: accts, Reader: rd, Hoppers: hoppers, Mentions: mentions, Hub: hub, Receiver: receiver,
 		Workers: &mention.Workers{Pool: pool, Fetch: fc, Log: log, Display: st.ChangeDisplay},
 		API:     api, Surface: surface, Handler: Router(api, surface, log),
 	}

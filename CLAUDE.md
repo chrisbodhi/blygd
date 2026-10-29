@@ -42,8 +42,11 @@ on the command line or in the environment. Each test gets a fresh database.
   `[[id]]` anchor, or a frozen `cited`. Do not widen it. The reverse
   holds too: `internal/reader` never queries plane-1 tables, and reads a
   same-instance origin through its rendered surface. `internal/mention`
-  reads the mirror only in `importedPage` and never writes plane 1. A
-  planes test in each package checks its SQL, and `internal/archtest`
+  reads the mirror only in `importedPage`, never writes plane 1, and asks
+  the studio about its items (`studio.TargetItem`, `studio.Pinned`)
+  instead of reading their tables. `internal/account` leaves a new
+  user's origin to the studio (`OriginMaker`), and `internal/web` holds
+  no SQL. A planes test in each package checks its SQL, and `internal/archtest`
   allow-lists who may import whom, so a new edge between packages fails
   until its row says why.
 - **Render inside the transaction.** Any change to plane 1 re-renders its

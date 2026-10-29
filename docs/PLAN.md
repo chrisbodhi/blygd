@@ -485,6 +485,22 @@ them.
    later, and the receiver re-verifies it as an update (§15.4 rule 6).
    `TestShutdownHandsBackTheClaimInFlight` and
    `TestEachHandsBackTheClaimAShutdownInterrupts` cover the change.)*
+9. **Plane-1 schema outside the studio** (D4). `mention` read `items` and
+   `item_versions` to resolve targets and pins. Handlers in `web` held the
+   mention-list SQL and an overlay query. `account.CreateUser` inserted
+   the origin itself and left its first render to the caller, in a second
+   transaction, so a failed `Rebuild` left an origin with no `blyg.json`.
+   *(Done, 2026-10-29. `studio.TargetItem` and `studio.Pinned` answer the
+   receiver and verifier, and the path patterns moved with them.
+   `mention.Store` lists received and sent mentions, and validates the
+   filters as `apperr` kinds. `reader.Subscribed` answers the event
+   stream. `CreateUser` asks an `account.OriginMaker`, which the studio
+   implements, to insert and render the origin in the user's
+   transaction. The CLI and the e2e harness no longer rebuild after it.
+   Planes tests now cover this: `mention` may not read the studio's
+   tables, `account` may not touch plane 1, and `web` may hold no SQL.
+   `TestNewOriginIsServedAtOnce` and `TestFailedOriginLeavesNoUser` cover
+   the account change.)*
 
 ## Interop (2026-10-10)
 

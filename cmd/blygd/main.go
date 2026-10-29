@@ -85,9 +85,6 @@ func run(log *slog.Logger, args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := st.Rebuild(ctx, originID); err != nil {
-			return err
-		}
 		o, _ := st.GetOrigin(ctx, originID)
 		fmt.Printf("origin: %s\nowner token (shown once): %s\n", o.BaseURL, secret)
 		return nil

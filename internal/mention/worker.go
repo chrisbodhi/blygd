@@ -14,6 +14,7 @@ import (
 	"github.com/chrisbodhi/blygd/internal/batch"
 	"github.com/chrisbodhi/blygd/internal/events"
 	"github.com/chrisbodhi/blygd/internal/fetch"
+	"github.com/chrisbodhi/blygd/internal/studio"
 	"github.com/chrisbodhi/blygd/internal/surface"
 )
 
@@ -158,12 +159,7 @@ func (wk *Workers) VerifyBatch(ctx context.Context) (int, error) {
 }
 
 func (wk *Workers) pinned(ctx context.Context, itemID string) func(int) bool {
-	return func(v int) bool {
-		var ok bool
-		err := wk.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM item_versions
-			WHERE item_id = $1 AND version = $2 AND pinned_at IS NOT NULL)`, itemID, v).Scan(&ok)
-		return err == nil && ok
-	}
+	return func(v int) bool { return studio.Pinned(ctx, wk.Pool, itemID, v) }
 }
 
 func (wk *Workers) recordInbound(ctx context.Context, c inboundClaim, out Outcome) error {
