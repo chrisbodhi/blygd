@@ -238,13 +238,16 @@ sudo systemctl start blygd-backup                      # a fresh dump, offsite t
 sudo cp /usr/local/bin/blygd /usr/local/bin/blygd.prev
 sudo install -m755 /tmp/blygd /usr/local/bin/blygd
 sudo systemctl restart blygd
-sudo journalctl -u blygd -n 30 --no-pager              # "migrated" from..to, then "listening"
+sudo journalctl -u blygd -n 30 --no-pager              # "migrated" from..to, then "listening" with its commit
 curl -4 -sI https://<host>/healthz
+blygd version                                          # commit, Go and x/net, for DEPLOYS.md
 ```
 
 Then add a row to [DEPLOYS.md](DEPLOYS.md): the commit, the toolchain, and
-`shasum -a 256 bin/blygd-linux` of what you shipped. Nothing else records
-what is live.
+`shasum -a 256 bin/blygd-linux` of what you shipped. The binary names the
+commit it was built from, but a commit ending `-dirty` was built from a tree
+with changes, untracked files included, and so is not that commit: build
+from a clean checkout. The checksum is what ties the row to the file.
 
 blygd migrates on start, so expect a few seconds of downtime. To separate
 the schema change from the restart, set `BLYGD_MIGRATE_ON_START=false` in

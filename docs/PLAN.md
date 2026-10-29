@@ -567,6 +567,21 @@ thumb.
 - **Deploy.** One binary under systemd, Caddy in front for TLS until
   custom domains move TLS in-process, nightly `pg_dump`. Set
   `BLYGD_TRUST_PROXY=true` behind Caddy.
+  Hardening it (2026-10-29), before the 0.3 → 0.4 deploy, which carries
+  migrations 003–006:
+  1. Rehearse each migrating release on a restored copy of production.
+  2. `scripts/deploy.sh`: build from a clean checkout, back up, dry-run
+     the migrations on a scratch restore of that backup, install keeping
+     `.prev`, check health and the running checksum, and put the old
+     binary back on failure when nothing migrated.
+  3. The binary says what it is. *(Done: `blygd version` prints the
+     commit, Go and x/net the toolchain stamped; the "listening" log line
+     carries the commit; `-dirty` marks a tree with changes.)*
+  4. Caddy holds requests across a restart (`lb_try_duration`) instead of
+     answering 502.
+  Then alerts (an uptime check, and a ping from each good backup), a
+  provisioning script with a timed restore drill, and CI once the code
+  has a host.
 - **Security posture: malicious and overeager requests.** Today's limits
   are local: mention receipt per host, domain and globally (§15.3), 8
   event streams per user, a 1 MiB JSON body cap, the media cap, server

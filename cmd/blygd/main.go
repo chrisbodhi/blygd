@@ -2,6 +2,7 @@
 // one binary over Postgres. `serve` also runs the mention workers and the
 // reader's poller.
 //
+//	blygd version                            print the commit and toolchain this binary was built from
 //	blygd serve                              run the server (migrates first, unless BLYGD_MIGRATE_ON_START=false)
 //	blygd migrate [status]                   apply pending schema migrations, or report them
 //	blygd user add <handle> [title]          create a user, their origin and an owner token
@@ -41,6 +42,7 @@ func main() {
 }
 
 var usage = `usage:
+  blygd version
   blygd serve
   blygd migrate [status]
   blygd user add <handle> [title]
@@ -53,6 +55,10 @@ scopes: * ` + strings.Join(account.AllScopes, " ")
 func run(log *slog.Logger, args []string) error {
 	if len(args) == 0 {
 		args = []string{"serve"}
+	}
+	if len(args) == 1 && args[0] == "version" {
+		readBuild().write(os.Stdout) // needs no settings or database
+		return nil
 	}
 	cfg, err := config.Load()
 	if err != nil {
@@ -249,7 +255,7 @@ func serve(ctx context.Context, log *slog.Logger, cfg *config.Config, app *web.A
 	}
 	errc := make(chan error, 1)
 	go func() {
-		log.Info("listening", "addr", cfg.Listen, "public", cfg.PublicURL)
+		log.Info("listening", "addr", cfg.Listen, "public", cfg.PublicURL, "commit", readBuild().commit())
 		errc <- srv.ListenAndServe()
 	}()
 	var err error
