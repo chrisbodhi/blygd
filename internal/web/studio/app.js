@@ -346,6 +346,7 @@ function viewSignIn() {
         route();
       },
     }, h("label", { for: "token" }, "Token"), input, h("div", { class: "row" }, h("button", { class: "primary" }, "Sign in"))),
+    h("p", { class: "muted small" }, "Writing a tool of your own? See the ", h("a", { href: "/studio/api/" }, "API reference"), "."),
   );
 }
 

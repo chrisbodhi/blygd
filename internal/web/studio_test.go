@@ -12,7 +12,8 @@ import (
 
 func TestStudioIsServed(t *testing.T) {
 	h := Router(&API{}, &Surface{}, discardLog())
-	for path, ctype := range map[string]string{"/studio/": "text/html", "/studio/app.js": "javascript", "/studio/app.css": "text/css"} {
+	for path, ctype := range map[string]string{"/studio/": "text/html", "/studio/app.js": "javascript", "/studio/app.css": "text/css",
+		"/studio/api/": "text/html", "/studio/api/docs.js": "javascript", "/studio/api/docs.css": "text/css"} {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
 		if rec.Code != 200 || !strings.Contains(rec.Header().Get("Content-Type"), ctype) {
@@ -33,23 +34,41 @@ func TestStudioIsServed(t *testing.T) {
 // else's HTML (§14). It is parsed inert and rebuilt from fresh nodes, so
 // no foreign node or attribute (but a checked href) reaches the page.
 func TestStudioNeverWritesHTML(t *testing.T) {
-	f, err := studioFiles.Open("studio/app.js")
+	// An empty or truncated file passes every check below, so first make
+	// sure each is what it should be.
+	for file, markers := range map[string][]string{
+		"studio/app.js":      {"function route(", "function viewEditor(", "function startStream(", "route();"},
+		"studio/api/docs.js": {"function render(", "function operation(", `fetch("/api/openapi.json")`},
+	} {
+		f, err := studioFiles.Open(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		src, _ := io.ReadAll(f)
+		for _, want := range markers {
+			if !strings.Contains(string(src), want) {
+				t.Fatalf("%s lacks %q: is it truncated?", file, want)
+			}
+		}
+		if m := regexp.MustCompile(`innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval\(|new Function`).Find(src); m != nil {
+			t.Errorf("%s uses %q: build nodes with textContent instead", file, m)
+		}
+		if m := regexp.MustCompile(`cloneNode|importNode|adoptNode|\.attributes\b|getAttributeNames|getAttribute\("(?:[^h]|h[^r])`).Find(src); m != nil {
+			t.Errorf("%s uses %q: rebuild foreign nodes, never copy them or their attributes", file, m)
+		}
+	}
+}
+
+// The API reference reads the public description and nothing else: it
+// shares the studio's origin, so it must not touch the studio's token.
+func TestAPIReferenceHoldsNoToken(t *testing.T) {
+	f, err := studioFiles.Open("studio/api/docs.js")
 	if err != nil {
 		t.Fatal(err)
 	}
 	src, _ := io.ReadAll(f)
-	// An empty or truncated file passes every check below, so first make
-	// sure it is the studio.
-	for _, want := range []string{"function route(", "function viewEditor(", "function startStream(", "route();"} {
-		if !strings.Contains(string(src), want) {
-			t.Fatalf("app.js lacks %q: is it truncated?", want)
-		}
-	}
-	if m := regexp.MustCompile(`innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval\(|new Function`).Find(src); m != nil {
-		t.Errorf("app.js uses %q: build nodes with textContent instead", m)
-	}
-	if m := regexp.MustCompile(`cloneNode|importNode|adoptNode|\.attributes\b|getAttributeNames|getAttribute\("(?:[^h]|h[^r])`).Find(src); m != nil {
-		t.Errorf("app.js uses %q: rebuild foreign nodes, never copy them or their attributes", m)
+	if m := regexp.MustCompile(`(?i)localStorage|sessionStorage|indexedDB|document\.cookie|authorization|bearer|blygd\.token`).Find(src); m != nil {
+		t.Errorf("docs.js mentions %q: the reference never reads or sends a token", m)
 	}
 }
 
@@ -83,7 +102,7 @@ func TestLLMSTxt(t *testing.T) {
 	}
 	// A client that holds a token learns where the blyg is mounted from
 	// /api/me: nothing is served at the host root.
-	for _, want := range []string{"(/api/openapi.json)", "(/studio/)", "https://github.com/blygger/blygger-spec", "`GET /api/me`"} {
+	for _, want := range []string{"(/api/openapi.json)", "(/studio/api/)", "(/studio/)", "https://github.com/blygger/blygger-spec", "`GET /api/me`"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("llms.txt lacks %s", want)
 		}

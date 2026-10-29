@@ -1,0 +1,49 @@
+/* The API reference, on top of the studio's app.css (its colours and type). */
+main.docs { max-width: 56rem; }
+#tags { max-width: 56rem; overflow-x: auto; scrollbar-width: none; }
+#tags a { flex: 0 0 auto; padding: .8rem .7rem; }
+.docs code { font: .9em ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+.docs p code, .docs .desc code { background: var(--card); border: 1px solid var(--line); border-radius: .25rem; padding: 0 .2rem; }
+.docs section { scroll-margin-top: 3.5rem; }
+.docs h2 { font-size: 1.15rem; margin-top: 2rem; text-transform: capitalize; }
+.docs h3 { font-size: .95rem; margin: 1rem 0 .4rem; }
+.docs .card { scroll-margin-top: 3.5rem; }
+
+.op { padding: 0; }
+.op > summary { display: flex; gap: .6rem; align-items: baseline; flex-wrap: wrap; padding: .75rem 1rem; cursor: pointer; list-style: none; }
+.op > summary::-webkit-details-marker { display: none; }
+.op > :not(summary) { margin-left: 1rem; margin-right: 1rem; }
+.op[open] { padding-bottom: .75rem; }
+.op[open] > summary { border-bottom: 1px solid var(--line); margin-bottom: .6rem; }
+.op .path { font-weight: 600; }
+.op .summary { color: var(--muted); flex: 1 1 14rem; }
+
+.method { flex: 0 0 4.2rem; text-align: center; font-size: .75rem; font-weight: 700; letter-spacing: .04em;
+  padding: .15rem 0; border-radius: .3rem; color: var(--accent-fg); background: var(--muted); }
+.method.get { background: var(--accent); }
+.method.post { background: #2f5d8a; }
+.method.patch, .method.put { background: #8a6a2f; }
+.method.delete { background: var(--danger); }
+
+.facts { display: flex; gap: .4rem; flex-wrap: wrap; margin: .4rem 0; }
+.fact, .req { display: inline-block; font-size: .78rem; padding: .05rem .4rem; border: 1px solid var(--line);
+  border-radius: .3rem; color: var(--muted); overflow-wrap: anywhere; text-decoration: none; }
+.req { color: var(--danger); border-color: currentColor; }
+
+.field { display: flex; gap: .5rem; align-items: baseline; flex-wrap: wrap; }
+.field .name { font-weight: 600; }
+.field .type { font-size: .9rem; }
+.fields { list-style: none; margin: .3rem 0; padding: 0 0 0 .8rem; border-left: 2px solid var(--line); }
+.fields > li { margin: .45rem 0; }
+.desc { margin: .15rem 0 0; color: var(--muted); font-size: .9rem; }
+.schema { margin: .3rem 0 .6rem; }
+
+.response { margin: .5rem 0; }
+.code { font-weight: 700; font-variant-numeric: tabular-nums; }
+.code.c2 { color: var(--accent); }
+.code.c4, .code.c5 { color: var(--danger); }
+
+@media (prefers-color-scheme: dark) {
+  .method.post { background: #6f9ccc; }
+  .method.patch, .method.put { background: #c9a466; }
+}

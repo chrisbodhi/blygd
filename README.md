@@ -78,8 +78,9 @@ curl -s localhost:8080/chris/items/$ID.json
 ## API
 
 The API is described by an OpenAPI 3.1 document, served without a token
-at `GET /api/openapi.json` (source: `internal/web/openapi.json`). Every
-other route takes `Authorization: Bearer <token>` and needs at most one
+at `GET /api/openapi.json` (source: `internal/web/openapi.json`), and
+rendered for people at `/studio/api/`, with each operation's scope and
+cost class. Every other route takes `Authorization: Bearer <token>` and needs at most one
 scope, named in the document's security requirement:
 
 | Scope | Allows |
