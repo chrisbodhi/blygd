@@ -179,3 +179,55 @@ func TestEventStreamOutlivesWriteTimeout(t *testing.T) {
 	}
 	next(t, ch, "mention")
 }
+
+// A user's streams hear every change to their items, whichever client made
+// it, with the draft's revision so a client can tell its own edit from
+// another's. Nobody else hears them, and a change that rolls back is never
+// heard.
+func TestItemEvents(t *testing.T) {
+	e := newEnv(t, mention.DefaultRateLimits)
+	alice, bob := e.user("alice"), e.user("bob")
+	<-e.hub.Ready()
+	aliceEv, _ := openStream(t, e.srv.URL, alice.token)
+	bobEv, _ := openStream(t, e.srv.URL, bob.token)
+	readerTok := alice.api("POST", "/tokens", map[string]any{"name": "r", "scopes": []string{"reader:read"}}).json(t)["token"].(string)
+	readerEv, _ := openStream(t, e.srv.URL, readerTok)
+	want := func(change, id string, version int, rev any) {
+		t.Helper()
+		ev := next(t, aliceEv, "item")
+		if ev.Data["id"] != id || ev.Data["change"] != change || ev.Data["draft_rev"] != rev ||
+			(version > 0) != (ev.Data["version"] != nil) || version > 0 && ev.Data["version"] != float64(version) {
+			t.Fatalf("want %s of %s (v%d, rev %v), got %v", change, id, version, rev, ev.Data)
+		}
+	}
+
+	r := alice.api("POST", "/items", map[string]any{"content_md": "one"})
+	expect(t, r, 201)
+	id := r.json(t)["id"].(string)
+	want("created", id, 0, r.json(t)["draft_rev"])
+	r = alice.api("PATCH", "/items/"+id, map[string]any{"content_md": "two"})
+	expect(t, r, 200)
+	want("edited", id, 0, r.json(t)["draft_rev"])
+	r = alice.api("POST", "/items/"+id+"/publish", nil)
+	expect(t, r, 200)
+	want("published", id, 1, r.json(t)["item"].(map[string]any)["draft_rev"])
+	expect(t, alice.api("POST", "/items/"+id+"/versions/1/pin", nil), 200)
+	want("pinned", id, 1, nil)
+	expect(t, alice.api("POST", "/items/"+id+"/versions/1/pin", nil), 200)
+	none(t, aliceEv, "item", "pinning a pinned version changes nothing")
+	expect(t, alice.api("POST", "/items/"+id+"/withdraw", nil), 200)
+	want("withdrawn", id, 2, nil)
+
+	// Over the fragment cap: the publish rolls back, and so does its event.
+	r = alice.api("POST", "/items", map[string]any{"content_md": strings.Repeat("x", 2001)})
+	expect(t, r, 201)
+	long := r.json(t)["id"].(string)
+	want("created", long, 0, r.json(t)["draft_rev"])
+	expect(t, alice.api("POST", "/items/"+long+"/publish", nil), 422)
+	none(t, aliceEv, "item", "a refused publish")
+	expect(t, alice.api("DELETE", "/items/"+long, nil), 204)
+	want("deleted", long, 0, nil)
+
+	none(t, bobEv, "item", "alice's items are not bob's")
+	none(t, readerEv, "item", "a reader:read token hears no items")
+}

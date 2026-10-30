@@ -11,8 +11,9 @@ import (
 )
 
 // GET /api/events is a Server-Sent Events stream of hints for the token's
-// user: import progress on their subscriptions (reader:read), and their
-// origin's mentions and outbound sends (mentions:read). An event says what
+// user: import progress on their subscriptions (reader:read), changes to
+// their own items (items:read), and their origin's mentions and outbound
+// sends (mentions:read). An event says what
 // changed, never the state itself, so a client re-fetches what it shows and
 // a dropped stream loses nothing. Browsers read it with fetch(), which can
 // send the Authorization header (EventSource cannot).
@@ -111,6 +112,8 @@ func (a *API) visible(r *http.Request, p *account.Principal, originID int64, ev 
 			return false
 		}
 		return a.Reader.Subscribed(r.Context(), p.UserID, ev.RemoteOriginID)
+	case "item":
+		return p.Can(account.ScopeItemsRead) && ev.OriginID == originID
 	case "mention", "outbound":
 		return p.Can(account.ScopeMentionsRead) && ev.OriginID == originID
 	}

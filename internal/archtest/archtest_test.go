@@ -24,7 +24,7 @@ const module = "github.com/chrisbodhi/blygd/"
 var imports = map[string][]string{
 	"cmd/blygd":         {"account", "config", "db", "web"},
 	"internal/web":      {"account", "apperr", "blyg", "config", "events", "fetch", "hopper", "limit", "mention", "reader", "studio"}, // New is the composition root
-	"internal/studio":   {"apperr", "blyg", "fetch", "surface", "tx"},                                                                 // writes the surface: nothing that reads the mirror
+	"internal/studio":   {"apperr", "blyg", "events", "fetch", "surface", "tx"},                                                       // writes the surface: nothing that reads the mirror; events only sends hints
 	"internal/reader":   {"apperr", "batch", "blyg", "events", "fetch", "studio", "tx"},
 	"internal/mention":  {"apperr", "batch", "blyg", "events", "fetch", "studio", "surface", "tx"},
 	"internal/hopper":   {"apperr", "blyg", "tx"},

@@ -2,6 +2,8 @@ package studio
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/chrisbodhi/blygd/internal/blyg"
+	"github.com/chrisbodhi/blygd/internal/events"
 	"github.com/chrisbodhi/blygd/internal/tx"
 )
 
@@ -33,6 +36,33 @@ type Item struct {
 	PublishedAt      *time.Time      `json:"published_at"`
 	CreatedAt        time.Time       `json:"created_at"`
 	DraftUpdatedAt   time.Time       `json:"draft_updated_at"`
+	// DraftRev names the draft's state: what an edit changes and what a
+	// publish reads. A client sends it back to edit or publish only the
+	// draft it saw.
+	DraftRev string `json:"draft_rev"`
+}
+
+// draftRev is a hash of the draft, not a counter, so two edits that land on
+// the same draft land on the same revision.
+func draftRev(it *Item) string {
+	b, _ := json.Marshal([]any{it.DraftMD, it.DraftNote, it.Generation})
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:16])
+}
+
+// itemEvent is the hint the owner's open clients hear when an item changes
+// (GET /api/events). It names the change, never the content.
+type itemEvent struct {
+	ID       string `json:"id"`
+	Change   string `json:"change"` // created, edited, deleted, published, withdrawn, pinned
+	Version  int    `json:"version,omitempty"`
+	DraftRev string `json:"draft_rev,omitempty"`
+}
+
+// notifyItem sends an item event inside tx, so it is heard on commit and
+// never for a change that rolled back.
+func notifyItem(ctx context.Context, tx pgx.Tx, originID int64, ev itemEvent) error {
+	return events.Notify(ctx, tx, "item", originID, 0, ev)
 }
 
 // State is draft, published or withdrawn.
@@ -55,7 +85,11 @@ func scanItem(row pgx.Row, extra ...any) (*Item, error) {
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, notFound("item not found")
 	}
-	return &it, err
+	if err != nil {
+		return nil, err
+	}
+	it.DraftRev = draftRev(&it)
+	return &it, nil
 }
 
 // Version is one published version.
@@ -258,8 +292,17 @@ func (s *Studio) CreateDraft(ctx context.Context, originID int64, in NewDraft) (
 			in.ContentMD = body
 		}
 	}
-	return scanItem(s.Pool.QueryRow(ctx, `INSERT INTO items (id, origin_id, authored_kind, draft_md, forked_from, draft_stub_of)
-		VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb) RETURNING `+itemCols, blyg.NewID(), originID, in.Kind, in.ContentMD, forked, stub))
+	var it *Item
+	err := tx.Run(ctx, s.Pool, pgx.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		it, err = scanItem(tx.QueryRow(ctx, `INSERT INTO items (id, origin_id, authored_kind, draft_md, forked_from, draft_stub_of)
+			VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb) RETURNING `+itemCols, blyg.NewID(), originID, in.Kind, in.ContentMD, forked, stub))
+		if err != nil {
+			return err
+		}
+		return notifyItem(ctx, tx, originID, itemEvent{ID: it.ID, Change: "created", DraftRev: it.DraftRev})
+	})
+	return it, err
 }
 
 // DraftEdit changes a draft; nil leaves a field alone.
@@ -269,6 +312,8 @@ type DraftEdit struct {
 	// Generation is what the client declares about each [TK] scope, by
 	// position: [{"model": …, "at": …}] (§5.7). JSON null clears it.
 	Generation json.RawMessage
+	// IfRev, when set, applies the edit only to the draft at that revision.
+	IfRev string
 }
 
 // UpdateDraft edits the draft content, the note for the next publish, and
@@ -283,12 +328,30 @@ func (s *Studio) UpdateDraft(ctx context.Context, originID int64, id string, in 
 		}
 		gen = norm
 	}
-	return scanItem(s.Pool.QueryRow(ctx, `UPDATE items SET
-		draft_md = coalesce($3, draft_md),
-		draft_note = CASE WHEN $4::text IS NULL THEN draft_note WHEN $4 = '' THEN NULL ELSE $4 END,
-		draft_generation = CASE WHEN $5::jsonb IS NULL THEN draft_generation WHEN $5::jsonb = 'null'::jsonb THEN NULL ELSE $5::jsonb END,
-		draft_updated_at = now()
-		WHERE origin_id = $1 AND id = $2 RETURNING `+itemCols, originID, id, in.ContentMD, in.Note, gen))
+	var it *Item
+	err := tx.Run(ctx, s.Pool, pgx.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
+		if in.IfRev != "" {
+			cur, err := scanItem(tx.QueryRow(ctx, `SELECT `+itemCols+` FROM items WHERE origin_id = $1 AND id = $2 FOR UPDATE`, originID, id))
+			if err != nil {
+				return err
+			}
+			if cur.DraftRev != in.IfRev {
+				return stale("the draft changed since you read it; read it again")
+			}
+		}
+		var err error
+		it, err = scanItem(tx.QueryRow(ctx, `UPDATE items SET
+			draft_md = coalesce($3, draft_md),
+			draft_note = CASE WHEN $4::text IS NULL THEN draft_note WHEN $4 = '' THEN NULL ELSE $4 END,
+			draft_generation = CASE WHEN $5::jsonb IS NULL THEN draft_generation WHEN $5::jsonb = 'null'::jsonb THEN NULL ELSE $5::jsonb END,
+			draft_updated_at = now()
+			WHERE origin_id = $1 AND id = $2 RETURNING `+itemCols, originID, id, in.ContentMD, in.Note, gen))
+		if err != nil {
+			return err
+		}
+		return notifyItem(ctx, tx, originID, itemEvent{ID: id, Change: "edited", DraftRev: it.DraftRev})
+	})
+	return it, err
 }
 
 // normalizeGeneration checks a generation array and puts each `at` in the
@@ -325,11 +388,19 @@ func normalizeGeneration(raw json.RawMessage) (string, error) {
 // a hard delete; nothing was ever public). Published items can only be
 // withdrawn.
 func (s *Studio) DeleteDraft(ctx context.Context, originID int64, id string) error {
-	tag, err := s.Pool.Exec(ctx, `DELETE FROM items WHERE origin_id = $1 AND id = $2 AND version = 0`, originID, id)
+	deleted := false
+	err := tx.Run(ctx, s.Pool, pgx.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `DELETE FROM items WHERE origin_id = $1 AND id = $2 AND version = 0`, originID, id)
+		if err != nil || tag.RowsAffected() == 0 {
+			return err
+		}
+		deleted = true
+		return notifyItem(ctx, tx, originID, itemEvent{ID: id, Change: "deleted"})
+	})
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
+	if !deleted {
 		var v int
 		if err := s.Pool.QueryRow(ctx, `SELECT version FROM items WHERE origin_id = $1 AND id = $2`, originID, id).Scan(&v); err != nil {
 			return notFound("item not found")
@@ -351,6 +422,8 @@ type PublishOptions struct {
 	Note *string // overrides the draft note when set
 	// NoteGenerated says the client wrote the note, not the author (§5.2).
 	NoteGenerated bool
+	// IfRev, when set, publishes only the draft at that revision.
+	IfRev string
 }
 
 // Publish publishes the draft as the next version. A thread's directives
@@ -361,6 +434,9 @@ func (s *Studio) Publish(ctx context.Context, originID int64, id string, opts Pu
 	pre, _, err := s.GetItem(ctx, originID, id)
 	if err != nil {
 		return nil, err
+	}
+	if opts.IfRev != "" && pre.DraftRev != opts.IfRev {
+		return nil, stale("the draft changed since you read it; read it again")
 	}
 	o, err := s.GetOrigin(ctx, originID)
 	if err != nil {
@@ -398,9 +474,10 @@ func (s *Studio) Publish(ctx context.Context, originID int64, id string, opts Pu
 		if strings.TrimSpace(it.DraftMD) == "" {
 			return invalid("nothing to publish: the draft is empty")
 		}
-		if it.DraftMD != pre.DraftMD {
-			// The imports were looked up for the draft read above.
-			return conflict("the draft changed while publishing; publish again")
+		// The imports were looked up for the draft read above, and a
+		// conditional publish is of the draft the client saw.
+		if it.DraftMD != pre.DraftMD || opts.IfRev != "" && it.DraftRev != opts.IfRev {
+			return stale("the draft changed while publishing; read it again")
 		}
 		page := blyg.DefaultPage(it.Kind, it.ID)
 		if it.Page != nil {
@@ -553,7 +630,7 @@ func (s *Studio) Publish(ctx context.Context, originID int64, id string, opts Pu
 			return err
 		}
 		res.Item, res.Version = it, v
-		return nil
+		return notifyItem(ctx, tx, originID, itemEvent{ID: id, Change: "published", Version: next, DraftRev: it.DraftRev})
 	})
 	if err != nil {
 		return nil, err
@@ -622,7 +699,7 @@ func (s *Studio) Withdraw(ctx context.Context, originID int64, id string, note *
 			return err
 		}
 		res.Item, res.Version = it, v
-		return nil
+		return notifyItem(ctx, tx, originID, itemEvent{ID: id, Change: "withdrawn", Version: v.Version})
 	})
 	if err != nil {
 		return nil, err
@@ -649,14 +726,18 @@ func (s *Studio) Pin(ctx context.Context, originID int64, id string, n int) (*Ve
 		if v.Kind == "withdrawn" {
 			return invalid("a withdrawal endcap cannot be pinned (§8 rule 2)")
 		}
-		if v.PinnedAt == nil {
+		pinned := v.PinnedAt == nil
+		if pinned {
 			if v, err = scanVersion(tx.QueryRow(ctx, `UPDATE item_versions SET pinned_at = $3
 				WHERE item_id = $1 AND version = $2 RETURNING `+versionCols, id, n, s.now())); err != nil {
 				return err
 			}
 		}
 		out = v
-		return s.renderItem(ctx, tx, o, id)
+		if err := s.renderItem(ctx, tx, o, id); err != nil || !pinned {
+			return err // pinning a pinned version changes nothing to hear about
+		}
+		return notifyItem(ctx, tx, originID, itemEvent{ID: id, Change: "pinned", Version: n})
 	})
 	return out, err
 }

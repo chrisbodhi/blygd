@@ -499,3 +499,55 @@ func TestTokensAndHoppers(t *testing.T) {
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
+
+// draft_rev makes an edit or a publish conditional on the draft the client
+// saw, so two clients cannot overwrite each other unseen.
+func TestDraftRevision(t *testing.T) {
+	e := newEnv(t, mention.DefaultRateLimits)
+	alice := e.user("alice")
+	r := alice.api("POST", "/items", map[string]any{"content_md": "one"})
+	expect(t, r, 201)
+	id, rev1 := r.json(t)["id"].(string), r.json(t)["draft_rev"]
+	if got := alice.api("GET", "/items/"+id, nil).json(t)["draft_rev"]; got != rev1 {
+		t.Fatalf("GET draft_rev %v, created as %v", got, rev1)
+	}
+
+	// Another client edits.
+	r = alice.api("PATCH", "/items/"+id, map[string]any{"content_md": "two"})
+	expect(t, r, 200)
+	rev2 := r.json(t)["draft_rev"]
+	if rev2 == rev1 {
+		t.Fatal("an edit kept the revision")
+	}
+
+	// The first client's edit and publish, both of "one", are refused, and
+	// nothing changes.
+	r = alice.api("PATCH", "/items/"+id, map[string]any{"content_md": "one, edited", "draft_rev": rev1})
+	expect(t, r, 409)
+	if r.json(t)["error"] != "stale" {
+		t.Fatalf("stale edit: %s", r.body)
+	}
+	r = alice.api("POST", "/items/"+id+"/publish", map[string]any{"draft_rev": rev1})
+	expect(t, r, 409)
+	if r.json(t)["error"] != "stale" {
+		t.Fatalf("stale publish: %s", r.body)
+	}
+	if it := alice.api("GET", "/items/"+id, nil).json(t); it["draft_md"] != "two" || it["version"] != float64(0) {
+		t.Fatalf("after stale writes: %v", it)
+	}
+
+	// Against the current revision, both go through.
+	r = alice.api("PATCH", "/items/"+id, map[string]any{"note": "first", "draft_rev": rev2})
+	expect(t, r, 200)
+	rev3 := r.json(t)["draft_rev"]
+	if rev3 == rev2 {
+		t.Fatal("a note edit kept the revision")
+	}
+	expect(t, alice.api("POST", "/items/"+id+"/publish", map[string]any{"draft_rev": rev3}), 200)
+
+	// The revision is the draft's content: equal drafts, equal revisions.
+	r = alice.api("PATCH", "/items/"+id, map[string]any{"content_md": "one"})
+	if r.json(t)["draft_rev"] != rev1 {
+		t.Fatalf("draft back to \"one\" has revision %v, not %v", r.json(t)["draft_rev"], rev1)
+	}
+}

@@ -540,6 +540,16 @@ a route table, and the tests compare that table with the document both
 ways, scopes included. They also validate every response the e2e suite
 sees against the documented schema.
 
+**Draft revisions.** Every item carries `draft_rev`, a hash of what an
+edit changes and a publish reads (`draft_md`, `draft_note`, generation).
+`PATCH` and publish take it back as an optional precondition and answer
+`409 stale` when the draft has moved on, so two clients cannot overwrite
+each other unseen. It is a body field, not an `ETag`: an `ETag` names the
+whole representation, which pins and publishes change while the draft
+does not, and a field also reaches clients through listings. A hash
+rather than a counter needs no column, and two edits that arrive
+at the same draft agree.
+
 Bearer tokens are stored as SHA-256 hashes, shown once at mint time,
 revocable, and scoped. Consequential public acts have their own scopes, so
 a drafting tool or an agent can be given `items:write` without the power
@@ -609,15 +619,19 @@ reconnect, re-fetch.
 
 - **Sources:** the poller after each batch (`import`: `items`, `more`,
   `error`); the receiver and verifier (`mention`); the sender
-  (`outbound`). Progress is never stored: it is transient, and the
+  (`outbound`); the studio, on every change to an own item (`item`:
+  `change`, and `version` or `draft_rev` where they apply, so a client
+  can tell its own edit from another's). A studio event is sent inside
+  the change's transaction, so it is heard on commit and never for a
+  change that rolled back. Progress is never stored: it is transient, and the
   counts are in the API.
 - **Transport:** Postgres `LISTEN/NOTIFY` on `blygd_events`, so any
   process can send and every process's streams hear. `internal/events`
   has one hijacked listening connection and a fan-out hub. A slow
   subscriber drops hints rather than slowing others.
 - **Per stream:** events are filtered by scope and ownership (imports
-  of the user's subscriptions with `reader:read`; their origin's
-  mentions and sends with `mentions:read`). The server's write deadline
+  of the user's subscriptions with `reader:read`; their own items with
+  `items:read`; their origin's mentions and sends with `mentions:read`). The server's write deadline
   is lifted for the stream, there is a heartbeat every 25 s, and at most
   8 streams per user. Requests share the process context, so a shutdown
   ends streams at once.

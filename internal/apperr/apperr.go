@@ -16,6 +16,7 @@ const (
 	NotFound        // nothing by that name is the caller's
 	Invalid         // well formed, but the domain refuses it (a draft that cannot publish)
 	Conflict        // it clashes with what exists: a duplicate, a limit reached
+	Stale           // it changed since the caller read it: read again, then retry
 )
 
 // Kinded is an error that knows its kind. *Error is one; studio.Error is

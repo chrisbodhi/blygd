@@ -179,6 +179,7 @@ var kinds = map[apperr.Kind]struct {
 	apperr.NotFound:   {http.StatusNotFound, "not_found"},
 	apperr.Invalid:    {http.StatusUnprocessableEntity, "invalid"},
 	apperr.Conflict:   {http.StatusConflict, "conflict"},
+	apperr.Stale:      {http.StatusConflict, "stale"},
 }
 
 // handleErr is the one place an error becomes a response. Handlers return
@@ -441,6 +442,7 @@ func (a *API) patchItem(w http.ResponseWriter, r *http.Request) error {
 		ContentMD  *string         `json:"content_md"`
 		Note       *string         `json:"note"`
 		Generation json.RawMessage `json:"generation"`
+		DraftRev   string          `json:"draft_rev"`
 	}
 	if err := decode(r, &in); err != nil {
 		return err
@@ -449,7 +451,7 @@ func (a *API) patchItem(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	it, err := a.Studio.UpdateDraft(r.Context(), o.ID, r.PathValue("id"), studio.DraftEdit{ContentMD: in.ContentMD, Note: in.Note, Generation: in.Generation})
+	it, err := a.Studio.UpdateDraft(r.Context(), o.ID, r.PathValue("id"), studio.DraftEdit{ContentMD: in.ContentMD, Note: in.Note, Generation: in.Generation, IfRev: in.DraftRev})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return &httpError{404, "not_found", "item not found"}
 	}
@@ -491,6 +493,7 @@ func (a *API) publish(w http.ResponseWriter, r *http.Request) error {
 	var in struct {
 		Note          *string `json:"note"`
 		NoteGenerated bool    `json:"note_generated"`
+		DraftRev      string  `json:"draft_rev"`
 	}
 	if r.ContentLength != 0 {
 		if err := decode(r, &in); err != nil {
@@ -501,7 +504,7 @@ func (a *API) publish(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	res, err := a.Studio.Publish(r.Context(), o.ID, r.PathValue("id"), studio.PublishOptions{Note: in.Note, NoteGenerated: in.NoteGenerated})
+	res, err := a.Studio.Publish(r.Context(), o.ID, r.PathValue("id"), studio.PublishOptions{Note: in.Note, NoteGenerated: in.NoteGenerated, IfRev: in.DraftRev})
 	if err != nil {
 		return err
 	}

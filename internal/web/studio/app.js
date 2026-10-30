@@ -439,6 +439,7 @@ async function viewEditor(id) {
     if (!it) return;
   }
   let kind = it.kind;
+  let rev = it.draft_rev; // the draft this editor saw: saves and publishes are of it alone
   const placeholder = () => (kind === "thread"
     ? "Long-form markdown. Quote with a line of ![[id]]; link with [[id]]." : "Say one thing.");
   const text = h("textarea", { id: "md", name: "md", placeholder: placeholder() });
@@ -464,18 +465,19 @@ async function viewEditor(id) {
     if (!id) {
       const created = await api("POST", "/items", { kind, content_md: text.value });
       id = created.id;
+      rev = created.draft_rev;
       history.replaceState(null, "", "#item/" + id);
       title.textContent = `Draft ${kind}`;
       if (kindSeg) kindSeg.remove(); // the kind is fixed once the item exists
     }
-    await api("PATCH", "/items/" + id, { content_md: text.value, note: note.value });
+    rev = (await api("PATCH", "/items/" + id, { content_md: text.value, note: note.value, draft_rev: rev })).draft_rev;
   }
 
   async function publish() {
     problems.replaceChildren();
     try {
       await save();
-      const r = await api("POST", `/items/${id}/publish`, note.value ? { note: note.value } : undefined);
+      const r = await api("POST", `/items/${id}/publish`, note.value ? { note: note.value, draft_rev: rev } : { draft_rev: rev });
       toast(`Published v${r.version.version}`);
       if (r.warnings && r.warnings.length) {
         problems.replaceChildren(h("div", { class: "problems" }, h("strong", {}, "Published, with warnings"),

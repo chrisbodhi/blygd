@@ -48,7 +48,7 @@ func (s *Studio) now() time.Time {
 
 // Error is a studio error with a stable code the API maps to a status.
 type Error struct {
-	Code string // not_found, invalid, conflict
+	Code string // not_found, invalid, conflict, stale
 	Msg  string
 	// Problems lists every reason a draft cannot be published (§10.2:
 	// unresolvable directives and links are publish errors).
@@ -66,6 +66,8 @@ func (e *Error) ErrorKind() apperr.Kind {
 		return apperr.Invalid
 	case "conflict":
 		return apperr.Conflict
+	case "stale":
+		return apperr.Stale
 	}
 	return 0
 }
@@ -78,6 +80,9 @@ func invalid(format string, a ...any) error {
 }
 func conflict(format string, a ...any) error {
 	return &Error{Code: "conflict", Msg: fmt.Sprintf(format, a...)}
+}
+func stale(format string, a ...any) error {
+	return &Error{Code: "stale", Msg: fmt.Sprintf(format, a...)}
 }
 
 // IsCode reports whether err is a studio Error with the given code.

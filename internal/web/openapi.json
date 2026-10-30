@@ -104,7 +104,7 @@
           "meta"
         ],
         "summary": "A Server-Sent Events stream of change hints for this user.",
-        "description": "Each event names what changed, never the state: re-fetch what you show. Events, by type:\n\n- `import` (needs reader:read): a poll of one of your subscriptions finished. `{subscription_id, items, more, error?}`, where `more` means a backfill continues with the next batch in about a minute.\n- `mention` (needs mentions:read): an inbound mention to your origin arrived or changed. `{id, status, relation?}`.\n- `outbound` (needs mentions:read): one of your outbound mentions was attempted. `{id, status, last_result}`.\n\nA heartbeat comment arrives every 25 s. Events missed while disconnected are not replayed; fetch state on reconnect. Browsers should read this with fetch(), which can send the Authorization header; EventSource cannot. At most 8 streams per user.",
+        "description": "Each event names what changed, never the state: re-fetch what you show. Events, by type:\n\n- `import` (needs reader:read): a poll of one of your subscriptions finished. `{subscription_id, items, more, error?}`, where `more` means a backfill continues with the next batch in about a minute.\n- `item` (needs items:read): one of your items changed, from any client. `{id, change, version?, draft_rev?}`, where change is created, edited, deleted, published, withdrawn or pinned; version is the one published, withdrawn or pinned; and draft_rev is the draft's revision after a create, edit or publish, so a client can tell its own change from another's.\n- `mention` (needs mentions:read): an inbound mention to your origin arrived or changed. `{id, status, relation?}`.\n- `outbound` (needs mentions:read): one of your outbound mentions was attempted. `{id, status, last_result}`.\n\nA heartbeat comment arrives every 25 s. Events missed while disconnected are not replayed; fetch state on reconnect. Browsers should read this with fetch(), which can send the Authorization header; EventSource cannot. At most 8 streams per user.",
         "security": [
           {
             "bearer": []
@@ -478,6 +478,9 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
           "422": {
             "$ref": "#/components/responses/Invalid"
           },
@@ -491,7 +494,7 @@
             "$ref": "#/components/responses/TooManyRequests"
           }
         },
-        "description": "Nothing changes on the wire until the next publish.",
+        "description": "Nothing changes on the wire until the next publish. With draft_rev, the edit applies only to the draft at that revision (409 stale otherwise), so two clients cannot overwrite each other unseen.",
         "requestBody": {
           "required": true,
           "content": {
@@ -592,7 +595,7 @@
             "$ref": "#/components/responses/TooManyRequests"
           }
         },
-        "description": "Directives and [[id]] links resolve now: own items first, then your subscriptions' imports (§10.2). Every unresolvable one is listed in a 422's problems. 409 when nothing changed.",
+        "description": "Directives and [[id]] links resolve now: own items first, then your subscriptions' imports (§10.2). Every unresolvable one is listed in a 422's problems. 409 when nothing changed. 409 stale when draft_rev is sent and the draft has moved on, or when the draft changes while publishing.",
         "requestBody": {
           "required": false,
           "content": {
@@ -2407,6 +2410,7 @@
               "invalid",
               "not_found",
               "conflict",
+              "stale",
               "forbidden",
               "unauthorized",
               "unresolved",
@@ -2417,7 +2421,7 @@
               "unavailable",
               "internal"
             ],
-            "description": "Stable code. invalid: a malformed request (400) or one refused as it stands (422). not_found: 404. conflict: 409. forbidden: the token lacks the operation's scope (403). unauthorized: no token, or one unknown, revoked or expired (401). unresolved: a URL that did not resolve (422, with trail). rate_limited: over a request budget, or too many failed authentications from this address (429). too_soon: a poll refused by §12.3's etiquette (429, with retry_at). too_many_streams: at most 8 open event streams per user (429). too_large: media over the upload cap (413). unavailable: events are not running (503). internal: the server's fault (500)."
+            "description": "Stable code. invalid: a malformed request (400) or one refused as it stands (422). not_found: 404. conflict: 409. stale: the draft changed since the draft_rev sent (409); read it again. forbidden: the token lacks the operation's scope (403). unauthorized: no token, or one unknown, revoked or expired (401). unresolved: a URL that did not resolve (422, with trail). rate_limited: over a request budget, or too many failed authentications from this address (429). too_soon: a poll refused by §12.3's etiquette (429, with retry_at). too_many_streams: at most 8 open event streams per user (429). too_large: media over the upload cap (413). unavailable: events are not running (503). internal: the server's fault (500)."
           },
           "message": {
             "type": "string"
@@ -2965,6 +2969,10 @@
             "type": "string",
             "format": "date-time"
           },
+          "draft_rev": {
+            "type": "string",
+            "description": "Names the draft's state: draft_md, draft_note and generation. Send it back as draft_rev on PATCH or publish to change only the draft you saw. It is a hash, so equal drafts have equal revisions."
+          },
           "state": {
             "type": "string",
             "enum": [
@@ -3005,7 +3013,8 @@
           "published_at",
           "created_at",
           "draft_updated_at",
-          "state"
+          "state",
+          "draft_rev"
         ],
         "additionalProperties": false
       },
@@ -3053,6 +3062,10 @@
               "$ref": "#/components/schemas/GenMeta"
             },
             "description": "Per [TK] scope, by position; null clears."
+          },
+          "draft_rev": {
+            "type": "string",
+            "description": "Apply the edit only if the draft is still at this revision; otherwise 409 stale and nothing changes. Absent, the edit applies to whatever the draft holds."
           }
         },
         "additionalProperties": false
@@ -3066,6 +3079,10 @@
           "note_generated": {
             "type": "boolean",
             "description": "The client wrote the note, not the author (§5.2)."
+          },
+          "draft_rev": {
+            "type": "string",
+            "description": "Publish only if the draft is still at this revision; otherwise 409 stale and nothing is published."
           }
         },
         "additionalProperties": false
