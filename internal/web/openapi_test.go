@@ -6,6 +6,9 @@ import (
 	"mime"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -130,6 +133,43 @@ func TestOpenAPIIsSelfConsistent(t *testing.T) {
 			if strings.HasPrefix(seg, "{") && !declared[strings.Trim(seg, "{}")] {
 				t.Errorf("%s: path parameter %s is not declared", path, seg)
 			}
+		}
+	}
+}
+
+// Every error code the handlers can send is in Error.error's enum, and
+// the enum lists nothing they never send. The e2e suite checks the codes
+// it provokes; this reads the source for the ones it does not.
+func TestOpenAPIListsEveryErrorCode(t *testing.T) {
+	_, whole := loadOpenAPI(t)
+	errSchema := whole["components"].(map[string]any)["schemas"].(map[string]any)["Error"].(map[string]any)
+	described := asStrings(errSchema["properties"].(map[string]any)["error"].(map[string]any)["enum"])
+
+	// A status beside a code: httpError, writeError and the kinds table;
+	// or an "error" member written by hand.
+	codeRE := regexp.MustCompile(`(?:http\.Status\w+|\b[1-5]\d\d), "([a-z_]+)"|"error": +"([a-z_]+)"`)
+	files, _ := filepath.Glob("*.go")
+	sent := map[string]bool{}
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range codeRE.FindAllStringSubmatch(string(src), -1) {
+			sent[m[1]+m[2]] = true
+		}
+	}
+	for code := range sent {
+		if !slices.Contains(described, code) {
+			t.Errorf("handlers send error %q, which openapi.json's Error.error does not list", code)
+		}
+	}
+	for _, code := range described {
+		if !sent[code] {
+			t.Errorf("openapi.json lists error %q, which no handler sends", code)
 		}
 	}
 }
@@ -284,6 +324,9 @@ func conforms(doc, s map[string]any, v any, at string) string {
 		if !slices.Contains(types, got) && !(got == "integer" && slices.Contains(types, "number")) {
 			return fmt.Sprintf("%s: %s, want %v", at, got, types)
 		}
+	}
+	if enum, ok := s["enum"].([]any); ok && !slices.Contains(enum, v) {
+		return fmt.Sprintf("%s: %v is not one of %v", at, v, enum)
 	}
 	switch v := v.(type) {
 	case map[string]any:

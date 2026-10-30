@@ -26,26 +26,29 @@ const Notice = "content_html, summary_html and pinned documents are the origin's
 
 // Subscription is one user's subscription to one remote origin.
 type Subscription struct {
-	ID              int64      `json:"id"` // the remote origin id; scopes item ids (§13.1 rule 7)
-	Kind            string     `json:"kind"`
-	Origin          string     `json:"origin"`
-	Title           *string    `json:"title"`
-	DisplayTitle    *string    `json:"display_title"`
-	SiteURL         *string    `json:"site_url,omitempty"`
-	InBlogroll      bool       `json:"in_blogroll"`
-	SiteDiscrepancy *string    `json:"site_discrepancy"`
-	Lossy           bool       `json:"lossy"`
-	Items           int        `json:"items"`
-	Unread          int        `json:"unread"`
-	Discrepancies   int        `json:"discrepancies"`
-	LastPolledAt    *time.Time `json:"last_polled_at"`
-	NextPollAt      time.Time  `json:"next_poll_at"`
-	PollFailures    int        `json:"poll_failures"`
-	LastError       *string    `json:"last_error"`
-	CreatedAt       time.Time  `json:"created_at"`
+	ID              int64           `json:"id"` // the remote origin id; scopes item ids (§13.1 rule 7)
+	Kind            string          `json:"kind"`
+	Origin          string          `json:"origin"`
+	Title           *string         `json:"title"`
+	Author          json.RawMessage `json:"author"` // manifest publication identity (§6.1): asserted, opaque (§5.5)
+	DisplayTitle    *string         `json:"display_title"`
+	SiteURL         *string         `json:"site_url,omitempty"`
+	InBlogroll      bool            `json:"in_blogroll"`
+	SiteDiscrepancy *string         `json:"site_discrepancy"`
+	Lossy           bool            `json:"lossy"`
+	Items           int             `json:"items"`
+	Unread          int             `json:"unread"`
+	Discrepancies   int             `json:"discrepancies"`
+	LastPolledAt    *time.Time      `json:"last_polled_at"`
+	NextPollAt      time.Time       `json:"next_poll_at"`
+	PollFailures    int             `json:"poll_failures"`
+	LastError       *string         `json:"last_error"`
+	CreatedAt       time.Time       `json:"created_at"`
 }
 
-const subCols = `ro.id, ro.kind, ro.identity_url, ro.title, s.display_title, ro.site_url,
+const subCols = `ro.id, ro.kind, ro.identity_url, ro.title,
+	CASE WHEN jsonb_typeof(ro.manifest->'author') = 'object' THEN ro.manifest->'author' END,
+	s.display_title, ro.site_url,
 	EXISTS (SELECT 1 FROM blogroll_entries b WHERE b.origin_id = $2 AND b.remote_origin_id = ro.id),
 	ro.site_discrepancy, ro.lossy,
 	(SELECT count(*) FROM imported_items ii WHERE ii.remote_origin_id = ro.id AND ii.state = 'current'),
@@ -56,7 +59,7 @@ const subCols = `ro.id, ro.kind, ro.identity_url, ro.title, s.display_title, ro.
 
 func scanSub(row pgx.Row) (*Subscription, error) {
 	var s Subscription
-	err := row.Scan(&s.ID, &s.Kind, &s.Origin, &s.Title, &s.DisplayTitle, &s.SiteURL, &s.InBlogroll,
+	err := row.Scan(&s.ID, &s.Kind, &s.Origin, &s.Title, &s.Author, &s.DisplayTitle, &s.SiteURL, &s.InBlogroll,
 		&s.SiteDiscrepancy, &s.Lossy, &s.Items, &s.Unread, &s.Discrepancies,
 		&s.LastPolledAt, &s.NextPollAt, &s.PollFailures, &s.LastError, &s.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {

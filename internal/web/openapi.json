@@ -2315,7 +2315,8 @@
               }
             }
           }
-        }
+        },
+        "description": "Mints a token holding a subset of the caller's scopes, expiring no later than the caller does: a minted token never outlives its minter. A device token that expires is replaced by minting from a token that outlives it, usually the owner's, which never expires and belongs offline. There is no refresh: a long-lived tokens:write token kept on the device would be that credential."
       }
     },
     "/api/tokens/self": {
@@ -2402,7 +2403,21 @@
         "properties": {
           "error": {
             "type": "string",
-            "description": "Stable code: invalid, not_found, conflict, forbidden, unauthorized, unresolved, internal."
+            "enum": [
+              "invalid",
+              "not_found",
+              "conflict",
+              "forbidden",
+              "unauthorized",
+              "unresolved",
+              "rate_limited",
+              "too_soon",
+              "too_many_streams",
+              "too_large",
+              "unavailable",
+              "internal"
+            ],
+            "description": "Stable code. invalid: a malformed request (400) or one refused as it stands (422). not_found: 404. conflict: 409. forbidden: the token lacks the operation's scope (403). unauthorized: no token, or one unknown, revoked or expired (401). unresolved: a URL that did not resolve (422, with trail). rate_limited: over a request budget, or too many failed authentications from this address (429). too_soon: a poll refused by §12.3's etiquette (429, with retry_at). too_many_streams: at most 8 open event streams per user (429). too_large: media over the upload cap (413). unavailable: events are not running (503). internal: the server's fault (500)."
           },
           "message": {
             "type": "string"
@@ -3259,7 +3274,7 @@
             ]
           },
           "doc": {
-            "description": "The origin's verbatim document, or null once withdrawn (§13.4). Sanitize (§14)."
+            "$ref": "#/components/schemas/ImportedDoc"
           }
         },
         "required": [
@@ -3789,6 +3804,13 @@
               "null"
             ]
           },
+          "author": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "The manifest's publication identity (§6.1), as the origin asserts it: an opaque object, name RECOMMENDED (§5.5). Relative URLs in it resolve against origin. Readers fall back to it when an item has no author. Null when the manifest has none, or for L0."
+          },
           "display_title": {
             "type": [
               "string",
@@ -3863,7 +3885,8 @@
           "next_poll_at",
           "poll_failures",
           "last_error",
-          "created_at"
+          "created_at",
+          "author"
         ],
         "additionalProperties": false
       },
@@ -4018,7 +4041,7 @@
             "type": "string"
           },
           "doc": {
-            "description": "Verbatim pinned document. Sanitize (§14)."
+            "$ref": "#/components/schemas/PinDocument"
           }
         },
         "required": [
@@ -4096,7 +4119,7 @@
             ]
           },
           "doc": {
-            "description": "The origin's verbatim document, or null once withdrawn (§13.4). Sanitize (§14)."
+            "$ref": "#/components/schemas/ImportedDoc"
           },
           "pins": {
             "type": "array",
@@ -4331,6 +4354,209 @@
         ],
         "description": "A links[] entry (§10.3a): the item a resolved [[id]] link names. Not a reference: no version, no cited.",
         "additionalProperties": false
+      },
+      "ItemDocument": {
+        "type": "object",
+        "description": "The origin's items/{id}.json (§5), verbatim (jsonb orders its keys). blygd checked only that id names the item, kind is one it knows, and version is at least 1: every other member is the origin's unverified assertion, and members this description does not list may appear. Sanitize content_html (§14).",
+        "properties": {
+          "blyg": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "fragment",
+              "thread"
+            ]
+          },
+          "origin": {
+            "type": "string"
+          },
+          "page": {
+            "type": "string",
+            "description": "Origin-relative or absolute (§5.8)."
+          },
+          "author": {
+            "description": "Opaque byline object (§5.5)."
+          },
+          "created": {
+            "type": "string"
+          },
+          "updated": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "content_md": {
+            "type": "string"
+          },
+          "content_html": {
+            "type": "string",
+            "description": "The origin's HTML. Sanitize (§14)."
+          },
+          "content_hash": {
+            "type": "string",
+            "description": "Checked against content_md; a mismatch is the item's discrepancy (§13.3)."
+          },
+          "media": {
+            "type": "array"
+          },
+          "transclusions": {
+            "type": "array"
+          },
+          "stub_of": {
+            "type": "object"
+          },
+          "forked_from": {
+            "type": "object"
+          },
+          "generated": {
+            "type": "array"
+          },
+          "links": {
+            "type": "array"
+          },
+          "changelog": {
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "version"
+        ]
+      },
+      "L0Document": {
+        "type": "object",
+        "description": "A wrapped legacy RSS entry (§13.6). blygd's own shape, not a protocol document: it never leaves this instance except through this API. Mark it visibly as legacy content.",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "l0"
+            ]
+          },
+          "guid": {
+            "type": "string"
+          },
+          "link": {
+            "type": "string",
+            "description": "The entry's URL. A response to it is a {url} stub (§10.6)."
+          },
+          "title": {
+            "type": "string"
+          },
+          "summary_html": {
+            "type": "string",
+            "description": "The entry's summary or description, verbatim and capped at 64 KB. Sanitize (§14)."
+          },
+          "summary_text": {
+            "type": "string",
+            "description": "Plain text, cut to 1,000 characters (§5.3's fragment ethos)."
+          },
+          "published": {
+            "type": "string",
+            "description": "As the feed claims it."
+          },
+          "feed": {
+            "type": "string",
+            "description": "The feed it came from."
+          },
+          "note": {
+            "type": "string",
+            "description": "Says what the wrapper is."
+          }
+        },
+        "required": [
+          "kind",
+          "summary_html",
+          "summary_text",
+          "feed",
+          "note"
+        ],
+        "additionalProperties": false
+      },
+      "ImportedDoc": {
+        "description": "The imported item's content: the origin's document for a blyg, blygd's wrapper for L0, or null once withdrawn (§13.4).",
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/components/schemas/ItemDocument"
+          },
+          {
+            "$ref": "#/components/schemas/L0Document"
+          }
+        ]
+      },
+      "PinDocument": {
+        "type": "object",
+        "description": "The origin's items/{id}/v{n}.json (§8), verbatim. blygd checked only that id and version name this pin and kind is not withdrawn; every other member is the origin's assertion. Sanitize content_html (§14).",
+        "properties": {
+          "blyg": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "at": {
+            "type": "string"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pinned": {
+            "type": "boolean"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "author": {
+            "description": "Opaque byline object (§5.5)."
+          },
+          "content_md": {
+            "type": "string"
+          },
+          "content_html": {
+            "type": "string",
+            "description": "The origin's HTML. Sanitize (§14)."
+          },
+          "content_hash": {
+            "type": "string"
+          },
+          "transclusions": {
+            "type": "array"
+          },
+          "stub_of": {
+            "type": "object"
+          },
+          "forked_from": {
+            "type": "object"
+          },
+          "generated": {
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "version"
+        ]
       }
     },
     "responses": {

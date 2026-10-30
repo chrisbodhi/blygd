@@ -164,6 +164,8 @@ type Blyg struct {
 	ManifestPath string
 	// Webmention is the manifest's webmention value (§15.1), if any.
 	Webmention string
+	// Author is the manifest's author (§6.1) as raw JSON, if any.
+	Author string
 }
 
 // Origin is the blyg's identity origin.
@@ -250,6 +252,9 @@ func (b *Blyg) Publish() {
 	}
 	if b.Webmention != "" {
 		keys += fmt.Sprintf(`, "webmention": %q`, b.Webmention)
+	}
+	if b.Author != "" {
+		keys += `, "author": ` + b.Author
 	}
 	b.S.Set(b.Path(b.ManifestURL()), fmt.Sprintf(`{"blyg": "0.3", "level": 1, "site": %q, "title": %q, %s}`, site, b.Title, keys))
 	var idx, entries []string

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chrisbodhi/blygd/internal/blyg"
 	"github.com/chrisbodhi/blygd/internal/mention"
 	"github.com/chrisbodhi/blygd/internal/testblyg"
 )
@@ -326,5 +327,56 @@ func TestMoveNeedsConfirmedIdentity(t *testing.T) {
 	subs := bob.api("GET", "/subscriptions", nil).json(t)["subscriptions"].([]any)
 	if len(subs) != 1 || subs[0].(map[string]any)["origin"] != alice2.origin {
 		t.Fatalf("after move: %v", subs)
+	}
+}
+
+// A subscription carries its publication's identity (§6.1) as the origin
+// asserts it, and an imported item's doc has a described shape, for a blyg
+// and for L0 alike: checkResponse holds every response here to openapi.json.
+func TestImportedShapes(t *testing.T) {
+	e := newEnv(t, mention.DefaultRateLimits)
+	alice, bob := e.user("alice"), e.user("bob")
+
+	expect(t, alice.api("PATCH", "/origin", map[string]any{"author": map[string]any{"name": "Alice A.", "avatar": "media/a.png"}}), 200)
+	id := alice.draft(t, map[string]any{"content_md": "Hello"})
+	alice.publish(t, id, 200)
+	r := bob.api("POST", "/subscriptions", map[string]any{"url": alice.origin})
+	expect(t, r, 201)
+	s := r.json(t)["subscription"].(map[string]any)
+	if a, _ := s["author"].(map[string]any); a["name"] != "Alice A." || a["avatar"] != "media/a.png" {
+		t.Fatalf("publication author: %v", s["author"])
+	}
+	sid := int(s["id"].(float64))
+	e.poll(sid)
+	r = bob.api("GET", "/reader/items/"+itoa(sid)+"/"+id, nil)
+	expect(t, r, 200)
+	if doc, _ := r.json(t)["item"].(map[string]any)["doc"].(map[string]any); doc["id"] != id {
+		t.Fatalf("blyg doc: %s", r.body)
+	}
+
+	// §6.1 makes author an object; anything else is no assertion.
+	remote := &testblyg.Blyg{S: testblyg.New(t), Mount: "/r/", Title: "Remote", Author: `"just a string"`}
+	remote.Publish()
+	r = bob.api("POST", "/subscriptions", map[string]any{"url": remote.Origin()})
+	expect(t, r, 201)
+	if s = r.json(t)["subscription"].(map[string]any); s["author"] != nil {
+		t.Fatalf("non-object author surfaced: %v", s["author"])
+	}
+
+	// L0 has no manifest, so no author, and its doc is blygd's wrapper.
+	remote.S.Set("/rss", `<rss version="2.0"><channel><title>Old Blog</title><link>`+remote.S.URL+`/</link>`+
+		`<item><guid>p1</guid><link>/p/1</link><title>One</title><description>first</description></item></channel></rss>`)
+	r = bob.api("POST", "/subscriptions", map[string]any{"url": remote.S.URL + "/rss"})
+	expect(t, r, 201)
+	s = r.json(t)["subscription"].(map[string]any)
+	if s["kind"] != "l0" || s["author"] != nil {
+		t.Fatalf("L0 subscription: %v", s)
+	}
+	sid = int(s["id"].(float64))
+	e.poll(sid)
+	r = bob.api("GET", "/reader/items/"+itoa(sid)+"/"+blyg.L0ID("p1", ""), nil)
+	expect(t, r, 200)
+	if doc, _ := r.json(t)["item"].(map[string]any)["doc"].(map[string]any); doc["kind"] != "l0" || doc["title"] != "One" {
+		t.Fatalf("L0 doc: %s", r.body)
 	}
 }
