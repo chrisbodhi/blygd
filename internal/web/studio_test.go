@@ -118,3 +118,70 @@ func TestLLMSTxt(t *testing.T) {
 }
 
 func discardLog() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
+
+// The studio is one client of the API, with no back door: every request
+// it makes is an operation openapi.json describes, so another client can
+// do anything it does (DESIGN.md, The studio).
+func TestStudioCallsOnlyTheDescribedAPI(t *testing.T) {
+	paths, _ := loadOpenAPI(t)
+	described := func(method, path string) bool {
+		segs := strings.Split(path, "/")
+	next:
+		for tmpl, ops := range paths {
+			if _, ok := ops[strings.ToLower(method)]; !ok {
+				continue
+			}
+			want := strings.Split(tmpl, "/")
+			if len(want) != len(segs) {
+				continue
+			}
+			for i, w := range want {
+				param := strings.HasPrefix(w, "{")
+				if segs[i] == "{}" && !param || segs[i] != "{}" && segs[i] != w && !param {
+					continue next
+				}
+			}
+			return true
+		}
+		return false
+	}
+
+	// api("GET", "/items/" + id), call("POST", "/tokens", …) and
+	// api("POST", `/items/${id}/publish`): an interpolation, or a value
+	// appended after a slash, is a path parameter; the rest is a query.
+	call := regexp.MustCompile("\\b(?:api|call)\\(\"([A-Z]+)\",\\s*(?:\"([^\"]*)\"(\\s*\\+\\s*[A-Za-z_$])?|`([^`]*)`)")
+	interp := regexp.MustCompile(`\$\{[^}]*\}`)
+	fetch := regexp.MustCompile("\\bfetch\\(\\s*([\"'`])([^\"'`]*)")
+	calls := 0
+	for _, file := range []string{"studio/app.js", "studio/api/docs.js"} {
+		f, err := studioFiles.Open(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		src, _ := io.ReadAll(f)
+		for _, m := range call.FindAllStringSubmatch(string(src), -1) {
+			path := m[2]
+			if m[4] != "" {
+				path = interp.ReplaceAllString(m[4], "{}")
+			} else if m[3] != "" && strings.HasSuffix(path, "/") {
+				path += "{}"
+			}
+			path, _, _ = strings.Cut(path, "?")
+			calls++
+			if !described(m[1], "/api"+path) {
+				t.Errorf("%s calls %s /api%s, which openapi.json does not describe", file, m[1], path)
+			}
+		}
+		for _, m := range fetch.FindAllStringSubmatch(string(src), -1) {
+			if !strings.HasPrefix(m[2], "/api") {
+				t.Errorf("%s fetches %q: the studio reaches the server only through /api/", file, m[2])
+			} else if m[2] != "/api" && !described("GET", m[2]) {
+				t.Errorf("%s fetches %s, which openapi.json does not describe", file, m[2])
+			}
+		}
+	}
+	// A regexp that stops matching would pass everything above.
+	if calls < 20 {
+		t.Fatalf("found %d API calls in the studio; has the call syntax changed?", calls)
+	}
+}

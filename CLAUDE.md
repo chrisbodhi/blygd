@@ -72,6 +72,11 @@ on the command line or in the environment. Each test gets a fresh database.
   is, and `handleErr` picks the status. Never map a status from an
   error's text, or treat "not a database error" as the caller's fault:
   anything unkinded is a 500.
+- **API first; UIs are clients.** The studio (`internal/web/studio/`)
+  is static files that call `/api/` like any other client. Never give a
+  UI its own route, server-side template or response field: add what it
+  needs to the API, describe it, and call that. `studio_test.go` fails on
+  a studio request `openapi.json` does not describe.
 - **The API is described.** Any change to an `/api/` route, its scope, or
   a request or response shape edits `internal/web/openapi.json` in the
   same change. `openapi_test.go` and the e2e suite fail until it does.

@@ -630,6 +630,16 @@ reconnect, re-fetch.
 HTML page, CSS and vanilla JS, with no build step. It talks only to
 `/api/`.
 
+**The API comes first; the studio is one client of it.** blygd exists to
+let different interfaces be tried against one service, so the studio gets
+no back door. Every request it makes is an operation `openapi.json`
+describes, and it fetches nothing outside `/api/` (`studio_test.go`).
+Its Go side is a static file handler (`studio.go`) and nothing more: no
+template, no route, no response shape that exists for the studio's sake.
+Whatever a new UI needs is added to the API, described, and is then
+there for every client. The studio could be deleted, or replaced by
+another directory of files, without touching a handler.
+
 - **Its own token.** A pasted token that may mint is traded at once for a
   studio token: only the scopes the studio calls (items, reader,
   mentions; no `tokens:write`, origin or hopper settings), 30 days, named
