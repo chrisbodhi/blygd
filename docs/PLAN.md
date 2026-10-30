@@ -156,7 +156,7 @@ Left for later:
   `rel="service-desc"` to the OpenAPI document. Approval and MCP open;
   the reference's shape is in its `docs/client-access.md`.)*
 
-## Phase 5 — protocol 0.4
+## Phase 5 — protocol 0.4 (done)
 
 Move from `protocol-v0.3.md` at `d008e21` (0.3's last revision) to
 `protocol-v0.4.md` at `24b9770` (its sixth revision, 2026-10-20). Every 0.4
@@ -367,9 +367,10 @@ Not in the spec at all:
   provider, per-user keys and a review step before publish, so it
   starts with a design note.
 
-## Hardening (from the architecture review, 2026-10-28)
+## Hardening (from the architecture review, 2026-10-28; done)
 
-The review is `reports/architecture-review-entire-project-2026-10-28-171955.md`.
+The review is `reports/architecture-review-entire-project-2026-10-28-171955.md`
+(local, not checked in).
 Its two critical findings come before Phase 5 step 4, and neither touches
 step 4's files. The rest wait until after the 0.4 bump unless step 4 needs
 them.
@@ -507,7 +508,8 @@ them.
 
 Checked against the reference client, blygger-studio 0.39.0 (`9f6bab8`).
 Both checks are in the repo and are rerun when the spec or the reference
-moves (`scripts/interop/README.md`):
+moves (`scripts/interop/README.md`). This is the first run; the latest,
+against 0.48.2 with seven scenarios, is under Phase 5 step 6.
 
 - **`make parity`**, differential: 56 cases through both implementations'
   pure functions (§10.2 text content, quote normalization, partial
@@ -547,6 +549,20 @@ and the studio follows it: backfill progress in place, a dot on tabs
 with news, and a refresh bar instead of re-rendering under the reader's
 thumb.
 
+## Client gaps (done, 2026-10-30)
+
+What a second client found missing, all in the API (migration 007):
+
+- Conditional draft edits: `draft_rev` on every item, taken back by
+  `PATCH` and publish, `409 stale` when the draft moved (DESIGN.md
+  "Draft revisions").
+- `item` and `subscribe` hints on `GET /api/events`.
+- Mark all read as of the `as_of` a feed page carries.
+- Subscription imports from OPML, a blogroll or another reader's export,
+  inline or by URL, worked off by a leased worker.
+- Draft preview (Phase 3), `Subscription.author`, schemas for imported
+  documents, and every error code described in `openapi.json`.
+
 ## Operations
 
 - **API description (done).** `internal/web/openapi.json`, OpenAPI 3.1,
@@ -573,23 +589,26 @@ thumb.
   1. Rehearse each migrating release on a restored copy of production.
      *(Built into 2 as the preflight, `scripts/deploy.sh --check`: the new
      binary migrates a scratch restore of a fresh backup and rebuilds
-     every origin there. Not yet run against the real host.)*
+     every origin there. Run against the real host before the 2026-10-29
+     and 2026-10-30 deploys.)*
   2. `scripts/deploy.sh`: build from a clean checkout, back up, dry-run
      the migrations on a scratch restore of that backup, install keeping
      `.prev`, check health and the running checksum, and put the old
      binary back on failure when nothing migrated. *(Done: the server half
      is `deploy/upgrade.sh`, shipped from the commit being deployed. It
-     migrates between stop and start, rebuilds every origin after, and
-     adds the DEPLOYS.md row. Builds come from a clone, not a worktree:
-     Go stamps no commit into a worktree outside the repository. The
-     local half was run against a stand-in host; the server half has run
-     only through shellcheck until the first `--check`.)*
+     migrates between stop and start and rebuilds every origin after; the
+     local half then adds the DEPLOYS.md row. Builds come from a clone,
+     not a worktree: Go stamps no commit into a worktree outside the
+     repository.)*
   3. The binary says what it is. *(Done: `blygd version` prints the
      commit, Go and x/net the toolchain stamped; the "listening" log line
      carries the commit; `-dirty` marks a tree with changes.)*
   4. Caddy holds requests across a restart (`lb_try_duration`) instead of
-     answering 502. *(In `deploy/Caddyfile`, 30 s; not yet tried against a
-     real restart, and it reaches the host only by hand.)*
+     answering 502. *(Done: in `deploy/Caddyfile`, 30 s, and copied to the
+     live host by hand. It was live only from 2026-10-30, after a reload:
+     the deploys before then answered 502 while blygd was down. Checked
+     that day by stopping blygd for 10 s under a `/healthz` poll: every
+     request answered 200.)*
   Shipped through it on 2026-10-29 (0.4, DEPLOYS.md). Then a
   provisioning script with a timed restore drill, and CI once the code
   has a host. Alerts (an uptime check, and a ping from each good backup)

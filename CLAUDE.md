@@ -21,9 +21,10 @@ make vuln          # govulncheck: known vulnerabilities on paths blygd calls
 make run           # serve on :8080 against BLYGD_DATABASE_URL
 make parity REFERENCE=path/to/blygger-studio   # differential tests vs the reference
 make interop REFERENCE=path/to/blygger-studio  # live: both studios, each subscribed to the other
-
-Rerun both when the spec or the reference moves (scripts/interop/README.md).
 ```
+
+Rerun parity and interop when the spec or the reference moves
+(`scripts/interop/README.md`).
 
 Database tests need `BLYGD_TEST_DATABASE_URL` pointing at a Postgres 18
 database whose user may `CREATE DATABASE`. `make test-all` defaults it to
@@ -93,10 +94,14 @@ on the command line or in the environment. Each test gets a fresh database.
 ## Layout
 
 ```
-cmd/blygd            CLI: serve, user add, token mint, rebuild
+cmd/blygd            CLI: serve, migrate, user add, token mint, rebuild, export, version
 internal/blyg        protocol: wire types, ids, hashing, markdown, feed, pages,
                      thread grammar and composition, fork flattening (pure)
+internal/config      settings from BLYGD_* environment variables
 internal/db          pool + embedded tern migrations (migrations/, migrations.sum)
+internal/events      live hints: LISTEN/NOTIFY on blygd_events, and a fan-out hub
+internal/limit       in-memory token buckets for request budgets
+internal/batch       works leased claims within their lease
 internal/studio      plane 1: item lifecycle, pins, outbox, render-on-publish
 internal/mention     §15: receiver, verifier, sender, lease workers
 internal/reader      §12–13: resolution, importer, poller, reading overlay

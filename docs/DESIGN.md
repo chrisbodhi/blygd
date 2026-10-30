@@ -21,7 +21,7 @@ three planes apart, and the separation is structural:
 |---|---|---|---|
 | 1. Own origins | Items this instance publishes, and its blogroll | `origins`, `items`, `item_versions`, `media`, `blogroll_entries`, `surface_files` | Authoritative |
 | 2. Import mirror | Other origins' items, one copy per origin, shared by every subscriber | `remote_origins`, `imported_items`, `imported_pins` | Reconciled copy (§13) |
-| 3. Private overlay | Per-user: subscriptions, hoppers, reads | `subscriptions`, `hoppers`, `hopper_members`, `reads` | Private, never on the wire |
+| 3. Private overlay | Per-user: subscriptions, hoppers, reads | `subscriptions`, `subscription_imports`, `hoppers`, `hopper_members`, `reads` | Private, never on the wire |
 
 - **The renderer reads only plane 1.** Imported items can never be
   re-emitted (§13.5) because nothing that writes `surface_files` queries
@@ -614,7 +614,8 @@ blygd runs one. `BLYGD_RATE_LIMITS=false` turns them off for harnesses.
   (`routeCosts`, stated as `x-blygd-cost` on every operation in
   openapi.json, and the two are compared by a test): `default` 120 a
   minute in bursts of 60, `fetch` 12 (subscribe, resolve, move, poll,
-  create an item, publish: each can fetch other hosts), `export` 2,
+  import subscriptions, create an item, publish: each can fetch other
+  hosts), `export` 2,
   `upload` 30 in bursts of 20 (media, and `PATCH /api/origin`, which
   re-renders every item), and `stream`, which has no per-request budget
   but at most 8 open streams. A user's budget is twice a token's, across

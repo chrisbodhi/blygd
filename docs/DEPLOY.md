@@ -264,6 +264,9 @@ to ship one.
 When `deploy/Caddyfile` changes, copy the change into
 `/etc/caddy/Caddyfile` by hand (it carries your host name), then
 `sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy`.
+Caddy reads the file only at start and on reload, so confirm the running
+config took it: `curl -s localhost:2019/config/` on the server shows what
+is loaded (for `lb_try_duration`, a `load_balancing` block).
 
 #### By hand
 

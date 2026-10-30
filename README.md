@@ -6,12 +6,15 @@ keeps your hoppers private, and sends and verifies Webmentions. It is
 headless — clients talk to it over a scoped-token API — and
 multi-tenant, with each user owning one path-mounted origin.
 
-Status: Phases 1–3 of [docs/PLAN.md](docs/PLAN.md). Fragments, pins,
-withdrawal, the full static surface, Webmentions in both directions,
-hoppers, the reader (subscriptions, the import mirror, a merged reading
-feed, the blogroll), and threads (transclusion across origins, partial
-quotes, `[[id]]` links, stubs, generation provenance, fork flattening)
-work. Media, public hoppers and custom domains (Phase 4) are next.
+Status: Phases 1–3 and 5 of [docs/PLAN.md](docs/PLAN.md), and most of
+Phase 4. It speaks protocol 0.4. Fragments, pins, withdrawal, the full
+static surface, Webmentions in both directions, hoppers, the reader
+(subscriptions, OPML and blogroll imports, the import mirror, a merged
+reading feed, the blogroll), threads (transclusion across origins, partial
+quotes, labelled `[[id]]` links, stubs, generation provenance, fork
+flattening, draft preview), media, pinned version pages, shown responses,
+public hoppers and static export work. Custom domains, OAuth-style token
+approval and an MCP transport (the rest of Phase 4) are next.
 
 ## Run it
 
@@ -21,7 +24,6 @@ with systemd, Caddy and Postgres 18, and nightly offsite backups.
 Requirements: Go 1.26+ and Postgres 18.
 
 ```sh
-go mod tidy    # once, to fill go.sum
 createdb blygd # on a local Postgres 18, e.g. brew install postgresql@18
 
 export BLYGD_DATABASE_URL='postgres://localhost:5432/blygd?sslmode=disable'
