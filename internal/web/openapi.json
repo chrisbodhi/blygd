@@ -542,6 +542,66 @@
         }
       }
     },
+    "/api/items/{id}/preview": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ItemID"
+        }
+      ],
+      "post": {
+        "operationId": "previewItem",
+        "tags": [
+          "items"
+        ],
+        "summary": "Compose the draft as publishing it now would, and store nothing.",
+        "description": "Composes the draft, or content_md in its place (an edit not yet saved), exactly as POST /api/items/{id}/publish would now: [TK] scopes stripped, [[id]] links resolved, and a thread's quotes baked from the versions they would quote, yours first, then your subscriptions' imports (§10.2). Nothing is stored, rendered to your surface, or sent. Every reason a publish would be refused is listed in problems, not returned as an error, and a directive that cannot bake is marked where it stands. It does not check a fork's pin at its origin, which only publishing fetches. Imports change as polls land, so a publish later may bake newer versions than this showed.",
+        "security": [
+          {
+            "bearer": [
+              "items:read"
+            ]
+          }
+        ],
+        "x-blygd-cost": "default",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Preview"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
     "/api/items/{id}/publish": {
       "parameters": [
         {
@@ -4961,6 +5021,75 @@
         },
         "required": [
           "deleted"
+        ],
+        "additionalProperties": false
+      },
+      "PreviewRequest": {
+        "type": "object",
+        "properties": {
+          "content_md": {
+            "type": "string",
+            "description": "Preview this in place of the saved draft; absent, the saved draft."
+          }
+        },
+        "additionalProperties": false
+      },
+      "Preview": {
+        "type": "object",
+        "properties": {
+          "content_md": {
+            "type": "string",
+            "description": "The wire content_md: [TK] scopes stripped to their output (§5.7). Empty when a scope has no output yet."
+          },
+          "content_html": {
+            "type": "string",
+            "description": "As publish would bake it, other origins' bytes included (§10.2). A directive that cannot bake is a blockquote of class \"blyg-transclusion unresolved\" saying why. Sanitize before rendering (§14)."
+          },
+          "transclusions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Reference"
+            }
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Link"
+            }
+          },
+          "generated": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Generated"
+            }
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Problem"
+            },
+            "description": "Every reason a publish would be refused now; empty means it would go through. A refusal of the draft as a whole is at \"draft\"."
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What a publish would warn about, such as a quote of an unpinned remote version."
+          },
+          "notice": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "content_md",
+          "content_html",
+          "transclusions",
+          "links",
+          "generated",
+          "problems",
+          "warnings",
+          "notice"
         ],
         "additionalProperties": false
       }

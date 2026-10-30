@@ -83,12 +83,13 @@ origins' bytes.
   and lineage on the fork's page (rule 7).
 - The publish guard against `[[` is gone, and the manifest's `level: 2`
   is now honest.
+- A draft preview (`POST /api/items/{id}/preview`): the publish that
+  would happen now, composed in a read-only transaction and stored
+  nowhere, with unbakeable directives marked in place as the reference
+  client does.
 
 Left for later:
 
-- A draft preview endpoint that renders unresolvable directives in place
-  instead of refusing (the reference client has one). Today the publish
-  `422` lists every problem.
 - A frozen `cited` on `forked_from` (§5.9 allows it; nothing sets it).
 - A `{url}` stub sends a plain W3C Webmention through the existing outbox
   (`relation = 'url'`). Nothing yet stubs an L0 entry by id: clients pass

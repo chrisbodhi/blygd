@@ -85,6 +85,10 @@ type ComposeInput struct {
 	Origin     string // the publishing origin: media/… resolves against it (§5.4)
 	Resolve    Resolver
 	Generation []GenMeta
+	// Preview renders a directive that cannot bake as an "unresolvable"
+	// block in its place, so the author sees where it sits. Its problem is
+	// listed as always: a preview is never published.
+	Preview bool
 }
 
 // Composed is a version ready to store: wire content_md, baked
@@ -312,8 +316,15 @@ func (c *composer) thread(md string) string {
 		quote, next, partial := attachedQuote(lines, i)
 		i = next - 1
 		directive := strings.TrimSpace(l)
+		// unbaked marks, in a preview, a directive the last problem refused.
+		unbaked := func() {
+			if c.in.Preview && len(c.out.Problems) > 0 {
+				parts = append(parts, UnresolvedBlock(c.out.Problems[len(c.out.Problems)-1].Reason))
+			}
+		}
 		resolved, ok := c.resolve(id, UseDirective, directive)
 		if !ok {
+			unbaked()
 			continue
 		}
 		t := &Target{}
@@ -335,11 +346,13 @@ func (c *composer) thread(md string) string {
 			sel := SelectionText(rendered)
 			if sel == "" {
 				c.problem(directive, "the attached blockquote is empty")
+				unbaked()
 				continue
 			}
 			loc := LocateSelection(snapshot, sel)
 			if loc == nil {
 				c.problem(directive, fmt.Sprintf("the quoted passage is not in version %d of %s (§10.2)", t.Version, id))
+				unbaked()
 				continue
 			}
 			ref.Selector = loc
@@ -367,6 +380,12 @@ func bakeOpen(class string, t *Target) string {
 		s += ` data-blyg-label="` + escapeHTML(t.Label) + `"`
 	}
 	return s + ">\n"
+}
+
+// UnresolvedBlock stands in a preview where a directive could not bake.
+// The classes are the reference client's, for parity.
+func UnresolvedBlock(reason string) string {
+	return `<blockquote class="blyg-transclusion unresolved"><p>⚠ unresolvable: ` + escapeHTML(reason) + `</p></blockquote>`
 }
 
 // BakeWhole wraps a snapshot as a transclusion (§10.2): a bare blockquote

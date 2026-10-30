@@ -19,7 +19,8 @@ import (
 // implemented by internal/reader, that hands the studio the snapshots a
 // user's subscriptions hold (§10.2 step 2). The studio never queries the
 // mirror itself (planes_test.go), and nothing it gets here is rendered
-// except as a baked transclusion, a link, or a frozen citation.
+// except as a baked transclusion, a link, or a frozen citation: by a
+// publish, or by a preview (Studio.Preview), which stores nothing.
 type Imports interface {
 	// Snapshots returns, for each id, every imported copy reachable from
 	// the user's subscriptions, usable or not.

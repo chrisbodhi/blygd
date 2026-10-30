@@ -466,3 +466,27 @@ func TestRemoteGenerationSource(t *testing.T) {
 		t.Fatalf("generated:\n%s\nwant\n%s", g, want)
 	}
 }
+
+// A preview shows a directive that cannot bake where it stands, with its
+// reason; a publish composes nothing there. Both list the problem.
+func TestPreviewMarksUnbakedDirectives(t *testing.T) {
+	const unknown = "0zzzzzzzzzzzzzzzzzzzzzzzzz"
+	md := "Before.\n\n![[" + unknown + "]]\n\n![[" + ownID + "]]\n> not in it\n\n![[" + ownID + "]]\n\nAfter."
+	for _, preview := range []bool{false, true} {
+		out, err := Compose(ComposeInput{ContentMD: md, Thread: true, PageURL: page, Resolve: fakeResolve, Preview: preview})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(out.Problems) != 2 || len(out.Transclusions) != 1 {
+			t.Fatalf("preview %v: problems %+v, transclusions %+v", preview, out.Problems, out.Transclusions)
+		}
+		marks := strings.Count(out.ContentHTML, `<blockquote class="blyg-transclusion unresolved">`)
+		switch {
+		case !preview && marks != 0:
+			t.Errorf("a publish composed %d unresolvable blocks", marks)
+		case preview && (marks != 2 || !strings.Contains(out.ContentHTML, "⚠ unresolvable: unknown item") ||
+			strings.Index(out.ContentHTML, "unknown item") > strings.Index(out.ContentHTML, `data-blyg-id="`+ownID)):
+			t.Errorf("preview, want two marks in place before the bake:\n%s", out.ContentHTML)
+		}
+	}
+}

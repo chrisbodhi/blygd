@@ -431,6 +431,18 @@ offline for a rebuild, so it never fetches. The URL is written once, and
 only when the check confirmed the file. Otherwise the page links the
 default path.
 
+**Preview** (`POST /api/items/{id}/preview`) is the publish that would
+happen now, stored nowhere. It shares publish's composition
+(`Studio.compose`), so it looks up imports the same way before its
+transaction (`studio.Imports`, its one other sanctioned caller), and runs
+in a read-only transaction, so Postgres itself refuses a write. Every
+refusal a publish would make is a problem in the response rather than an
+error, and `ComposeInput.Preview` marks a directive that cannot bake
+where it stands, in the reference client's `blyg-transclusion
+unresolved` block. It skips the fork pin check, the one fetch a publish
+makes. The HTML is returned verbatim with a notice, like `/api/items`'
+`content_html`: clients sanitize.
+
 ## Media (Phase 4)
 
 Bytes live in Postgres (`media.bytes`). Backups stay one `pg_dump`, and

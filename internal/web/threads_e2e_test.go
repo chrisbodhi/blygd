@@ -614,3 +614,77 @@ func TestLinksAndSourcesNotify(t *testing.T) {
 		t.Errorf("endcap links: %+v", d.Links)
 	}
 }
+
+// A preview is the publish that would happen now, quotes of other origins
+// baked from bob's imports, refusals listed and unbakeable quotes marked
+// in place, and nothing stored, rendered or sent.
+func TestPreview(t *testing.T) {
+	e := newEnv(t, mention.DefaultRateLimits)
+	alice, bob := e.user("alice"), e.user("bob")
+	f := alice.draft(t, map[string]any{"content_md": "Alice's words."})
+	alice.publish(t, f, 200)
+	bob.subscribe(t, alice.origin)
+	const unknown = "0zzzzzzzzzzzzzzzzzzzzzzzzz"
+	th := bob.draft(t, map[string]any{"kind": "thread", "content_md": "Mine.\n\n![[" + f + "]]\n\n![[" + unknown + "]]\n\nSee [[" + f + "]]."})
+
+	count := func() (n int) {
+		t.Helper()
+		if err := e.pool.QueryRow(context.Background(), `SELECT (SELECT count(*) FROM item_versions) + (SELECT count(*) FROM surface_files)
+			+ (SELECT count(*) FROM outbound_mentions)`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	before := count()
+	r := bob.api("POST", "/items/"+th+"/preview", nil)
+	expect(t, r, 200)
+	p := r.json(t)
+	html := p["content_html"].(string)
+	problems, warnings := p["problems"].([]any), p["warnings"].([]any)
+	switch {
+	case !strings.Contains(html, `data-blyg-id="`+f+`"`) || !strings.Contains(html, `data-blyg-origin="`+alice.origin+`"`) ||
+		!strings.Contains(html, "Alice's words."):
+		t.Errorf("alice's fragment is not baked from bob's import:\n%s", html)
+	case !strings.Contains(html, `class="blyg-transclusion unresolved"`) || !strings.Contains(html, `href="`+alice.origin+"f/"+f+`/"`):
+		t.Errorf("want the unknown quote marked and the link resolved:\n%s", html)
+	case len(problems) != 1 || !strings.Contains(problems[0].(map[string]any)["at"].(string), unknown):
+		t.Errorf("problems: %v", problems)
+	case len(warnings) != 1 || !strings.Contains(warnings[0].(string), "not pinned"):
+		t.Errorf("warnings: %v", warnings)
+	case len(p["transclusions"].([]any)) != 1 || len(p["links"].([]any)) != 1:
+		t.Errorf("provenance: %s", r.body)
+	}
+	if after := count(); after != before {
+		t.Fatalf("a preview stored, rendered or queued %d rows", after-before)
+	}
+
+	// Unsaved text previews in place of the draft, which stays as it was.
+	r = bob.api("POST", "/items/"+th+"/preview", map[string]any{"content_md": "Mine.\n\n![[" + f + "]]"})
+	expect(t, r, 200)
+	if n := len(r.json(t)["problems"].([]any)); n != 0 {
+		t.Fatalf("clean text: %s", r.body)
+	}
+	if md := bob.api("GET", "/items/"+th, nil).json(t)["draft_md"].(string); !strings.Contains(md, unknown) {
+		t.Fatalf("a preview changed the draft: %q", md)
+	}
+
+	// Publish's other refusals come back as problems.
+	refusal := func(id string, body map[string]any, want string) {
+		t.Helper()
+		r := alice.api("POST", "/items/"+id+"/preview", body)
+		expect(t, r, 200)
+		ps := r.json(t)["problems"].([]any)
+		if len(ps) != 1 || !strings.Contains(ps[0].(map[string]any)["reason"].(string), want) {
+			t.Fatalf("want %q: %s", want, r.body)
+		}
+	}
+	refusal(f, nil, "no change since v1")
+	refusal(f, map[string]any{"content_md": strings.Repeat("x", 2001)}, "the cap is 2000")
+	refusal(f, map[string]any{"content_md": "  "}, "the draft is empty")
+
+	tok := bob.api("POST", "/tokens", map[string]any{"name": "r", "scopes": []string{"items:read"}}).json(t)["token"].(string)
+	expect(t, (&user{e: e, token: tok, origin: bob.origin}).api("POST", "/items/"+th+"/preview", nil), 200)
+	tok = bob.api("POST", "/tokens", map[string]any{"name": "w", "scopes": []string{"items:write"}}).json(t)["token"].(string)
+	expect(t, (&user{e: e, token: tok, origin: bob.origin}).api("POST", "/items/"+th+"/preview", nil), 403)
+	expect(t, alice.api("POST", "/items/"+th+"/preview", nil), 404)
+}

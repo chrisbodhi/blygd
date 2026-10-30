@@ -39,7 +39,10 @@ on the command line or in the environment. Each test gets a fresh database.
   implemented by `reader.Snapshots`: a read-only lookup, scoped to the
   publisher's own subscriptions and called before the publish
   transaction, whose results are only ever baked as a §10.2 snapshot, an
-  `[[id]]` anchor, or a frozen `cited`. Do not widen it. The reverse
+  `[[id]]` anchor, or a frozen `cited`. Its one other caller is
+  `Studio.Preview`, which composes the same way in a read-only
+  transaction and returns the result without storing it. Do not widen it
+  further. The reverse
   holds too: `internal/reader` never queries plane-1 tables, and reads a
   same-instance origin through its rendered surface. `internal/mention`
   reads the mirror only in `importedPage`, never writes plane 1, and asks

@@ -451,6 +451,7 @@ async function viewEditor(id) {
   note.value = it.draft_note || "";
   const count = h("span", { class: "muted small" });
   const problems = h("div");
+  const previewed = h("div");
   const updateCount = () => (count.textContent = kind === "fragment" ? `${text.value.length} / 2000` : `${text.value.length} characters`);
   text.addEventListener("input", updateCount);
   updateCount();
@@ -475,8 +476,32 @@ async function viewEditor(id) {
     rev = (await api("PATCH", "/items/" + id, { content_md: text.value, note: note.value, draft_rev: rev })).draft_rev;
   }
 
+  // preview shows what publishing the text in the editor would put out now,
+  // saved or not. A new item is saved first: a preview needs its id.
+  async function preview() {
+    problems.replaceChildren();
+    previewed.replaceChildren();
+    try {
+      if (!id) await save();
+      const p = await api("POST", `/items/${id}/preview`, { content_md: text.value });
+      const notes = [
+        ...p.problems.map((x) => h("li", {}, h("code", {}, x.at), " ", x.reason)),
+        ...p.warnings.map((w) => h("li", {}, w))];
+      if (notes.length) {
+        problems.replaceChildren(h("div", { class: "problems" },
+          h("strong", {}, p.problems.length ? "Would not publish" : "Would publish, with warnings"), h("ul", {}, notes)));
+      }
+      previewed.replaceChildren(h("div", { class: "card" },
+        h("div", { class: "meta" }, "Preview: nothing is saved or sent"),
+        h("div", { class: "rich" }, richOf(p.content_html))));
+    } catch (e) {
+      toast(e.message);
+    }
+  }
+
   async function publish() {
     problems.replaceChildren();
+    previewed.replaceChildren();
     try {
       await save();
       const r = await api("POST", `/items/${id}/publish`, note.value ? { note: note.value, draft_rev: rev } : { draft_rev: rev });
@@ -499,6 +524,7 @@ async function viewEditor(id) {
   const latest = it.versions && it.versions.length ? it.versions[it.versions.length - 1] : null;
   const actions = h("div", { class: "row" },
     h("button", { onclick: () => attempt(save, "Saved") }, "Save draft"),
+    h("button", { onclick: preview }, "Preview"),
     h("button", { class: "primary", onclick: publish }, it.version ? "Publish changes" : "Publish"));
   const more = id && it.version ? h("div", { class: "row" },
     it.url ? h("a", { href: it.url, target: "_blank", rel: "noopener" }, "Open public page ↗") : null,
@@ -522,7 +548,7 @@ async function viewEditor(id) {
     it.stub_of ? h("p", { class: "muted small" }, "A response to ", h("code", {}, it.stub_of.url || it.stub_of.id)) : null,
     h("label", { for: "md" }, "Markdown"), text, h("div", {}, count),
     h("label", { for: "note" }, "Note"), note,
-    problems, actions, more, del,
+    problems, actions, previewed, more, del,
     id ? h("p", { class: "muted small" }, "id ", h("code", {}, id)) : null,
   );
 }

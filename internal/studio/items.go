@@ -479,31 +479,13 @@ func (s *Studio) Publish(ctx context.Context, originID int64, id string, opts Pu
 		if it.DraftMD != pre.DraftMD || opts.IfRev != "" && it.DraftRev != opts.IfRev {
 			return stale("the draft changed while publishing; read it again")
 		}
-		page := blyg.DefaultPage(it.Kind, it.ID)
-		if it.Page != nil {
-			page = *it.Page
-		}
-		var gen []blyg.GenMeta
-		if it.Generation != nil {
-			if err := json.Unmarshal(it.Generation, &gen); err != nil {
-				return fmt.Errorf("stored generation is malformed: %w", err)
-			}
-		}
-		rs := &resolver{ctx: ctx, tx: tx, origin: o, self: id, imports: imports}
-		c, err := blyg.Compose(blyg.ComposeInput{
-			ContentMD: it.DraftMD, Thread: it.Kind == "thread", PageURL: o.BaseURL + page, Origin: o.BaseURL,
-			Resolve: rs.resolve, Generation: gen,
-		})
+		b, err := s.compose(ctx, tx, o, it, imports, false)
 		if err != nil {
 			return err
 		}
-		media := blyg.MediaRefs(c.ContentHTML, o.BaseURL)
-		missing, err := recordMedia(ctx, tx, o, media)
-		if err != nil {
-			return err
-		}
-		if problems := append(c.Problems, missing...); len(problems) > 0 {
-			return unpublishable(problems)
+		c, page, media, rs := b.Composed, b.page, b.media, b.rs
+		if len(c.Problems) > 0 {
+			return unpublishable(c.Problems)
 		}
 		md := c.ContentMD
 		if strings.TrimSpace(md) == "" {
@@ -546,9 +528,7 @@ func (s *Studio) Publish(ctx context.Context, originID int64, id string, opts Pu
 				// §5.9: each remote entry carries its human half, frozen now.
 				c.Transclusions[i].Cited = cited(rs.quoted[t.Origin+" "+t.ID], at)
 				if !t.Pinned {
-					res.Warnings = append(res.Warnings, fmt.Sprintf(
-						"![[%s]] quotes v%d at %s, which is not pinned: if it is withdrawn, this thread cannot be republished until the quote is removed (§10.2)",
-						t.ID, t.Version, t.Origin))
+					res.Warnings = append(res.Warnings, unpinnedQuote(t))
 				}
 			}
 			b, err := json.Marshal(c.Transclusions)
@@ -636,6 +616,140 @@ func (s *Studio) Publish(ctx context.Context, originID int64, id string, opts Pu
 		return nil, err
 	}
 	return res, nil
+}
+
+// unpinnedQuote is §10.2's notice for a remote quote of an unpinned version.
+func unpinnedQuote(t *blyg.Target) string {
+	return fmt.Sprintf("![[%s]] quotes v%d at %s, which is not pinned: if it is withdrawn, this thread cannot be republished until the quote is removed (§10.2)",
+		t.ID, t.Version, t.Origin)
+}
+
+// built is a draft composed as publishing it now would compose it.
+type built struct {
+	*blyg.Composed // Problems includes media the draft names and this origin lacks
+	page           string
+	media          []blyg.MediaRef
+	rs             *resolver
+}
+
+// compose composes it's draft in tx as a publish now would: local ids first,
+// then the imports looked up before the transaction (§10.2), with the
+// draft's own media checked. It only reads, so a preview runs it in a
+// read-only transaction.
+func (s *Studio) compose(ctx context.Context, tx pgx.Tx, o *Origin, it *Item, imports map[string][]Snapshot, preview bool) (*built, error) {
+	page := blyg.DefaultPage(it.Kind, it.ID)
+	if it.Page != nil {
+		page = *it.Page
+	}
+	var gen []blyg.GenMeta
+	if it.Generation != nil {
+		if err := json.Unmarshal(it.Generation, &gen); err != nil {
+			return nil, fmt.Errorf("stored generation is malformed: %w", err)
+		}
+	}
+	rs := &resolver{ctx: ctx, tx: tx, origin: o, self: it.ID, imports: imports}
+	c, err := blyg.Compose(blyg.ComposeInput{
+		ContentMD: it.DraftMD, Thread: it.Kind == "thread", PageURL: o.BaseURL + page, Origin: o.BaseURL,
+		Resolve: rs.resolve, Generation: gen, Preview: preview,
+	})
+	if err != nil {
+		return nil, err
+	}
+	media := blyg.MediaRefs(c.ContentHTML, o.BaseURL)
+	missing, err := recordMedia(ctx, tx, o, media)
+	if err != nil {
+		return nil, err
+	}
+	c.Problems = append(c.Problems, missing...)
+	return &built{Composed: c, page: page, media: media, rs: rs}, nil
+}
+
+// Preview is what publishing a draft now would put on the wire. It is
+// stored nowhere and sent nowhere.
+type Preview struct {
+	ContentMD     string           `json:"content_md"`   // the wire content_md: [TK] scopes stripped (§5.7)
+	ContentHTML   string           `json:"content_html"` // bakes other origins' bytes (§10.2): sanitize to show it (§14)
+	Transclusions []blyg.Reference `json:"transclusions"`
+	Links         []blyg.Link      `json:"links"`
+	Generated     []blyg.Generated `json:"generated"`
+	// Problems is every reason a publish would be refused now; empty means
+	// it would go through.
+	Problems []blyg.Problem `json:"problems"`
+	Warnings []string       `json:"warnings"`
+}
+
+// Preview composes id's draft, or contentMD in its place (an edit not yet
+// saved), exactly as Publish would now. Imported snapshots are looked up
+// the same way, before the transaction (§10.2), and the composition runs
+// in a read-only one. Every reason a publish would refuse is a problem,
+// not an error, and a directive that cannot bake is marked where it
+// stands. It does not check a fork's pin at its origin, which only
+// publishing fetches.
+func (s *Studio) Preview(ctx context.Context, originID int64, id string, contentMD *string) (*Preview, error) {
+	it, _, err := s.GetItem(ctx, originID, id)
+	if err != nil {
+		return nil, err
+	}
+	if contentMD != nil {
+		it.DraftMD = *contentMD
+	}
+	o, err := s.GetOrigin(ctx, originID)
+	if err != nil {
+		return nil, err
+	}
+	// The import lookup publish makes, made for a preview too (CLAUDE.md):
+	// what it returns is shown, never stored.
+	var imports map[string][]Snapshot
+	if ids := referencedIDs(it.DraftMD); len(ids) > 0 && s.Imports != nil {
+		if imports, err = s.Imports.Snapshots(ctx, o.OwnerID, ids); err != nil {
+			return nil, err
+		}
+	}
+	var p *Preview
+	err = tx.Run(ctx, s.Pool, pgx.TxOptions{AccessMode: pgx.ReadOnly}, func(ctx context.Context, tx pgx.Tx) error {
+		b, err := s.compose(ctx, tx, o, it, imports, true)
+		if err != nil {
+			return err
+		}
+		p = &Preview{ContentMD: b.ContentMD, ContentHTML: b.ContentHTML, Transclusions: b.Transclusions,
+			Links: b.Links, Generated: b.Generated, Problems: b.Problems, Warnings: []string{}}
+		if p.Links == nil {
+			p.Links = []blyg.Link{}
+		}
+		if p.Generated == nil {
+			p.Generated = []blyg.Generated{}
+		}
+		refuse := func(reason string) { p.Problems = append(p.Problems, blyg.Problem{At: "draft", Reason: reason}) }
+		// Publish's refusals, in its order.
+		switch n := utf8.RuneCountInString(b.ContentMD); {
+		case len(b.Problems) > 0:
+		case strings.TrimSpace(b.ContentMD) == "":
+			refuse("nothing to publish: the draft is empty")
+		case it.Kind == "fragment" && s.FragmentCap > 0 && n > s.FragmentCap:
+			refuse(fmt.Sprintf("fragment is %d characters; the cap is %d (§5.3)", n, s.FragmentCap))
+		case it.Version > 0 && !it.Withdrawn:
+			prev, err := scanVersion(tx.QueryRow(ctx, `SELECT `+versionCols+` FROM item_versions WHERE item_id = $1 AND version = $2`, id, it.Version))
+			if err != nil {
+				return err
+			}
+			if prev.ContentMD == b.ContentMD && prev.ContentHTML == b.ContentHTML {
+				refuse(fmt.Sprintf("no change since v%d", it.Version))
+			}
+		}
+		if p.Problems == nil {
+			p.Problems = []blyg.Problem{}
+		}
+		for _, t := range b.Quoted {
+			if t.Origin != "" && !t.Pinned {
+				p.Warnings = append(p.Warnings, unpinnedQuote(t))
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return p, nil
 }
 
 // Withdraw publishes a withdrawal endcap (§9). It is reversible: publishing

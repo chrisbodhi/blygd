@@ -71,6 +71,7 @@ func (a *API) routes() []route {
 		{"GET /api/items/{id}", account.ScopeItemsRead, a.getItem},
 		{"PATCH /api/items/{id}", account.ScopeItemsWrite, a.patchItem},
 		{"DELETE /api/items/{id}", account.ScopeItemsWrite, a.deleteItem},
+		{"POST /api/items/{id}/preview", account.ScopeItemsRead, a.preview},
 		{"POST /api/items/{id}/publish", account.ScopeItemsPublish, a.publish},
 		{"POST /api/items/{id}/withdraw", account.ScopeItemsWithdraw, a.withdraw},
 		{"POST /api/items/{id}/versions/{n}/pin", account.ScopeItemsPin, a.pin},
@@ -487,6 +488,37 @@ func optionalNote(r *http.Request) (*string, error) {
 		return nil, err
 	}
 	return in.Note, nil
+}
+
+// previewNotice travels with a preview: a thread's quotes are other
+// origins' bytes, baked verbatim as publish would bake them (§10.2).
+const previewNotice = "content_html bakes other origins' bytes verbatim, as publishing would. Sanitize or sandbox it before rendering (§14)."
+
+// preview composes the draft, or content_md in its place, as publishing it
+// now would, and stores nothing. A POST because it carries a body; it is a
+// read, so items:read is enough.
+func (a *API) preview(w http.ResponseWriter, r *http.Request) error {
+	var in struct {
+		ContentMD *string `json:"content_md"`
+	}
+	if r.ContentLength != 0 {
+		if err := decode(r, &in); err != nil {
+			return err
+		}
+	}
+	o, err := a.origin(r)
+	if err != nil {
+		return err
+	}
+	p, err := a.Studio.Preview(r.Context(), o.ID, r.PathValue("id"), in.ContentMD)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, 200, struct {
+		*studio.Preview
+		Notice string `json:"notice"`
+	}{p, previewNotice})
+	return nil
 }
 
 func (a *API) publish(w http.ResponseWriter, r *http.Request) error {
