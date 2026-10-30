@@ -102,18 +102,19 @@ function fields(s, depth) {
   return rows.length ? h("ul", { class: "fields" }, rows) : null;
 }
 
-function schemaBlock(doc, s) {
+// schemaBlock shows a schema; label, when given, leads its first line.
+function schemaBlock(doc, s, label) {
   if (!s) return null;
   const shown = s.$ref ? resolve(doc, s) : s;
   return h("div", { class: "schema" },
-    h("div", { class: "field" }, h("span", { class: "type" }, typeOf(s)), facts(shown).map((f) => h("span", { class: "fact" }, f))),
+    h("div", { class: "field" }, label, h("span", { class: "type" }, typeOf(s)), facts(shown).map((f) => h("span", { class: "fact" }, f))),
     s.$ref ? null : prose(s.description, "desc"),
     s.$ref ? null : fields(s.items && !s.items.$ref ? s.items : s, 0));
 }
 
 function bodyOf(doc, content) {
   return Object.entries(content || {}).map(([type, media]) =>
-    h("div", {}, h("div", { class: "small muted" }, type), schemaBlock(doc, media.schema)));
+    schemaBlock(doc, media.schema, h("span", { class: "small muted" }, type)));
 }
 
 function operation(doc, path, method, op, shared) {
@@ -146,7 +147,7 @@ function operation(doc, path, method, op, shared) {
     Object.entries(op.responses || {}).sort(([a], [b]) => a.localeCompare(b)).map(([code, r]) => {
       const res = resolve(doc, r);
       return h("div", { class: "response" },
-        h("div", { class: "field" }, h("span", { class: "code c" + code[0] }, code), h("span", {}, res.description || "")),
+        h("div", { class: "status" }, h("span", { class: "code c" + code[0] }, code), h("span", {}, res.description || "")),
         bodyOf(doc, res.content));
     }));
 }

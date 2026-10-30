@@ -8,6 +8,7 @@ main.docs { max-width: 56rem; }
 .docs h2 { font-size: 1.15rem; margin-top: 2rem; text-transform: capitalize; }
 .docs h3 { font-size: .95rem; margin: 1rem 0 .4rem; }
 .docs .card { scroll-margin-top: 3.5rem; }
+.docs .card > h3:first-child { margin-top: 0; }
 
 .op { padding: 0; }
 .op > summary { display: flex; gap: .6rem; align-items: baseline; flex-wrap: wrap; padding: .75rem 1rem; cursor: pointer; list-style: none; }
@@ -39,6 +40,9 @@ main.docs { max-width: 56rem; }
 .schema { margin: .3rem 0 .6rem; }
 
 .response { margin: .5rem 0; }
+.response .schema { margin: .1rem 0 0; }
+/* The code keeps its column; a long description wraps beside it. */
+.status { display: grid; grid-template-columns: auto 1fr; gap: .5rem; align-items: baseline; }
 .code { font-weight: 700; font-variant-numeric: tabular-nums; }
 .code.c2 { color: var(--accent); }
 .code.c4, .code.c5 { color: var(--danger); }
