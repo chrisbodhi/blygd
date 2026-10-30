@@ -23,13 +23,15 @@ import (
 // Channel is the NOTIFY channel.
 const Channel = "blygd_events"
 
-// Event is one hint. Exactly one of OriginID (an own origin: mentions) or
-// RemoteOriginID (an import, shared by every subscriber) says who may hear
-// it; Data is what the client receives.
+// Event is one hint. Exactly one of OriginID (an own origin: items and
+// mentions), RemoteOriginID (an import, shared by every subscriber) or
+// UserID (one user's private reading state) says who may hear it; Data is
+// what the client receives.
 type Event struct {
-	Type           string          `json:"type"` // import, mention, outbound
+	Type           string          `json:"type"` // import, item, mention, outbound, subscribe
 	OriginID       int64           `json:"origin_id,omitempty"`
 	RemoteOriginID int64           `json:"remote_origin_id,omitempty"`
+	UserID         int64           `json:"user_id,omitempty"`
 	Data           json.RawMessage `json:"data"`
 }
 
@@ -42,11 +44,21 @@ type Execer interface {
 // Notify sends an event. A failure is logged by the caller at most: an
 // event is a hint, and nothing depends on its delivery.
 func Notify(ctx context.Context, db Execer, typ string, originID, remoteOriginID int64, data any) error {
+	return send(ctx, db, Event{Type: typ, OriginID: originID, RemoteOriginID: remoteOriginID}, data)
+}
+
+// NotifyUser sends an event only userID's streams may hear.
+func NotifyUser(ctx context.Context, db Execer, typ string, userID int64, data any) error {
+	return send(ctx, db, Event{Type: typ, UserID: userID}, data)
+}
+
+func send(ctx context.Context, db Execer, e Event, data any) error {
 	d, err := json.Marshal(data)
 	if err != nil {
 		return err
 	}
-	ev, err := json.Marshal(Event{Type: typ, OriginID: originID, RemoteOriginID: remoteOriginID, Data: d})
+	e.Data = d
+	ev, err := json.Marshal(e)
 	if err != nil {
 		return err
 	}

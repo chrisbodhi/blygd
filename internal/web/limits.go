@@ -30,6 +30,7 @@ var routeCosts = map[string]string{
 	"POST /api/subscriptions/{sid}/resolve": costFetch,
 	"POST /api/subscriptions/{sid}/move":    costFetch,
 	"POST /api/subscriptions/{sid}/poll":    costFetch,
+	"POST /api/subscriptions/imports":       costFetch, // a url is fetched, and may resolve (§12.1)
 	"POST /api/items":                       costFetch, // a fork or stub target is fetched
 	"POST /api/items/{id}/publish":          costFetch, // remote pins are checked first
 	"GET /api/origin/export":                costExport,

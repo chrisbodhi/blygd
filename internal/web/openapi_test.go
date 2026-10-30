@@ -241,25 +241,36 @@ func checkResponse(t *testing.T, method, path string, status int, ctype string, 
 	}
 }
 
+// matchPath finds the documented path for a request path. Like the router,
+// it prefers the most specific: /api/subscriptions/imports over
+// /api/subscriptions/{sid}.
 func matchPath(paths map[string]any, path string) (string, map[string]any) {
 	segs := strings.Split(path, "/")
-	for pattern, item := range paths {
+	best, bestLiterals := "", -1
+	for pattern := range paths {
 		ps := strings.Split(pattern, "/")
 		if len(ps) != len(segs) {
 			continue
 		}
-		ok := true
+		literals := 0
 		for i := range ps {
-			if !strings.HasPrefix(ps[i], "{") && ps[i] != segs[i] {
-				ok = false
+			if strings.HasPrefix(ps[i], "{") {
+				continue
+			}
+			if ps[i] != segs[i] {
+				literals = -1
 				break
 			}
+			literals++
 		}
-		if ok {
-			return pattern, item.(map[string]any)
+		if literals > bestLiterals {
+			best, bestLiterals = pattern, literals
 		}
 	}
-	return "", nil
+	if best == "" {
+		return "", nil
+	}
+	return best, paths[best].(map[string]any)
 }
 
 func deref(doc map[string]any, s map[string]any) map[string]any {

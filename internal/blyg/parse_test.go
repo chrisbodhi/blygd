@@ -1,6 +1,7 @@
 package blyg
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -101,5 +102,36 @@ func TestRenderOPML(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in\n%s", want, out)
 		}
+	}
+}
+
+// OPML from the wild: folders, entries with only a page, repeats, title
+// without text, odd case, and a truncated tail. A feed is not OPML.
+func TestParseOPML(t *testing.T) {
+	got, err := ParseOPML([]byte(`<?xml version="1.0"?>
+<opml version="1.0"><head><title>mine</title></head><body>
+  <outline text="Friends">
+    <outline type="rss" text="Alice" xmlUrl=" https://a.example/feed.xml " htmlUrl="https://a.example/"/>
+    <outline title="Bob" htmlURL="https://b.example/"/>
+  </outline>
+  <outline type="rss" text="Alice again" xmlUrl="https://a.example/feed.xml"/>
+  <OUTLINE text="Carol" XMLURL="https://c.example/rss"/>
+  <outline text="Dan" xmlUrl="https://d.example/feed`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []BlogrollEntry{
+		{Text: "Alice", XMLURL: "https://a.example/feed.xml", HTMLURL: "https://a.example/"},
+		{Text: "Bob", HTMLURL: "https://b.example/"},
+		{Text: "Carol", XMLURL: "https://c.example/rss"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %+v\nwant %+v", got, want)
+	}
+	if _, err := ParseOPML([]byte(`<rss version="2.0"><channel><title>x</title></channel></rss>`)); err == nil {
+		t.Error("a feed parsed as OPML")
+	}
+	if _, err := ParseOPML([]byte(`not xml at all`)); err == nil {
+		t.Error("text parsed as OPML")
 	}
 }

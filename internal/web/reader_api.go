@@ -25,6 +25,9 @@ func (a *API) readerRoutes() []route {
 		{"POST /api/subscriptions/{sid}/resolve", account.ScopeReaderRead, a.reresolve},
 		{"POST /api/subscriptions/{sid}/move", account.ScopeReaderWrite, a.moveSubscription},
 		{"POST /api/subscriptions/{sid}/poll", account.ScopeReaderWrite, a.pollSubscription},
+		{"POST /api/subscriptions/imports", account.ScopeReaderWrite, a.importSubscriptions},
+		{"GET /api/subscriptions/imports", account.ScopeReaderRead, a.listImports},
+		{"DELETE /api/subscriptions/imports", account.ScopeReaderWrite, a.clearImports},
 
 		{"GET /api/reader/feed", account.ScopeReaderRead, a.readerFeed},
 		{"GET /api/reader/items/{sid}/{iid}", account.ScopeReaderRead, a.readerItem},
@@ -75,6 +78,52 @@ func (a *API) subscribe(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	writeJSON(w, 201, map[string]any{"subscription": s, "resolution": res})
+	return nil
+}
+
+// importSubscriptions queues an OPML list, sent or fetched, for the
+// importer to resolve entry by entry.
+func (a *API) importSubscriptions(w http.ResponseWriter, r *http.Request) error {
+	var in struct {
+		OPML string `json:"opml"`
+		URL  string `json:"url"`
+	}
+	if err := decode(r, &in); err != nil {
+		return err
+	}
+	uid := principal(r.Context()).UserID
+	var res *reader.ImportResult
+	var err error
+	switch {
+	case (in.OPML == "") == (in.URL == ""):
+		return badRequest("send one of opml or url")
+	case in.OPML != "":
+		res, err = a.Reader.ImportOPML(r.Context(), uid, []byte(in.OPML))
+	default:
+		res, err = a.Reader.ImportFrom(r.Context(), uid, in.URL)
+	}
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusAccepted, res)
+	return nil
+}
+
+func (a *API) listImports(w http.ResponseWriter, r *http.Request) error {
+	es, err := a.Reader.Imports(r.Context(), principal(r.Context()).UserID, r.URL.Query().Get("status"))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, 200, map[string]any{"imports": es})
+	return nil
+}
+
+func (a *API) clearImports(w http.ResponseWriter, r *http.Request) error {
+	n, err := a.Reader.ClearImports(r.Context(), principal(r.Context()).UserID, r.URL.Query().Get("status"))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, 200, map[string]any{"deleted": n})
 	return nil
 }
 

@@ -14,7 +14,7 @@ import (
 // is internal/archtest's import-graph test.
 func TestStudioNeverQueriesTheMirror(t *testing.T) {
 	archtest.Check(t, ".", archtest.Rule{
-		Banned: regexp.MustCompile(`(?i)\b(FROM|JOIN|INTO|UPDATE)\s+(remote_origins|imported_items|imported_pins|subscriptions|reads|hopper_members)\b`),
+		Banned: regexp.MustCompile(`(?i)\b(FROM|JOIN|INTO|UPDATE)\s+(remote_origins|imported_items|imported_pins|subscriptions|subscription_imports|reads|hopper_members)\b`),
 		Why:    "this queries the import mirror or overlay: the studio renders plane 1 only",
 	})
 }

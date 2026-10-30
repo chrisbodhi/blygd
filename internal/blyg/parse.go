@@ -307,6 +307,68 @@ type BlogrollEntry struct {
 	HTMLURL string
 }
 
+// ParseOPML reads the entries of an OPML document: a blogroll (§11), or a
+// subscription list exported from any reader. Outlines nest in folders in
+// the wild, so every outline with a URL counts, at any depth; an outline
+// with neither xmlUrl nor htmlUrl is a folder and is skipped. Entries come
+// back in document order, repeats removed. It is an error only when the
+// document is not OPML at all.
+func ParseOPML(body []byte) ([]BlogrollEntry, error) {
+	d := newXMLDecoder(body)
+	var out []BlogrollEntry
+	seen := map[string]bool{}
+	root := ""
+	for {
+		tok, err := d.Token()
+		if err != nil {
+			if root == "" {
+				return nil, errors.New("not an OPML document")
+			}
+			return out, nil // the end, or a broken tail: keep what came before
+		}
+		el, ok := tok.(xml.StartElement)
+		if !ok {
+			continue
+		}
+		if root == "" {
+			if !strings.EqualFold(el.Name.Local, "opml") {
+				return nil, errors.New("not an OPML document")
+			}
+			root = el.Name.Local
+			continue
+		}
+		if !strings.EqualFold(el.Name.Local, "outline") {
+			continue
+		}
+		var e BlogrollEntry
+		var title string
+		for _, a := range el.Attr {
+			switch strings.ToLower(a.Name.Local) {
+			case "xmlurl":
+				e.XMLURL = strings.TrimSpace(a.Value)
+			case "htmlurl":
+				e.HTMLURL = strings.TrimSpace(a.Value)
+			case "text":
+				e.Text = strings.TrimSpace(a.Value)
+			case "title":
+				title = strings.TrimSpace(a.Value)
+			}
+		}
+		if e.Text == "" {
+			e.Text = title
+		}
+		key := e.XMLURL
+		if key == "" {
+			key = e.HTMLURL
+		}
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, e)
+	}
+}
+
 // RenderOPML renders blogroll.opml: standard OPML 2.0, no extensions (§11).
 func RenderOPML(title string, entries []BlogrollEntry) []byte {
 	var b strings.Builder

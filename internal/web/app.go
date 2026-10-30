@@ -65,13 +65,15 @@ func New(cfg *config.Config, pool *pgxpool.Pool, log *slog.Logger) *App {
 	}
 }
 
-// Run runs the background work, the event hub, the mention workers and
-// the poller, until ctx ends, and returns once all of it has stopped: no
-// batch is mid-query when the caller closes the pool (review P5).
+// Run runs the background work, the event hub, the mention workers, the
+// poller and the subscription importer, until ctx ends, and returns once
+// all of it has stopped: no batch is mid-query when the caller closes the
+// pool (review P5).
 func (a *App) Run(ctx context.Context) {
 	var wg sync.WaitGroup
 	wg.Go(func() { a.Hub.Run(ctx) })
 	wg.Go(func() { a.Workers.Run(ctx) })
 	wg.Go(func() { a.Reader.Run(ctx) })
+	wg.Go(func() { a.Reader.RunImports(ctx) })
 	wg.Wait()
 }

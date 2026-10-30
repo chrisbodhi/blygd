@@ -320,6 +320,20 @@ is returned verbatim with a `notice` that clients must sanitize (§14).
 Hopper members that are imported items carry the verbatim document, or
 none once withdrawn.
 
+**Subscription imports**: an OPML list, a blogroll (§11) or another
+reader's export, sent inline or fetched from a URL (an OPML file, or a
+blyg whose manifest names a blogroll), becomes one
+`subscription_imports` row per entry, up to 1,000. A worker beside the
+poller leases due rows the poller's way and resolves each through
+`Subscribe`, so §12.1 and the subscription cap apply unchanged, and a
+blyg's feed upgrades to the blyg (§11). It takes one entry per user per
+batch, so one long list cannot hold back another user's. A failure
+waits 5 minutes, then 20, and fails on the third try; the cap fails an
+entry at once. An entry's title becomes the display title only when it
+differs from the origin's own and the user has not named it, and
+nothing imported joins the user's blogroll (§11: opt-in). Each outcome
+is a `subscribe` hint to that user alone.
+
 ## Threads (Phase 3)
 
 **Composition** is `blyg.Compose`, pure apart from a resolver callback,
@@ -625,17 +639,19 @@ reconnect, re-fetch.
   `error`); the receiver and verifier (`mention`); the sender
   (`outbound`); the studio, on every change to an own item (`item`:
   `change`, and `version` or `draft_rev` where they apply, so a client
-  can tell its own edit from another's). A studio event is sent inside
-  the change's transaction, so it is heard on commit and never for a
-  change that rolled back. Progress is never stored: it is transient, and the
-  counts are in the API.
+  can tell its own edit from another's); the importer, per entry tried
+  (`subscribe`, to the importing user only). A studio event is sent
+  inside the change's transaction, so it is heard on commit and never
+  for a change that rolled back. Progress is never stored: it is
+  transient, and the counts are in the API.
 - **Transport:** Postgres `LISTEN/NOTIFY` on `blygd_events`, so any
   process can send and every process's streams hear. `internal/events`
   has one hijacked listening connection and a fan-out hub. A slow
   subscriber drops hints rather than slowing others.
 - **Per stream:** events are filtered by scope and ownership (imports
-  of the user's subscriptions with `reader:read`; their own items with
-  `items:read`; their origin's mentions and sends with `mentions:read`). The server's write deadline
+  of the user's subscriptions, and their own subscription imports, with
+  `reader:read`; their own items with `items:read`; their origin's
+  mentions and sends with `mentions:read`). The server's write deadline
   is lifted for the stream, there is a heartbeat every 25 s, and at most
   8 streams per user. Requests share the process context, so a shutdown
   ends streams at once.

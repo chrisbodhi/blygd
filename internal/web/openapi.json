@@ -104,7 +104,7 @@
           "meta"
         ],
         "summary": "A Server-Sent Events stream of change hints for this user.",
-        "description": "Each event names what changed, never the state: re-fetch what you show. Events, by type:\n\n- `import` (needs reader:read): a poll of one of your subscriptions finished. `{subscription_id, items, more, error?}`, where `more` means a backfill continues with the next batch in about a minute.\n- `item` (needs items:read): one of your items changed, from any client. `{id, change, version?, draft_rev?}`, where change is created, edited, deleted, published, withdrawn or pinned; version is the one published, withdrawn or pinned; and draft_rev is the draft's revision after a create, edit or publish, so a client can tell its own change from another's.\n- `mention` (needs mentions:read): an inbound mention to your origin arrived or changed. `{id, status, relation?}`.\n- `outbound` (needs mentions:read): one of your outbound mentions was attempted. `{id, status, last_result}`.\n\nA heartbeat comment arrives every 25 s. Events missed while disconnected are not replayed; fetch state on reconnect. Browsers should read this with fetch(), which can send the Authorization header; EventSource cannot. At most 8 streams per user.",
+        "description": "Each event names what changed, never the state: re-fetch what you show. Events, by type:\n\n- `import` (needs reader:read): a poll of one of your subscriptions finished. `{subscription_id, items, more, error?}`, where `more` means a backfill continues with the next batch in about a minute.\n- `subscribe` (needs reader:read): an entry of one of your subscription imports was tried. `{id, status, subscription_id?, error?}`, where status is subscribed, failed, or pending when it will be tried again.\n- `item` (needs items:read): one of your items changed, from any client. `{id, change, version?, draft_rev?}`, where change is created, edited, deleted, published, withdrawn or pinned; version is the one published, withdrawn or pinned; and draft_rev is the draft's revision after a create, edit or publish, so a client can tell its own change from another's.\n- `mention` (needs mentions:read): an inbound mention to your origin arrived or changed. `{id, status, relation?}`.\n- `outbound` (needs mentions:read): one of your outbound mentions was attempted. `{id, status, last_result}`.\n\nA heartbeat comment arrives every 25 s. Events missed while disconnected are not replayed; fetch state on reconnect. Browsers should read this with fetch(), which can send the Authorization header; EventSource cannot. At most 8 streams per user.",
         "security": [
           {
             "bearer": []
@@ -2013,6 +2013,172 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/api/subscriptions/imports": {
+      "post": {
+        "operationId": "importSubscriptions",
+        "tags": [
+          "reader"
+        ],
+        "summary": "Queue an OPML list of subscriptions.",
+        "description": "Send an OPML document (a blogroll, §11, or another reader's export) as opml, or a url: an OPML file, or a blyg whose manifest names a blogroll (§6.1). Every entry with an http(s) xmlUrl, or an htmlUrl when it has none, is queued and resolved in the background like POST /api/subscriptions (§12.1), at most one per user at a time, so a long list costs no subscribe budget. A blyg's feed upgrades to the blyg itself (§11). Entries already queued or subscribed are left alone; failed ones are tried again. An entry's title becomes the subscription's display title when it differs from the origin's own and you have not named it. Imported subscriptions never join your blogroll (§11: inclusion is opt-in). Watch GET /api/subscriptions/imports, or the subscribe event.",
+        "security": [
+          {
+            "bearer": [
+              "reader:write"
+            ]
+          }
+        ],
+        "x-blygd-cost": "fetch",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Queued.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      },
+      "get": {
+        "operationId": "listImports",
+        "tags": [
+          "reader"
+        ],
+        "summary": "List queued subscription imports.",
+        "security": [
+          {
+            "bearer": [
+              "reader:read"
+            ]
+          }
+        ],
+        "x-blygd-cost": "default",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "subscribed",
+                "failed"
+              ]
+            },
+            "description": "Only entries in this status."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "clearImports",
+        "tags": [
+          "reader"
+        ],
+        "summary": "Forget queued imports.",
+        "description": "Forgets the entries in status, or all of them. No subscription changes, and a pending entry forgotten is never tried.",
+        "security": [
+          {
+            "bearer": [
+              "reader:write"
+            ]
+          }
+        ],
+        "x-blygd-cost": "default",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "subscribed",
+                "failed"
+              ]
+            },
+            "description": "Only entries in this status."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClearResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
           }
         }
       }
@@ -4665,6 +4831,136 @@
         },
         "required": [
           "marked"
+        ],
+        "additionalProperties": false
+      },
+      "ImportRequest": {
+        "type": "object",
+        "description": "Exactly one of opml or url.",
+        "properties": {
+          "opml": {
+            "type": "string",
+            "description": "An OPML document, up to the 1 MB request limit."
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "An OPML file, or a blyg whose manifest names a blogroll."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ImportResult": {
+        "type": "object",
+        "properties": {
+          "entries": {
+            "type": "integer",
+            "description": "Entries with an http(s) URL, at most 1000."
+          },
+          "queued": {
+            "type": "integer",
+            "description": "New entries, and failed ones queued again."
+          }
+        },
+        "required": [
+          "entries",
+          "queued"
+        ],
+        "additionalProperties": false
+      },
+      "ImportEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "url": {
+            "type": "string",
+            "description": "The entry's xmlUrl, or its htmlUrl."
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The entry's text, as the list wrote it."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "subscribed",
+              "failed"
+            ]
+          },
+          "subscription_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Once subscribed."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The last failure. A pending entry with one is waiting to try again; three failures and it fails."
+          },
+          "attempts": {
+            "type": "integer"
+          },
+          "next_attempt_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "title",
+          "status",
+          "subscription_id",
+          "error",
+          "attempts",
+          "next_attempt_at",
+          "created_at",
+          "updated_at"
+        ],
+        "additionalProperties": false
+      },
+      "ImportList": {
+        "type": "object",
+        "properties": {
+          "imports": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImportEntry"
+            }
+          }
+        },
+        "required": [
+          "imports"
+        ],
+        "additionalProperties": false
+      },
+      "ClearResult": {
+        "type": "object",
+        "properties": {
+          "deleted": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "deleted"
         ],
         "additionalProperties": false
       }

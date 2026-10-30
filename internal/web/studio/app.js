@@ -301,6 +301,8 @@ function onEvent(type, d) {
     else delete importing[d.subscription_id];
     renderImporting();
     if (!d.more) offerRefresh("reader");
+  } else if (type === "subscribe") {
+    offerRefresh("reader"); // an imported entry was tried
   } else if (type === "mention") {
     offerRefresh("mentions");
   } else if (type === "outbound" && d.status !== "sent") {
@@ -541,9 +543,13 @@ function bumpUnread(sid, delta) {
 }
 
 async function viewReader() {
-  const [subs, feed] = await Promise.all([
+  const [subs, feed, waiting, failed] = await Promise.all([
     attempt(() => api("GET", "/subscriptions")),
     attempt(() => api("GET", "/reader/feed?limit=50" + (unreadOnly ? "&unread=true" : "") + (readerSub ? "&subscription=" + readerSub : ""))),
+    // Only what is still to come or went wrong: a finished import can be a
+    // thousand rows.
+    attempt(() => api("GET", "/subscriptions/imports?status=pending")),
+    attempt(() => api("GET", "/subscriptions/imports?status=failed")),
   ]);
   if (!subs || !feed) return;
   const list = subs.subscriptions || [];
@@ -569,6 +575,8 @@ async function viewReader() {
         toast(e.body.trail ? `${e.message} (tried ${e.body.trail.length} URLs)` : e.message);
       }
     } }, h("div", { class: "row" }, url, h("button", { class: "primary" }, "Subscribe"))),
+    importList(),
+    importQueue(waiting ? waiting.imports : [], failed ? failed.imports : []),
     h("div", { id: "importing" }),
     h("div", { class: "chips" },
       h("button", { class: readerSub === 0 ? "on" : "", onclick: () => { readerSub = 0; route(); } }, "All"),
@@ -586,6 +594,40 @@ async function viewReader() {
     feed.items && feed.items.length ? feed.items.map(readerCard) : h("p", { class: "muted" }, list.length ? "Nothing unread." : "Subscribe to someone to start reading."),
   );
   renderImporting();
+}
+
+// importList takes an OPML file (a blogroll, or another reader's export) or
+// the address of one, or of a blyg with a blogroll. The entries resolve in
+// the background; importQueue shows what is still to come.
+function importList() {
+  const queued = (r) => { toast(`Queued ${r.queued} of ${r.entries}`); route(); };
+  const file = h("input", { type: "file", accept: ".opml,.xml,text/x-opml,application/xml", "aria-label": "OPML file", onchange: async () => {
+    const f = file.files[0];
+    if (!f) return;
+    const r = await attempt(async () => api("POST", "/subscriptions/imports", { opml: await f.text() }));
+    if (r) queued(r);
+  } });
+  const url = h("input", { name: "list", type: "url", placeholder: "https://… an OPML file, or a blyg with a blogroll", autocapitalize: "off", "aria-label": "Address of a list" });
+  return h("details", {}, h("summary", {}, "Import a list"),
+    h("p", { class: "muted small" }, "A blogroll or another reader's OPML export. Each entry is subscribed in the background; none joins your blogroll."),
+    file,
+    h("form", { onsubmit: async (ev) => {
+      ev.preventDefault();
+      const r = await attempt(() => api("POST", "/subscriptions/imports", { url: url.value.trim() }));
+      if (r) queued(r);
+    } }, h("div", { class: "row" }, url, h("button", {}, "Import"))));
+}
+
+function importQueue(waiting, failed) {
+  if (!waiting.length && !failed.length) return null;
+  return h("div", { class: "card" },
+    h("div", {}, h("strong", {}, "Importing"), " ", [
+      waiting.length ? `${waiting.length} waiting` : "",
+      failed.length ? `${failed.length} failed` : ""].filter(Boolean).join(" · ")),
+    failed.length ? h("ul", { class: "small" }, failed.map((e) => h("li", {}, e.title || e.url, h("span", { class: "muted" }, " — " + e.error)))) : null,
+    failed.length ? h("div", { class: "row" }, h("button", { onclick: async () => {
+      if (await attempt(() => api("DELETE", "/subscriptions/imports?status=failed"), "Cleared")) route();
+    } }, "Clear failed")) : null);
 }
 
 function subscriptionTools(s) {

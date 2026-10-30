@@ -11,12 +11,12 @@ import (
 )
 
 // GET /api/events is a Server-Sent Events stream of hints for the token's
-// user: import progress on their subscriptions (reader:read), changes to
-// their own items (items:read), and their origin's mentions and outbound
-// sends (mentions:read). An event says what
-// changed, never the state itself, so a client re-fetches what it shows and
-// a dropped stream loses nothing. Browsers read it with fetch(), which can
-// send the Authorization header (EventSource cannot).
+// user: import progress on their subscriptions and their subscription
+// imports (reader:read), changes to their own items (items:read), and
+// their origin's mentions and outbound sends (mentions:read). An event
+// says what changed, never the state itself, so a client re-fetches what
+// it shows and a dropped stream loses nothing. Browsers read it with
+// fetch(), which can send the Authorization header (EventSource cannot).
 
 // maxStreams caps one user's concurrent streams: each holds a goroutine and
 // a subscription for as long as a phone keeps a tab open.
@@ -114,6 +114,8 @@ func (a *API) visible(r *http.Request, p *account.Principal, originID int64, ev 
 		return a.Reader.Subscribed(r.Context(), p.UserID, ev.RemoteOriginID)
 	case "item":
 		return p.Can(account.ScopeItemsRead) && ev.OriginID == originID
+	case "subscribe":
+		return p.Can(account.ScopeReaderRead) && ev.UserID != 0 && ev.UserID == p.UserID
 	case "mention", "outbound":
 		return p.Can(account.ScopeMentionsRead) && ev.OriginID == originID
 	}

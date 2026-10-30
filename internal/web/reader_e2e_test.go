@@ -415,3 +415,70 @@ func TestMarkAllRead(t *testing.T) {
 	readOnly := &user{e: e, token: tok, origin: bob.origin}
 	expect(t, readOnly.api("POST", "/reader/read", map[string]any{"as_of": asOf}), 403)
 }
+
+// A blogroll becomes subscriptions: name an origin, and its manifest's
+// blogroll (§6.1, §11) is queued and resolved in the background, heard by
+// the importing user's streams alone.
+func TestSubscriptionImport(t *testing.T) {
+	e := newEnv(t, mention.DefaultRateLimits)
+	alice, bob, carol, dave := e.user("alice"), e.user("bob"), e.user("carol"), e.user("dave")
+	<-e.hub.Ready()
+	bobEv, _ := openStream(t, e.srv.URL, bob.token)
+	aliceEv, _ := openStream(t, e.srv.URL, alice.token)
+	carol.publish(t, carol.draft(t, map[string]any{"content_md": "from carol"}), 200)
+	sid := alice.subscribe(t, carol.origin)
+	expect(t, alice.api("PATCH", "/subscriptions/"+itoa(sid), map[string]any{"in_blogroll": true}), 200)
+
+	r := bob.api("POST", "/subscriptions/imports", map[string]any{"url": alice.origin})
+	expect(t, r, 202)
+	if m := r.json(t); m["entries"] != float64(1) || m["queued"] != float64(1) {
+		t.Fatalf("import of alice's blogroll: %s", r.body)
+	}
+	opml := `<opml version="2.0"><body><outline type="rss" text="Dave" htmlUrl="` + dave.origin + `"/></body></opml>`
+	r = bob.api("POST", "/subscriptions/imports", map[string]any{"opml": opml})
+	expect(t, r, 202)
+	if n, err := e.reader.ImportBatch(context.Background()); err != nil || n != 1 {
+		t.Fatalf("first batch: %d %v", n, err)
+	}
+	ev := next(t, bobEv, "subscribe")
+	if ev.Data["status"] != "subscribed" || ev.Data["subscription_id"] == nil {
+		t.Fatalf("subscribe event: %v", ev.Data)
+	}
+	none(t, aliceEv, "subscribe", "bob's import is bob's")
+	if _, err := e.reader.ImportBatch(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	next(t, bobEv, "subscribe")
+
+	r = bob.api("GET", "/subscriptions/imports", nil)
+	expect(t, r, 200)
+	imports := r.json(t)["imports"].([]any)
+	if len(imports) != 2 {
+		t.Fatalf("imports: %s", r.body)
+	}
+	subs := map[string]bool{}
+	for _, s := range bob.api("GET", "/subscriptions", nil).json(t)["subscriptions"].([]any) {
+		subs[s.(map[string]any)["origin"].(string)] = s.(map[string]any)["in_blogroll"].(bool)
+	}
+	if blogrolled, ok := subs[carol.origin]; !ok || blogrolled {
+		t.Fatalf("carol: subscribed %v, in bob's blogroll %v (§11: opt-in)", ok, blogrolled)
+	}
+	if _, ok := subs[dave.origin]; !ok {
+		t.Fatalf("dave not subscribed: %v", subs)
+	}
+
+	expect(t, bob.api("POST", "/subscriptions/imports", map[string]any{}), 400)
+	expect(t, bob.api("POST", "/subscriptions/imports", map[string]any{"opml": opml, "url": alice.origin}), 400)
+	expect(t, bob.api("POST", "/subscriptions/imports", map[string]any{"opml": "<rss/>"}), 422)
+	expect(t, bob.api("POST", "/subscriptions/imports", map[string]any{"url": dave.origin}), 422) // no blogroll
+	expect(t, bob.api("GET", "/subscriptions/imports?status=nope", nil), 400)
+	r = bob.api("DELETE", "/subscriptions/imports?status=subscribed", nil)
+	expect(t, r, 200)
+	if r.json(t)["deleted"] != float64(2) || len(bob.api("GET", "/subscriptions/imports", nil).json(t)["imports"].([]any)) != 0 {
+		t.Fatalf("clear: %s", r.body)
+	}
+	tok := bob.api("POST", "/tokens", map[string]any{"name": "r", "scopes": []string{"reader:read"}}).json(t)["token"].(string)
+	readOnly := &user{e: e, token: tok, origin: bob.origin}
+	expect(t, readOnly.api("POST", "/subscriptions/imports", map[string]any{"opml": opml}), 403)
+	expect(t, readOnly.api("GET", "/subscriptions/imports", nil), 200)
+}
