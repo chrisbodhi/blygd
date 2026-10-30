@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -228,7 +229,8 @@ func TestWithdrawalRetainsOnlyPins(t *testing.T) {
 	if ra.state != "withdrawn" || ra.hasDoc || ra.version != 3 || ra.page == "" {
 		t.Fatalf("endcap: %+v", ra)
 	}
-	items, _, err := g.r.Feed(ctx, g.uid, FeedQuery{})
+	page, err := g.r.Feed(ctx, g.uid, FeedQuery{})
+	items := page.Items
 	if err != nil || len(items) != 0 {
 		t.Fatalf("withdrawn item still in the feed: %v %v", items, err)
 	}
@@ -435,7 +437,8 @@ func TestLegacyFeedWrapper(t *testing.T) {
 	if r = g.row(id); r == nil || r.version != 2 || r.state != "current" || g.row(blyg.L0ID("p2", "")) == nil {
 		t.Fatalf("L0 edit and retention: %+v", r)
 	}
-	items, _, err := g.r.Feed(ctx, g.uid, FeedQuery{})
+	page, err := g.r.Feed(ctx, g.uid, FeedQuery{})
+	items := page.Items
 	if err != nil || len(items) != 2 || !items[0].L0 {
 		t.Fatalf("L0 in the feed: %+v %v", items, err)
 	}
@@ -465,7 +468,8 @@ func TestFeedOrderAndReads(t *testing.T) {
 	}
 	g.subscribe()
 	g.poll()
-	items, _, err := g.r.Feed(ctx, g.uid, FeedQuery{})
+	page, err := g.r.Feed(ctx, g.uid, FeedQuery{})
+	items := page.Items
 	if err != nil || len(items) != 2 {
 		t.Fatal(items, err)
 	}
@@ -474,8 +478,9 @@ func TestFeedOrderAndReads(t *testing.T) {
 		t.Fatalf("order: %v %v / %v %v", items[0].ItemID, items[0].SortAt, items[1].ItemID, items[1].SortAt)
 	}
 	// Paging.
-	page1, next, _ := g.r.Feed(ctx, g.uid, FeedQuery{Limit: 1})
-	page2, _, _ := g.r.Feed(ctx, g.uid, FeedQuery{Limit: 1, Before: next})
+	p1, _ := g.r.Feed(ctx, g.uid, FeedQuery{Limit: 1})
+	p2, _ := g.r.Feed(ctx, g.uid, FeedQuery{Limit: 1, Before: p1.Next})
+	page1, page2 := p1.Items, p2.Items
 	if len(page1) != 1 || len(page2) != 1 || page1[0].ItemID == page2[0].ItemID {
 		t.Fatalf("paging: %v %v", page1, page2)
 	}
@@ -484,14 +489,16 @@ func TestFeedOrderAndReads(t *testing.T) {
 	if err := g.r.MarkRead(ctx, g.uid, g.sid, idA, true); err != nil {
 		t.Fatal(err)
 	}
-	unread, _, _ := g.r.Feed(ctx, g.uid, FeedQuery{UnreadOnly: true})
+	up, _ := g.r.Feed(ctx, g.uid, FeedQuery{UnreadOnly: true})
+	unread := up.Items
 	if len(unread) != 1 || unread[0].ItemID != idB {
 		t.Fatalf("unread: %v", unread)
 	}
 	g.b.Items[0].Version, g.b.Items[0].ContentMD = 2, "old, edited"
 	g.b.Publish()
 	g.poll()
-	unread, _, _ = g.r.Feed(ctx, g.uid, FeedQuery{UnreadOnly: true})
+	up, _ = g.r.Feed(ctx, g.uid, FeedQuery{UnreadOnly: true})
+	unread = up.Items
 	if len(unread) != 2 {
 		t.Fatalf("an edit should be unread again: %v", unread)
 	}
@@ -694,5 +701,64 @@ func TestBatchPollsOriginsSideBySide(t *testing.T) {
 		if b.S.Hits("/blyg/feed.xml") == 0 {
 			t.Errorf("%s never polled", b.Origin())
 		}
+	}
+}
+
+// "Mark all read" marks what a feed read at as_of could have shown. A
+// version seen after it stays unread, even one dated earlier, which sorts
+// among the items already read (§13.7).
+func TestMarkAllRead(t *testing.T) {
+	g := newRig(t)
+	ctx := context.Background()
+	clock := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	g.r.Now = func() time.Time { return clock }
+	past := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	g.b.Items = []*testblyg.Item{
+		{ID: idA, Kind: "fragment", Version: 1, ContentMD: "a", Updated: past},
+		{ID: idB, Kind: "fragment", Version: 1, ContentMD: "b", Updated: past},
+	}
+	g.subscribe()
+	g.poll()
+	clock = clock.Add(time.Minute)
+	shown, err := g.r.Feed(ctx, g.uid, FeedQuery{})
+	if err != nil || len(shown.Items) != 2 || !shown.AsOf.Equal(clock) {
+		t.Fatalf("feed: %+v %v", shown, err)
+	}
+	unread := func() []string {
+		t.Helper()
+		p, err := g.r.Feed(ctx, g.uid, FeedQuery{UnreadOnly: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var ids []string
+		for _, it := range p.Items {
+			ids = append(ids, it.ItemID)
+		}
+		return ids
+	}
+
+	// After the feed was read: a backdated edit of a, and a backdated c.
+	clock = clock.Add(time.Minute)
+	g.b.Items[0].Version, g.b.Items[0].ContentMD = 2, "a, edited"
+	g.b.Items = append(g.b.Items, &testblyg.Item{ID: idC, Kind: "fragment", Version: 1, ContentMD: "c", Updated: past})
+	g.b.Publish()
+	g.poll()
+	if n, err := g.r.MarkAllRead(ctx, g.uid, 0, shown.AsOf); err != nil || n != 1 {
+		t.Fatalf("marked %d, %v; want b alone", n, err)
+	}
+	if got := unread(); len(got) != 2 || slices.Contains(got, idB) {
+		t.Fatalf("unread after marking: %v, want a's v2 and c", got)
+	}
+	if _, err := g.r.MarkAllRead(ctx, g.uid, g.sid+1, shown.AsOf); err != ErrNotFound {
+		t.Errorf("another subscription: %v", err)
+	}
+
+	// A feed read now covers them, and marking twice marks nothing more.
+	now, _ := g.r.Feed(ctx, g.uid, FeedQuery{})
+	if n, err := g.r.MarkAllRead(ctx, g.uid, g.sid, now.AsOf); err != nil || n != 2 || len(unread()) != 0 {
+		t.Fatalf("marked %d, %v; unread %v", n, err, unread())
+	}
+	if n, err := g.r.MarkAllRead(ctx, g.uid, g.sid, now.AsOf); err != nil || n != 0 {
+		t.Fatalf("marking again marked %d, %v", n, err)
 	}
 }

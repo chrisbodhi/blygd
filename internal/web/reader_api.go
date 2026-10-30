@@ -30,6 +30,7 @@ func (a *API) readerRoutes() []route {
 		{"GET /api/reader/items/{sid}/{iid}", account.ScopeReaderRead, a.readerItem},
 		{"PUT /api/reader/items/{sid}/{iid}/read", account.ScopeReaderWrite, a.markRead},
 		{"DELETE /api/reader/items/{sid}/{iid}/read", account.ScopeReaderWrite, a.markUnread},
+		{"POST /api/reader/read", account.ScopeReaderWrite, a.markAllRead},
 	}
 }
 
@@ -291,11 +292,35 @@ func (a *API) readerFeed(w http.ResponseWriter, r *http.Request) error {
 		}
 		q.SubscriptionID = n
 	}
-	items, next, err := a.Reader.Feed(r.Context(), principal(r.Context()).UserID, q)
+	page, err := a.Reader.Feed(r.Context(), principal(r.Context()).UserID, q)
 	if err != nil {
 		return err
 	}
-	writeJSON(w, 200, map[string]any{"items": items, "next": next, "notice": reader.Notice})
+	writeJSON(w, 200, map[string]any{"items": page.Items, "next": page.Next, "as_of": page.AsOf, "notice": reader.Notice})
+	return nil
+}
+
+// markAllRead marks read what a feed read at as_of could have shown, for
+// one subscription or all of them.
+func (a *API) markAllRead(w http.ResponseWriter, r *http.Request) error {
+	var in struct {
+		AsOf           *time.Time `json:"as_of"`
+		SubscriptionID int64      `json:"subscription_id"`
+	}
+	if err := decode(r, &in); err != nil {
+		return err
+	}
+	if in.AsOf == nil {
+		return badRequest("as_of is required: send the one from the feed you showed")
+	}
+	if in.SubscriptionID < 0 {
+		return badRequest("subscription_id must be a positive integer")
+	}
+	n, err := a.Reader.MarkAllRead(r.Context(), principal(r.Context()).UserID, in.SubscriptionID, *in.AsOf)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, 200, map[string]any{"marked": n})
 	return nil
 }
 

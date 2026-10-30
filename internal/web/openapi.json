@@ -2234,6 +2234,61 @@
         }
       }
     },
+    "/api/reader/read": {
+      "post": {
+        "operationId": "markAllRead",
+        "tags": [
+          "reader"
+        ],
+        "summary": "Mark read everything a feed could have shown.",
+        "description": "Marks read, at its current version, every live item whose current version blygd first saw at or before as_of: everything a feed read at as_of could have shown, on every page. Send the as_of of the feed you showed. A version that arrives later stays unread, even one the origin dates earlier, which the feed sorts among items already read (§13.7). With subscription_id, only that subscription's items.",
+        "security": [
+          {
+            "bearer": [
+              "reader:write"
+            ]
+          }
+        ],
+        "x-blygd-cost": "default",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkAllRead"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarkAllReadResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
     "/api/tokens": {
       "get": {
         "operationId": "listTokens",
@@ -4182,12 +4237,18 @@
           },
           "notice": {
             "type": "string"
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this page was read. Send the first page's to POST /api/reader/read to mark read what you showed and nothing that arrived since."
           }
         },
         "required": [
           "items",
           "next",
-          "notice"
+          "notice",
+          "as_of"
         ],
         "additionalProperties": false
       },
@@ -4574,6 +4635,38 @@
           "id",
           "version"
         ]
+      },
+      "MarkAllRead": {
+        "type": "object",
+        "properties": {
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The as_of of the feed you showed."
+          },
+          "subscription_id": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Only this subscription's items; absent, every subscription's."
+          }
+        },
+        "required": [
+          "as_of"
+        ],
+        "additionalProperties": false
+      },
+      "MarkAllReadResult": {
+        "type": "object",
+        "properties": {
+          "marked": {
+            "type": "integer",
+            "description": "Items that were unread and are now read."
+          }
+        },
+        "required": [
+          "marked"
+        ],
+        "additionalProperties": false
       }
     },
     "responses": {

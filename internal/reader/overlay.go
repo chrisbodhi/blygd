@@ -350,20 +350,30 @@ type FeedQuery struct {
 	UnreadOnly     bool
 }
 
+// FeedPage is one page of the reading feed.
+type FeedPage struct {
+	Items []*Item
+	Next  string // cursor for the next page; empty at the end
+	// AsOf is when the feed was read. MarkAllRead takes it back, so "mark
+	// all read" covers what the feed could have shown and nothing newer.
+	AsOf time.Time
+}
+
 // Feed is the merged reverse-chronological reading surface across a
 // user's subscriptions, ordered by min(claimed updated, when we saw that
 // version) so a skewed or future-dated origin cannot sit on top (§13.7).
 // Withdrawn items are not live and are not shown (§13.4).
-func (r *Reader) Feed(ctx context.Context, userID int64, q FeedQuery) ([]*Item, string, error) {
+func (r *Reader) Feed(ctx context.Context, userID int64, q FeedQuery) (FeedPage, error) {
 	if q.Limit <= 0 || q.Limit > 200 {
 		q.Limit = 50
 	}
+	asOf := r.now()
 	var beforeT *time.Time
 	var beforeID int64
 	if q.Before != "" {
 		t, id, err := parseCursor(q.Before)
 		if err != nil {
-			return nil, "", err
+			return FeedPage{}, err
 		}
 		beforeT, beforeID = &t, id
 	}
@@ -379,26 +389,25 @@ func (r *Reader) Feed(ctx context.Context, userID int64, q FeedQuery) ([]*Item, 
 		ORDER BY ii.sort_at DESC, ii.id DESC LIMIT $6`,
 		userID, q.SubscriptionID, beforeT, beforeID, q.UnreadOnly, q.Limit)
 	if err != nil {
-		return nil, "", err
+		return FeedPage{}, err
 	}
 	defer rows.Close()
-	items := []*Item{}
+	page := FeedPage{Items: []*Item{}, AsOf: asOf}
 	for rows.Next() {
 		it, err := scanItem(rows)
 		if err != nil {
-			return nil, "", err
+			return FeedPage{}, err
 		}
-		items = append(items, it)
+		page.Items = append(page.Items, it)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, "", err
+		return FeedPage{}, err
 	}
-	next := ""
-	if len(items) == q.Limit {
-		last := items[len(items)-1]
-		next = strconv.FormatInt(last.SortAt.UnixMicro(), 10) + "." + strconv.FormatInt(last.ID, 10)
+	if len(page.Items) == q.Limit {
+		last := page.Items[len(page.Items)-1]
+		page.Next = strconv.FormatInt(last.SortAt.UnixMicro(), 10) + "." + strconv.FormatInt(last.ID, 10)
 	}
-	return items, next, nil
+	return page, nil
 }
 
 func parseCursor(c string) (time.Time, int64, error) {
@@ -471,4 +480,34 @@ func (r *Reader) MarkRead(ctx context.Context, userID, remoteID int64, itemID st
 		return ErrNotFound
 	}
 	return err
+}
+
+// MarkAllRead marks read, at its current version, every current item whose
+// current version was first seen by asOf: what a feed read at asOf could
+// have shown. A version that arrives later stays unread, even one dated
+// earlier, which the feed sorts among items already read (§13.7). remoteID
+// 0 means every subscription. It returns how many items it marked.
+func (r *Reader) MarkAllRead(ctx context.Context, userID, remoteID int64, asOf time.Time) (int64, error) {
+	if remoteID != 0 {
+		var ok bool
+		if err := r.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM subscriptions WHERE user_id = $1 AND remote_origin_id = $2)`,
+			userID, remoteID).Scan(&ok); err != nil {
+			return 0, err
+		}
+		if !ok {
+			return 0, ErrNotFound
+		}
+	}
+	tag, err := r.Pool.Exec(ctx, `INSERT INTO reads (user_id, imported_item_id, version)
+		SELECT s.user_id, ii.id, ii.version FROM subscriptions s
+		JOIN imported_items ii ON ii.remote_origin_id = s.remote_origin_id
+		WHERE s.user_id = $1 AND ($2::bigint = 0 OR s.remote_origin_id = $2)
+		  AND ii.state = 'current' AND ii.version_seen_at <= $3
+		ON CONFLICT (user_id, imported_item_id) DO UPDATE SET version = EXCLUDED.version, read_at = now()
+			WHERE reads.version < EXCLUDED.version`,
+		userID, remoteID, asOf)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
 }

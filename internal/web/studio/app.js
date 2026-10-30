@@ -573,7 +573,15 @@ async function viewReader() {
     h("div", { class: "chips" },
       h("button", { class: readerSub === 0 ? "on" : "", onclick: () => { readerSub = 0; route(); } }, "All"),
       list.map(subChip),
-      h("button", { class: unreadOnly ? "on" : "", onclick: () => { unreadOnly = !unreadOnly; route(); } }, "Unread only")),
+      h("button", { class: unreadOnly ? "on" : "", onclick: () => { unreadOnly = !unreadOnly; route(); } }, "Unread only"),
+      // Marks what this feed could show, as of when it was read: anything
+      // that arrived since stays unread.
+      list.some((s) => s.unread && (!readerSub || s.id === readerSub))
+        ? h("button", { onclick: async () => {
+            const body = readerSub ? { as_of: feed.as_of, subscription_id: readerSub } : { as_of: feed.as_of };
+            const r = await attempt(() => api("POST", "/reader/read", body));
+            if (r) { toast(`Marked ${r.marked} read`); route(); }
+          } }, "Mark all read") : null),
     readerSub ? subscriptionTools(list.find((s) => s.id === readerSub)) : null,
     feed.items && feed.items.length ? feed.items.map(readerCard) : h("p", { class: "muted" }, list.length ? "Nothing unread." : "Subscribe to someone to start reading."),
   );

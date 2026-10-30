@@ -311,7 +311,11 @@ use it. The reader keeps its own copy of each subscribed manifest.
 
 **Reading API**: subscriptions, a merged feed with keyset paging and an
 unread filter, single items with retained pins, and read marks per
-version (an item read at v3 is unread again at v4). Every imported byte
+version (an item read at v3 is unread again at v4). "Mark all read"
+takes back the `as_of` a feed page carries and marks every item whose
+current version was first seen by then (`version_seen_at`), not every
+item sorted below some point: a backdated edit sorts among items already
+read (§13.7), and must stay unread until it is shown. Every imported byte
 is returned verbatim with a `notice` that clients must sanitize (§14).
 Hopper members that are imported items carry the verbatim document, or
 none once withdrawn.

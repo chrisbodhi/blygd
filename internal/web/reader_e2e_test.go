@@ -380,3 +380,38 @@ func TestImportedShapes(t *testing.T) {
 		t.Fatalf("L0 doc: %s", r.body)
 	}
 }
+
+// One request marks read what the feed showed, for one subscription or
+// all of them.
+func TestMarkAllRead(t *testing.T) {
+	e := newEnv(t, mention.DefaultRateLimits)
+	alice, carol, bob := e.user("alice"), e.user("carol"), e.user("bob")
+	alice.publish(t, alice.draft(t, map[string]any{"content_md": "from alice"}), 200)
+	carol.publish(t, carol.draft(t, map[string]any{"content_md": "from carol"}), 200)
+	aliceSid, carolSid := bob.subscribe(t, alice.origin), bob.subscribe(t, carol.origin)
+	unread := func(sid int) float64 {
+		t.Helper()
+		return bob.api("GET", "/subscriptions/"+itoa(sid), nil).json(t)["unread"].(float64)
+	}
+	r := bob.api("GET", "/reader/feed", nil)
+	expect(t, r, 200)
+	asOf := r.json(t)["as_of"].(string)
+
+	r = bob.api("POST", "/reader/read", map[string]any{"as_of": asOf, "subscription_id": aliceSid})
+	expect(t, r, 200)
+	if r.json(t)["marked"] != float64(1) || unread(aliceSid) != 0 || unread(carolSid) != 1 {
+		t.Fatalf("one subscription: %s; unread %v, %v", r.body, unread(aliceSid), unread(carolSid))
+	}
+	r = bob.api("POST", "/reader/read", map[string]any{"as_of": asOf})
+	expect(t, r, 200)
+	if r.json(t)["marked"] != float64(1) || unread(carolSid) != 0 {
+		t.Fatalf("every subscription: %s", r.body)
+	}
+
+	expect(t, bob.api("POST", "/reader/read", map[string]any{}), 400)
+	theirs := carol.subscribe(t, bob.origin) // a subscription, but carol's
+	expect(t, bob.api("POST", "/reader/read", map[string]any{"as_of": asOf, "subscription_id": theirs}), 404)
+	tok := bob.api("POST", "/tokens", map[string]any{"name": "r", "scopes": []string{"reader:read"}}).json(t)["token"].(string)
+	readOnly := &user{e: e, token: tok, origin: bob.origin}
+	expect(t, readOnly.api("POST", "/reader/read", map[string]any{"as_of": asOf}), 403)
+}
