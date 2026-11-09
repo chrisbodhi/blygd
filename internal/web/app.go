@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/chrisbodhi/blygd/internal/account"
+	"github.com/chrisbodhi/blygd/internal/classify"
 	"github.com/chrisbodhi/blygd/internal/config"
 	"github.com/chrisbodhi/blygd/internal/events"
 	"github.com/chrisbodhi/blygd/internal/fetch"
@@ -44,7 +45,12 @@ func New(cfg *config.Config, pool *pgxpool.Pool, log *slog.Logger) *App {
 		Level: cfg.Level, Fetch: fc, FragmentCap: cfg.FragmentCap, MediaMax: cfg.MediaMax}
 	accts := &account.Accounts{Pool: pool, Origins: st}
 	rd := &reader.Reader{Pool: pool, Fetch: fc, Log: log,
-		ManualPollFloor: time.Duration(cfg.PollFloor) * time.Second}
+		ManualPollFloor: time.Duration(cfg.PollFloor) * time.Second, DailyCalls: cfg.SubQDailyCalls}
+	if cfg.SubQKey != "" {
+		// Readers' filters (DESIGN.md "Filters"). The key goes only to the
+		// URL the operator configured, never through a redirect.
+		rd.Classifier = &classify.Client{Fetch: fc, BaseURL: cfg.SubQURL, Key: cfg.SubQKey, Model: cfg.SubQModel}
+	}
 	st.Imports = rd // §10.2 step 2: imported snapshots reach a publish only through this
 	hoppers := &hopper.Store{Pool: pool}
 	mentions := &mention.Store{Pool: pool}
@@ -66,7 +72,8 @@ func New(cfg *config.Config, pool *pgxpool.Pool, log *slog.Logger) *App {
 }
 
 // Run runs the background work, the event hub, the mention workers, the
-// poller and the subscription importer, until ctx ends, and returns once
+// poller, the subscription importer and the labeller (when a classifier
+// is configured), until ctx ends, and returns once
 // all of it has stopped: no batch is mid-query when the caller closes the
 // pool (review P5).
 func (a *App) Run(ctx context.Context) {
@@ -75,5 +82,6 @@ func (a *App) Run(ctx context.Context) {
 	wg.Go(func() { a.Workers.Run(ctx) })
 	wg.Go(func() { a.Reader.Run(ctx) })
 	wg.Go(func() { a.Reader.RunImports(ctx) })
+	wg.Go(func() { a.Reader.RunLabels(ctx) })
 	wg.Wait()
 }

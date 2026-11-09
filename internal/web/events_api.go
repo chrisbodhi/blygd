@@ -107,7 +107,7 @@ func (a *API) streamEvents(w http.ResponseWriter, r *http.Request) error {
 // it, and it concerns the user's own origin or one of their subscriptions.
 func (a *API) visible(r *http.Request, p *account.Principal, originID int64, ev events.Event) bool {
 	switch ev.Type {
-	case "import":
+	case "import", "label":
 		if !p.Can(account.ScopeReaderRead) || ev.RemoteOriginID == 0 {
 			return false
 		}

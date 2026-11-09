@@ -23,14 +23,15 @@ const module = "github.com/chrisbodhi/blygd/"
 // SQL, and this says which other packages' SQL can run on its behalf.
 var imports = map[string][]string{
 	"cmd/blygd":         {"account", "config", "db", "web"},
-	"internal/web":      {"account", "apperr", "blyg", "config", "events", "fetch", "hopper", "limit", "mention", "reader", "studio"}, // New is the composition root
-	"internal/studio":   {"apperr", "blyg", "events", "fetch", "surface", "tx"},                                                       // writes the surface: nothing that reads the mirror; events only sends hints
-	"internal/reader":   {"apperr", "batch", "blyg", "events", "fetch", "studio", "tx"},
+	"internal/web":      {"account", "apperr", "blyg", "classify", "config", "events", "fetch", "hopper", "limit", "mention", "reader", "studio"}, // New is the composition root
+	"internal/studio":   {"apperr", "blyg", "events", "fetch", "surface", "tx"},                                                                   // writes the surface: nothing that reads the mirror; events only sends hints
+	"internal/reader":   {"apperr", "batch", "blyg", "classify", "events", "fetch", "studio", "tx"},
 	"internal/mention":  {"apperr", "batch", "blyg", "events", "fetch", "studio", "surface", "tx"},
 	"internal/hopper":   {"apperr", "blyg", "tx"},
 	"internal/account":  {"apperr", "blyg", "tx"},
 	"internal/config":   {"blyg"},
 	"internal/surface":  {"blyg", "fetch"},
+	"internal/classify": {"fetch"}, // asks the operator's classifier; no SQL, so no plane (DESIGN.md "Filters")
 	"internal/fetch":    {"tx"},
 	"internal/blyg":     {}, // the protocol is pure
 	"internal/tx":       {},

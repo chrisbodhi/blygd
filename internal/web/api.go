@@ -97,6 +97,7 @@ func (a *API) routes() []route {
 		{"GET /api/outbound", account.ScopeMentionsRead, a.listOutbound},
 	}
 	rs = append(rs, a.readerRoutes()...)
+	rs = append(rs, a.filterRoutes()...)
 	return append(rs,
 		route{"GET /api/tokens", account.ScopeTokensWrite, a.listTokens},
 		route{"POST /api/tokens", account.ScopeTokensWrite, a.mintToken},

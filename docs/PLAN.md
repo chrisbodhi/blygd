@@ -563,6 +563,48 @@ What a second client found missing, all in the API (migration 007):
 - Draft preview (Phase 3), `Subscription.author`, schemas for imported
   documents, and every error code described in `openapi.json`.
 
+## Filters (reader-side labels, 2026-11-09)
+
+Readers' private topics, judged by SubQ's Decisions API
+(`subq-snap-1.1`), and what the feed does with posts about them
+(DESIGN.md "Filters", migration 008). Off without `BLYGD_SUBQ_KEY`
+(invariant 3).
+
+Done:
+
+- `internal/classify`: the Decisions API client, with score questions,
+  documented failures mapped to retry, skip or halt, and no SQL.
+- The labelling worker: leased, outside transactions, one request per
+  item, answers shared by readers asking the same question, reused across
+  versions with unchanged text, and deleted on withdrawal (§13.4). It
+  stops at a daily ceiling and halts on key or credit errors.
+- `fold`, `hide` and `hold`, with `hidden` and `held` counted once per page,
+  `filters=off`, overrides, per-subscription scope, and
+  `GET /api/filters`'s classifier status. Filters run under
+  `reader:read` and `reader:write`.
+- Tests against a fake of the API (the real client end to end) and a fake
+  classifier. Every rule's test was seen failing with the rule broken.
+
+Not yet:
+
+- **Calibration.** No request has gone to the real API: this was built
+  against its documentation. Before trusting any threshold, label about
+  200 items from a real feed by hand per topic, run them through
+  `subq-snap-1.1`, and pick each default (`match`, `threshold`) from the
+  precision and recall. The docs ask for this ("Set thresholds from your
+  own data"), and 0.5 is a placeholder.
+- **Zero data retention** with SubQ before other readers turn filters on
+  (DESIGN.md "Filters", what leaves the instance).
+- **Where it matched:** number paragraphs `[P1]…` and ask a `choice` over
+  them (the Decisions API's document pattern), so a fold can point at
+  the passage. Escape literal `[P3]` in the post first.
+- **Images** (up to 4 per request) for spoilers in screenshots. That
+  needs other origins' media fetched outside the transaction.
+- The studio's UI for filters (the API is complete); routing matches into
+  a hopper (the reference's auto-hoppers); an author's private view of
+  their own topic balance, from plane 1 and never rendered.
+- Subscription `unread` counts still include hidden items.
+
 ## Operations
 
 - **API description (done).** `internal/web/openapi.json`, OpenAPI 3.1,

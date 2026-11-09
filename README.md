@@ -76,6 +76,10 @@ curl -s localhost:8080/chris/items/$ID.json
 | `BLYGD_GENERATOR_URL` | this repo | Manifest `generator_url` |
 | `BLYGD_ALLOW_PRIVATE_FETCH` | `false` | Development only: lets fetches reach private addresses |
 | `BLYGD_RATE_LIMITS` | `true` | Request budgets (docs/DESIGN.md); `false` for test harnesses only |
+| `BLYGD_SUBQ_KEY` | (unset) | SubQ API key for readers' filters (docs/DESIGN.md "Filters"); unset, filters do nothing |
+| `BLYGD_SUBQ_URL` | `https://api.subq.ai/v1` | The Decisions API's base URL |
+| `BLYGD_SUBQ_MODEL` | `subq-snap-1.1` | The decision model; a new one asks every question again |
+| `BLYGD_SUBQ_DAILY_CALLS` | `20000` | Classifier requests per UTC day, across every reader |
 
 ## API
 
@@ -91,7 +95,7 @@ scope, named in the document's security requirement:
 | `items:publish` / `items:withdraw` / `items:pin` | the public acts, each separately; pins are irrevocable |
 | `hoppers:read` / `hoppers:write` | private hoppers |
 | `mentions:read` / `mentions:write` | inbound and outbound Webmentions; hiding responses and blocking sources (showing one also needs `origin:write`) |
-| `reader:read` / `reader:write` | subscriptions, the reading feed, read marks |
+| `reader:read` / `reader:write` | subscriptions, the reading feed, read marks, filters |
 | `origin:write` | origin settings, publishing a blogroll entry, making a hopper public |
 | `tokens:write` | listing, minting (a subset of your own scopes) and revoking tokens |
 | `*` | everything: the owner token |

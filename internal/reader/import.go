@@ -51,6 +51,21 @@ type Reader struct {
 	// under the poll lease, or a second poll of the origin could start
 	// beside the first. Default 5 minutes.
 	PollDeadline time.Duration
+
+	// Classifier judges imported items against readers' filters
+	// (labels.go). Nil turns filtering off: filters are kept, and fold,
+	// hide and hold nothing (protocol invariant 3: readers need no models).
+	Classifier Classifier
+	// LabelWindow is how far back, by feed position, items are classified:
+	// a new filter backfills this far. Default 14 days.
+	LabelWindow time.Duration
+	// HoldFor is the longest a filter with pending "hold" keeps a new
+	// version back while it waits for an answer. Default 10 minutes.
+	HoldFor time.Duration
+	// DailyCalls caps classifier requests per UTC day, across every
+	// reader: a ceiling for a runaway worker. Default 20,000.
+	DailyCalls int
+	labels     labelState
 }
 
 func (r *Reader) pollDeadline() time.Duration {
@@ -190,7 +205,7 @@ func (r *Reader) ApplyDocument(ctx context.Context, remoteID int64, s blyg.Surfa
 	}
 	now := r.now()
 
-	err := tx.Run(ctx, r.Pool, pgx.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
+	apply := func(ctx context.Context, tx pgx.Tx) error {
 		var watermark, version int
 		var curHash *string
 		var curState string
@@ -254,6 +269,26 @@ func (r *Reader) ApplyDocument(ctx context.Context, remoteID int64, s blyg.Surfa
 			WHERE remote_origin_id = $1 AND item_id = $2`,
 			remoteID, itemID, state, d.Kind, doc, d.ContentHash, pageURL, claimed, d.Version, now, joinNotes(notes))
 		return err
+	}
+	err := tx.Run(ctx, r.Pool, pgx.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
+		if err := apply(ctx, tx); err != nil {
+			return err
+		}
+		if d.Kind != "withdrawn" || res.Outcome == "regression" {
+			return nil
+		}
+		// §13.4: withdrawn, the item keeps nothing derived from what it
+		// said either. The reader's own judgments (label_overrides), like
+		// its read marks, are the reader's and stay.
+		for _, q := range []string{
+			`DELETE FROM item_labels WHERE imported_item_id = (SELECT id FROM imported_items WHERE remote_origin_id = $1 AND item_id = $2)`,
+			`DELETE FROM label_leases WHERE imported_item_id = (SELECT id FROM imported_items WHERE remote_origin_id = $1 AND item_id = $2)`,
+		} {
+			if _, err := tx.Exec(ctx, q, remoteID, itemID); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	return res, err
 }

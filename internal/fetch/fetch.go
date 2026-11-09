@@ -128,6 +128,15 @@ func (c *Client) Do(ctx context.Context, method, rawURL string, body io.Reader, 
 	return c.do(ctx, method, rawURL, body, contentType, lim, accept, nil)
 }
 
+// DoWith is Do with extra request headers, for an API the operator
+// configured that needs a credential (internal/classify). A credential
+// belongs only on a request to the URL it was issued for: never send one
+// to a URL someone else chose, and set MaxRedirects to 0 so it cannot
+// follow a redirect elsewhere.
+func (c *Client) DoWith(ctx context.Context, method, rawURL string, body io.Reader, contentType string, lim Limits, accept string, header http.Header) (*Response, error) {
+	return c.do(ctx, method, rawURL, body, contentType, lim, accept, header)
+}
+
 func (c *Client) do(ctx context.Context, method, rawURL string, body io.Reader, contentType string, lim Limits, accept string, extra http.Header) (*Response, error) {
 	if tx.Active(ctx) {
 		return nil, ErrInTx
