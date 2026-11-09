@@ -5,11 +5,41 @@ reader, hoppers and Webmentions together. It is headless — every client
 (the SwiftUI app, ygg.el, an agent) talks to it over the write API — and
 multi-tenant, with each user owning one origin.
 
-Spec references (§) are to `blygger-spec` `docs/protocol-v0.4.md`, read at
-commit `24b9770` (2026-10-20, its sixth revision) for Phase 5. Phases 1–3
-were built against `docs/protocol-v0.3.md` at `c2da39f` and `d008e21`
-(2026-10-07). Section numbers carry over, with §10.3a new in 0.4. blygd
-emits `"blyg": "0.4"` (§3.1), and reads any `0.x`.
+Spec references (§) are to `blygger-spec` `docs/protocol-v0.4.md`. This
+document was last checked against it at commit `b31d0ef` (2026-11-09),
+whose text is the eleventh revision (2026-11-07). Phase 5 was built
+against the sixth revision, at `24b9770` (2026-10-20), and Phases 1–3
+against `docs/protocol-v0.3.md` at `c2da39f` and `d008e21` (2026-10-07).
+Section numbers carry over, with §10.3a new in 0.4. blygd emits
+`"blyg": "0.4"` (§3.1), and reads any `0.x`.
+
+What the revisions after the sixth changed, and where blygd stands:
+
+- **Seventh** (2026-11-01, decision #87): `{origin}blyg.json` MUST serve
+  the manifest at every identity origin (§4, §6.1, §12.1 step 4). blygd
+  always serves it there, and already located other origins only there
+  (Other origins' surfaces, below), so nothing changed.
+- **Eighth** (2026-11-01, decision #86): hopper feeds. **Not
+  implemented.** blygd emits no `hoppers` manifest key (§6.1) and no
+  hopper feed (§4, §13.5 rules (a)–(d)), and its reader has no hopper
+  match (§12.1 step 7), so no hopper subscription (§12.2, §13.6) either.
+  Both are OPTIONAL to emit, so the publisher side is conformant; a hopper
+  page's URL resolves to the whole blyg, the degradation step 7 itself
+  names for readers without it.
+- **Ninth** (2026-11-03): §10.1's rule that a directive line is never a
+  lazy continuation line, so it ends a partial selection, is **not yet
+  implemented** (Threads, below). §13.2's clause that a version with no
+  words of its own MAY be queued as maintenance, and §13.7's folding of a
+  burst under a thread published with it, are MAYs blygd does not take.
+  A gap older than the sixth revision is recorded under the reader:
+  §13.2's SHOULD NOT on resurfacing a same-hash republish.
+- **Tenth** (2026-11-05, decision #93) and **eleventh** (2026-11-07,
+  decisions #95 and #96) are clarifications blygd already meets: every
+  reader gets the same stored bytes (§4), and nothing in blygd reads
+  meaning into the words of a changelog note (§5.2).
+- Ruled shapes that are not yet normative (§16.9 `pinned_at` and `cid`,
+  §16.10 author-sized images, §16.13 `moved_from`) are neither emitted nor
+  read.
 
 ## Three planes
 
@@ -88,7 +118,7 @@ has a test.
 | An approval does not survive a changed response | §15.5 | verifier clears `approved_at` unless relation, class, origin, page and author match |
 | A notice is never shown among responses | §15.5 | CHECK `approved_at IS NULL OR class = 'response'`; a link is always a notice; class is set exactly with relation |
 | A public hopper's slug never changes | §13.5 (reference `slug_frozen`) | CHECK `NOT public OR slug_frozen` + trigger `hoppers_guard` |
-| Public hoppers are never protocol surface | §13.5 | served live, never in `surface_files`; structural test in `internal/hopper` |
+| Public hopper pages are served live and never stored | §13.5 (curation display) | nothing writes them to `surface_files`; structural test in `internal/hopper` |
 | Pinned version pages stay 200 forever | §8.4 rule 1 | `surface_files.permanent` (re-renderable, not write-once) |
 | Imported items are never re-emitted | §13.5 | renderer reads plane 1 only; structural test |
 | The import watermark never regresses | §13.3 | trigger `imported_items_guard` |
@@ -151,7 +181,10 @@ exactly that template's expansion. That one rule rejects mirrors, pinned
 files, and path-mounted neighbours speaking for each other. The relation
 check is `stub`, `transclusion`, `fork`, `source`, then `link`; a fork
 counts only if it names a version pinned here, and an unpinned one falls
-through to the rest.
+through to the rest. A reference must name this origin's identity as it
+is now: blygd's manifest carries no `moved_from`, and the receiver
+accepts no former identity (§16.13, decision #88, ruled but not yet
+normative).
 
 The receiver also derives a class (§15.5). A `link`, or a stub or
 transclusion whose document has no words of its own (a repost, §15.4), is
@@ -192,9 +225,11 @@ their own.
 
 ## The reader (Phase 2)
 
-**Resolution** (§12.1) is `reader.Resolve`: the six steps in order, at
-most six fetches, under a 45 s overall deadline because a subscribe
-request waits on it. The identity is the URL the manifest was fetched
+**Resolution** (§12.1) is `reader.Resolve`: steps 1–6 in order, at
+most six fetches. Step 7, the hopper match, is not implemented (it costs
+no fetch, so the bound is the same), and a hopper's URL resolves to the
+whole blyg. Resolution runs under a 45 s overall deadline because a
+subscribe request waits on it. The identity is the URL the manifest was fetched
 from, after redirects, minus its last path segment (§12.2), and that URL
 is kept as `manifest_url` so polls re-read the manifest where it was
 found. A `rel="blyg"` target whose body parses as a manifest is the
@@ -211,7 +246,13 @@ autodiscover its feed. Both the order and the bound are the spec's.
 /api/subscriptions/{id}/resolve` re-runs resolution and only reports.
 `POST …/move {to}` moves the subscription, and only if `to` resolves to
 exactly the identity named, so the user confirms the identity they saw,
-not a URL that redirects somewhere else.
+not a URL that redirects somewhere else. A manifest that answers a poll
+from anywhere but where it was found, by any redirect, is recorded as the
+subscription's error with a prompt to re-resolve, and the poll goes on
+with the manifest it holds. §16.13 (decision #88, ruled, not yet
+normative) would make a permanent redirect to a manifest whose
+`moved_from` lists the old identity a move to offer the user; blygd
+neither reads `moved_from` nor tells a permanent redirect from any other.
 
 **Polling now.** `POST /api/subscriptions/{id}/poll` polls one origin
 synchronously, within §12.3. It is refused (429, `Retry-After`) while the
@@ -282,6 +323,16 @@ that leave the window are kept.
 saw this version)`, a stored generated column. Edits resurface; a
 future-dated origin sorts no later than now.
 
+**Maintenance** (§13.2) is not told apart yet. A version whose
+`content_hash` equals the one before it (decision #77) is unread again
+and sorts by its new `updated` like any edit, though §13.2 says readers
+SHOULD NOT resurface one as new: a gap, not a choice. The importer
+already reads the held version's hash before it applies the next. The
+two MAY clauses beside it are not taken either: an edit below a
+reader-local threshold (#83), and a version with no words of its own
+(the ninth revision), which uses §15.4's repost test, the one the
+receiver already runs (`internal/blyg`).
+
 **Same-instance fetches** (subscriptions, forks, mentions in both
 directions) are answered in-process. `fetch.Client.Local` hands any
 request for `BLYGD_PUBLIC_URL`'s own scheme and host to the origin-surface
@@ -304,10 +355,12 @@ retried, because guessing the default path would aim at the wrong
 address on a templated origin.
 
 **Other origins' surfaces** are located by `internal/surface`, which
-reads `{origin}blyg.json` and nothing else. It depends only on `blyg` and
-`fetch`, so plane 1 may use it without reaching the mirror. The verifier,
-the sender, the fork pin check, fork copying and the attribution link all
-use it. The reader keeps its own copy of each subscribed manifest.
+reads `{origin}blyg.json` and nothing else: the one name every identity
+origin MUST serve the manifest at (§4, §12.1 step 4, decision #87). It
+depends only on `blyg` and `fetch`, so plane 1 may use it without
+reaching the mirror. The verifier, the sender, the fork pin check, fork
+copying and the attribution link all use it. The reader keeps its own
+copy of each subscribed manifest.
 
 **Reading API**: subscriptions, a merged feed with keyset paging and an
 unread filter, single items with retained pins, and read marks per
@@ -346,6 +399,12 @@ and it runs inside the publish transaction:
    selection must be a substring of the target's text content (§10.2),
    and it bakes as escaped `<p>` lines with `blyg-partial`. The selector
    records the first match with 32 characters of context either side.
+   **Gap:** since the ninth revision, §10.1 says a directive line (or the
+   reserved `![[id@vN]]`) is never a lazy continuation line, so it ends
+   the selection. blygd's `attachedQuote` still asks goldmark alone, which
+   reads a directive straight after a `>` line as lazy continuation: the
+   directive becomes selected text and never bakes. Fork flattening and
+   the repost test use the same function to find a selection's extent.
 3. The prose between directives is rendered with `[[id]]` links swapped
    for sentinels, generated spans are wrapped in `blyg-tk-gen`, and the
    links are spliced back as absolute anchors. A link inside another
@@ -503,8 +562,13 @@ anyone else. So the defaults assume a response may be hostile.
 ## Public hoppers (Phase 4)
 
 §13.5 lets a reader display imported content publicly as curation: a
-shown list with attribution and links, and no protocol surface. A public
-hopper is that, at `{origin}h/{slug}/`.
+shown list with attribution and links, with no protocol surface beyond
+the manifest's `hoppers` list (§6.1) and a hopper feed (§13.5 rules
+(a)–(d)). A public hopper is that display, at `{origin}h/{slug}/`, and
+blygd uses neither of the two: both are OPTIONAL, so the manifest lists
+no hoppers and no hopper has a feed. The page carries `<link rel="blyg">`
+to its origin, as §13.5 asks; with no feed, there is no `rel="alternate"`
+to carry.
 
 - **Served live, never stored.** The web layer renders it per request
   from `hopper.Store.Public`, with an ETag and `no-cache`. Nothing reaches
@@ -754,9 +818,10 @@ another directory of files, without touching a handler.
   accepts a pinned version's page or document as a target (§15.3,
   decision #84).
 - A partial quote's blockquote has CommonMark's extent, lazy continuation
-  included (§10.1, decision #76). The reference (0.48.2) still ends it at
-  the first line without `>`, so a document it composed selected less than
-  we would read. Fork flattening takes the extent from the bake: lazy
+  included (§10.1, decision #76), except that a directive line ends it,
+  which blygd does not yet do (the gap under Threads). The reference
+  (0.48.2) still ends it at the first line without `>`, so a document it
+  composed selected less than we would read. Fork flattening takes the extent from the bake: lazy
   lines are the quote's only when the bake holds them, else the author's
   prose, so neither reading loses or repeats words.
 - Fork flattening puts a blank line after each flattened quote. The
@@ -773,19 +838,24 @@ another directory of files, without touching a handler.
   offered yet. The discrepancy is surfaced and the watermark holds.
 - Adding a subscription to the blogroll needs `origin:write` as well as
   `reader:write`, because it publishes a reading choice (§11).
-- Another origin's surface is located through `{origin}blyg.json`, the
-  one fixed name (§4), everywhere outside the reader. An origin whose
-  manifest is only where a `rel="blyg"` link names it (§12.1 step 4,
-  §12.2's `/wp-json/…` case) can be subscribed to and read, but not
-  forked: both the copy and the publish-time pin check refuse, naming the
-  missing file. Mentions to it fall back to the default layout and
-  W3C discovery, so they usually find no endpoint. The reader records
-  where it found the manifest, but plane 1 knows only the identity, and
-  passing the location through `studio.Imports` would widen the one door
-  between the planes. The reference reuses its subscription's stored
-  surface. The spec half-supports the case: §15.3 verification fetches
-  `{origin}blyg.json` too, so such an origin's own mentions fail anywhere
-  that its documents are off the default path (blygger-spec#21).
+- Another origin's surface is located through `{origin}blyg.json`
+  everywhere outside the reader, never through the reader's stored
+  manifest location. Since the seventh revision this is the spec's own
+  rule, not a departure from it: `{origin}blyg.json` MUST serve the
+  manifest at every identity origin, as the manifest or by a redirect to
+  one with the same identity (§4, §6.1, §12.1 step 4; decision #87, on
+  blygger-spec#21), and the parties that hold only an identity (a
+  receiver under templates, §15.4; a sender building a target, §15.2; a
+  forker checking a pin, §5.6 rule 2) all probe it. An origin whose
+  manifest is only where a `rel="blyg"` link names it is now
+  nonconforming. blygd can still subscribe to and read it, but not fork
+  it: both the copy and the publish-time pin check refuse, naming the
+  missing file. Mentions to it fall back to the default layout and W3C
+  discovery, so they usually find no endpoint. Plane 1 knows only the
+  identity, and passing the reader's location through `studio.Imports`
+  would widen the one door between the planes. What remains a departure
+  is from the reference client, which reuses its subscription's stored
+  surface and so reaches such an origin.
 - The manifest claims `level: 2` (§3). With threads it is honest: every
   L1 and L2 publisher construct is implemented. The claim stays
   informative (§3.2).
