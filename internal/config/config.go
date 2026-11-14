@@ -43,6 +43,13 @@ type Config struct {
 	// RateLimits turns the request budgets on (BLYGD_RATE_LIMITS, default
 	// true). Off is for test harnesses only (scripts/interop).
 	RateLimits bool
+	// The classifier behind readers' filters: SubQ's Decisions API
+	// (DESIGN.md "Filters"). With no key, filtering is off, and blygd stays
+	// a reader that needs no models or keys (protocol invariant 3).
+	SubQKey        string // BLYGD_SUBQ_KEY
+	SubQURL        string // BLYGD_SUBQ_URL, default https://api.subq.ai/v1
+	SubQModel      string // BLYGD_SUBQ_MODEL, default subq-snap-1.1
+	SubQDailyCalls int    // BLYGD_SUBQ_DAILY_CALLS, default 20000: requests per UTC day, across every reader
 }
 
 // Load reads the environment.
@@ -56,6 +63,9 @@ func Load() (*Config, error) {
 		GeneratorURL:   envOr("BLYGD_GENERATOR_URL", "https://github.com/chrisbodhi/blygd"),
 		MigrateOnStart: os.Getenv("BLYGD_MIGRATE_ON_START") != "false",
 		RateLimits:     os.Getenv("BLYGD_RATE_LIMITS") != "false",
+		SubQKey:        os.Getenv("BLYGD_SUBQ_KEY"),
+		SubQURL:        envOr("BLYGD_SUBQ_URL", "https://api.subq.ai/v1"),
+		SubQModel:      envOr("BLYGD_SUBQ_MODEL", "subq-snap-1.1"),
 	}
 	var err error
 	if c.FragmentCap, err = intEnv("BLYGD_FRAGMENT_CAP", 2000); err != nil {
@@ -68,6 +78,9 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	if c.Level, err = intEnv("BLYGD_LEVEL", 2); err != nil {
+		return nil, err
+	}
+	if c.SubQDailyCalls, err = intEnv("BLYGD_SUBQ_DAILY_CALLS", 20000); err != nil {
 		return nil, err
 	}
 	if c.DatabaseURL == "" {

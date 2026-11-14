@@ -28,7 +28,7 @@ const Channel = "blygd_events"
 // UserID (one user's private reading state) says who may hear it; Data is
 // what the client receives.
 type Event struct {
-	Type           string          `json:"type"` // import, item, mention, outbound, subscribe
+	Type           string          `json:"type"` // import, item, label, mention, outbound, subscribe
 	OriginID       int64           `json:"origin_id,omitempty"`
 	RemoteOriginID int64           `json:"remote_origin_id,omitempty"`
 	UserID         int64           `json:"user_id,omitempty"`

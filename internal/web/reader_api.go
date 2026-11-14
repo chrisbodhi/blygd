@@ -341,11 +341,19 @@ func (a *API) readerFeed(w http.ResponseWriter, r *http.Request) error {
 		}
 		q.SubscriptionID = n
 	}
+	switch r.URL.Query().Get("filters") {
+	case "", "apply":
+	case "off":
+		q.Unfiltered = true
+	default:
+		return badRequest("filters is apply or off")
+	}
 	page, err := a.Reader.Feed(r.Context(), principal(r.Context()).UserID, q)
 	if err != nil {
 		return err
 	}
-	writeJSON(w, 200, map[string]any{"items": page.Items, "next": page.Next, "as_of": page.AsOf, "notice": reader.Notice})
+	writeJSON(w, 200, map[string]any{"items": page.Items, "next": page.Next, "as_of": page.AsOf, "notice": reader.Notice,
+		"hidden": page.Hidden, "held": page.Held})
 	return nil
 }
 

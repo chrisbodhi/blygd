@@ -21,7 +21,8 @@ three planes apart, and the separation is structural:
 |---|---|---|---|
 | 1. Own origins | Items this instance publishes, and its blogroll | `origins`, `items`, `item_versions`, `media`, `blogroll_entries`, `surface_files` | Authoritative |
 | 2. Import mirror | Other origins' items, one copy per origin, shared by every subscriber | `remote_origins`, `imported_items`, `imported_pins` | Reconciled copy (§13) |
-| 3. Private overlay | Per-user: subscriptions, hoppers, reads | `subscriptions`, `subscription_imports`, `hoppers`, `hopper_members`, `reads` | Private, never on the wire |
+| (derived from 2) | Classifier answers about imported items, shared by every reader who asked the same question | `item_labels`, `label_leases`, `classifier_usage` | Derived; an item's answers go when it is withdrawn (§13.4) |
+| 3. Private overlay | Per-user: subscriptions, hoppers, reads, filters and ratings | `subscriptions`, `subscription_imports`, `hoppers`, `hopper_members`, `reads`, `filters`, `label_overrides` | Private, never on the wire |
 
 - **The renderer reads only plane 1.** Imported items can never be
   re-emitted (§13.5) because nothing that writes `surface_files` queries
@@ -545,6 +546,107 @@ serve: every surface file at its origin-relative path, directory pages as
   webmention endpoint. Exporting sends no mentions (§15.7 permits it, does
   not require it).
 
+## Filters (reader-side labels)
+
+A reader names topics in their own words ("US politics", "spoilers for
+Severance season 3") and says what happens to posts about them. A
+classifier the operator configured judges each imported item against
+them, and the reading feed folds, hides or holds what matches, saying
+which filter did it. It is reading state, like a read mark, and the wire
+never sees it: AI is never in the protocol, and a reader needs no models
+or keys (invariant 3). Without `BLYGD_SUBQ_KEY` filters are kept and do
+nothing, and nothing is held for an answer that will never come.
+
+- **The classifier** is SubQ's Decisions API, `POST {BLYGD_SUBQ_URL}/systemone`
+  with `subq-snap-1.1` (docs.subq.ai), behind `reader.Classifier`.
+  `internal/classify` holds no SQL and imports only `fetch`. It answers in
+  probabilities and never in text. Each topic is one `score` question with
+  three levels: not about it, mentions it in passing, mainly about it. A
+  request covers one item, so one post's text cannot steer another's
+  answers, and carries every question any of its readers asks, up to 128.
+  The input is the post's text, a title for L0, and never its author, so
+  who wrote it cannot sway the answer. Rendered text includes baked quotes
+  (§10.2), where a spoiler can hide as well as anywhere.
+- **Answers are stored, decisions are not.** `item_labels` keeps each
+  level's probability per item, question and model. A filter's `match`
+  (`mentions` or `mainly`) and `threshold` decide at read time, so
+  changing them needs no request. The question is `classify.Topic.Hash`,
+  the normalized words plus the prompt's version, so readers who wrote the
+  same topic share one answer, as they share the mirror. Changing the
+  words, the prompt or the model asks again.
+- **An answer is about one version's words.** It applies only while the
+  item is at the version and `content_hash` it was asked about, so neither
+  an edit nor a stealth edit (§13.3) is judged by an answer about other
+  words. A new version whose text is unchanged (a maintenance republish,
+  §13.2) reuses the answer by `input_hash`, without asking. Withdrawal
+  deletes the item's answers and claims in the endcap's own transaction
+  (§13.4). The reader's own judgments stay: they are the reader's, like
+  read marks.
+- **The worker** leases the poller's way. It claims recent items, newest
+  first and back `LabelWindow` (14 days) by feed position, that some
+  reader's enabled filter covers and that have no answer for their current
+  text. It asks outside any transaction and stores the answer in a short
+  one, which also sends a `label` hint. Each documented failure means one
+  thing. 429 and 5xx back off 5, 20 then 80 minutes, honoring
+  `Retry-After`, and fail after 4 tries. 400 and 422 fail that version at
+  once. 401, 402, 403 and any other 4xx halt every request for 10 minutes,
+  refunding the claims. A failed version shows as unclassified. Requests
+  stop at `BLYGD_SUBQ_DAILY_CALLS` per UTC day, a ceiling for a runaway
+  worker rather than a budget: an item is about $0.00003 of input at
+  $0.04 per million tokens.
+- **Nothing vanishes silently.** `fold` returns the item with `filtered`
+  saying which filters matched, for the client to collapse. `hide` leaves
+  it out and counts it in the page's `hidden`. `hold`, a filter's
+  `pending` choice for spoilers, leaves a version out (counted in `held`)
+  until it is answered, for at most `HoldFor` (10 minutes) after blygd
+  first saw it. A version the classifier cannot judge is never held. Each
+  left-out item is counted on exactly one page however the feed is paged,
+  and `filters=off` shows everything, each item still saying what its
+  filters make of it. A reader's override (`label_overrides`) wins over
+  the classifier for every version of the item.
+- **Planes.** `filters` and `label_overrides` are plane 3.
+  `item_labels`, `label_leases` and `classifier_usage` are derived from
+  plane 2. All five are `internal/reader`'s and nothing in plane 1 reads
+  them. Authors are never told who filters them: subscription is invisible
+  on purpose (§1, §11), and a count of filtering readers would be a trace
+  of it.
+- **What leaves the instance.** The text of items readers' filters cover,
+  and the filters' words, go to SubQ. Together they say what this
+  instance's readers read. SubQ deletes Decisions inputs within 60 days,
+  or keeps nothing for an organization on zero data retention. That
+  matters for §13.4: a withdrawn item's text can outlive its withdrawal
+  there. Ask for zero data retention before other readers turn filters on.
+- **Ratings tune each filter as the reader reads**, with no labelled set
+  up front. A rating is the reader's yes or no on an item under one
+  filter (`PUT /api/reader/items/{sid}/{iid}/filters/{fid}`, migration
+  009). It decides that item for every version, as an override always
+  did. It also keeps the classifier's probabilities for the item's
+  current version, the filter's `def_hash` and the model. Only ratings
+  of the current question from the current model count, so new words or
+  a new model start afresh, and a rating made before any answer arrived
+  decides its item and tunes nothing. With `auto_tune` (the default),
+  each rating moves the threshold to the one that disagrees with the
+  fewest ratings (`tune.go`). It moves only once there are at least two
+  ratings each way, and only to a threshold with strictly fewer
+  disagreements. Among equals it takes the one nearest the current
+  threshold, between 0.05 and 0.95. Only the threshold is tuned: `match`
+  says what the reader means, and stays theirs. A threshold set by hand
+  turns tuning off, and the filter then reports `suggested_threshold`
+  instead. A rating answers with the filter as it left it, so a client
+  can say what the rating changed.
+- **In the studio** each reader card asks, per filter, "About politics?
+  Yes / No", beside the model's guess. Tapping one's own answer again
+  takes the rating back. With more than three filters a card asks only
+  where it matters: a match, an existing rating, or an answer within 0.2
+  of the threshold. The rest are one tap away, for what the model missed.
+  A filtered post arrives folded, naming its filters. "Show filtered"
+  (`filters=off`) brings hidden and held posts back to be read and rated.
+  A Filters panel adds, pauses, deletes and untunes filters, and shows
+  the classifier's status.
+- **Status:** `GET /api/filters` carries `classifier`, with whether it runs,
+  the model, any halt and its reason, and today's calls. A halt is per
+  process: each process learns it from its own next request.
+
 ## Outbound fetching
 
 Every outbound request goes through `internal/fetch`. Every URL it touches
@@ -560,6 +662,13 @@ is chosen by someone else, so it is bounded on every axis:
 
 `BLYGD_ALLOW_PRIVATE_FETCH=true` lifts the address check. Use it for
 development only.
+
+One destination is the operator's choice, not a stranger's: the
+classifier at `BLYGD_SUBQ_URL` (see "Filters"). It goes through the same
+client, so it is bounded, refused inside a transaction and address-checked
+too. A self-hosted classifier on a private address therefore needs
+`BLYGD_ALLOW_PRIVATE_FETCH`. Its key travels by `fetch.Client.DoWith`,
+with redirects off, so it reaches only the URL it was issued for.
 
 ## Write API and scopes
 
@@ -653,7 +762,8 @@ reconnect, re-fetch.
   (`outbound`); the studio, on every change to an own item (`item`:
   `change`, and `version` or `draft_rev` where they apply, so a client
   can tell its own edit from another's); the importer, per entry tried
-  (`subscribe`, to the importing user only). A studio event is sent
+  (`subscribe`, to the importing user only); the labeller, per item
+  answered (`label`, to the origin's subscribers, as `import` is). A studio event is sent
   inside the change's transaction, so it is heard on commit and never
   for a change that rolled back. Progress is never stored: it is
   transient, and the counts are in the API.

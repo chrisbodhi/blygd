@@ -303,6 +303,8 @@ function onEvent(type, d) {
     if (!d.more) offerRefresh("reader");
   } else if (type === "subscribe") {
     offerRefresh("reader"); // an imported entry was tried
+  } else if (type === "label") {
+    offerRefresh("reader"); // the classifier answered: a post may now fold, hide or show
   } else if (type === "mention") {
     offerRefresh("mentions");
   } else if (type === "outbound" && d.status !== "sent") {
@@ -560,6 +562,11 @@ let unreadOnly = true;
 // Unread counts on the Reader's subscription chips, kept current as cards
 // are marked: sid -> { n, el, label }.
 let unreadChips = {};
+// Filters (DESIGN.md "Filters"): showFiltered reads the feed with
+// filters=off, so hidden and held posts can be seen and rated too.
+let showFiltered = false;
+let filtersOpen = false;
+let filterByID = {}; // filter id → the filter, from the last list
 
 function bumpUnread(sid, delta) {
   const c = unreadChips[sid];
@@ -569,15 +576,19 @@ function bumpUnread(sid, delta) {
 }
 
 async function viewReader() {
-  const [subs, feed, waiting, failed] = await Promise.all([
+  const [subs, feed, waiting, failed, fl] = await Promise.all([
     attempt(() => api("GET", "/subscriptions")),
-    attempt(() => api("GET", "/reader/feed?limit=50" + (unreadOnly ? "&unread=true" : "") + (readerSub ? "&subscription=" + readerSub : ""))),
+    attempt(() => api("GET", "/reader/feed?limit=50" + (unreadOnly ? "&unread=true" : "") + (readerSub ? "&subscription=" + readerSub : "") +
+      (showFiltered ? "&filters=off" : ""))),
     // Only what is still to come or went wrong: a finished import can be a
     // thousand rows.
     attempt(() => api("GET", "/subscriptions/imports?status=pending")),
     attempt(() => api("GET", "/subscriptions/imports?status=failed")),
+    attempt(() => api("GET", "/filters")),
   ]);
   if (!subs || !feed) return;
+  const filters = fl ? fl.filters : [];
+  filterByID = Object.fromEntries(filters.map((f) => [f.id, f]));
   const list = subs.subscriptions || [];
   for (const s of list) subTitles[s.id] = s.display_title || s.title || s.origin;
   unreadChips = {};
@@ -610,6 +621,7 @@ async function viewReader() {
       h("button", { class: unreadOnly ? "on" : "", onclick: () => { unreadOnly = !unreadOnly; route(); } }, "Unread only"),
       // Marks what this feed could show, as of when it was read: anything
       // that arrived since stays unread.
+      filters.length ? h("button", { class: showFiltered ? "on" : "", onclick: () => { showFiltered = !showFiltered; route(); } }, "Show filtered") : null,
       list.some((s) => s.unread && (!readerSub || s.id === readerSub))
         ? h("button", { onclick: async () => {
             const body = readerSub ? { as_of: feed.as_of, subscription_id: readerSub } : { as_of: feed.as_of };
@@ -617,6 +629,8 @@ async function viewReader() {
             if (r) { toast(`Marked ${r.marked} read`); route(); }
           } }, "Mark all read") : null),
     readerSub ? subscriptionTools(list.find((s) => s.id === readerSub)) : null,
+    fl ? filtersPanel(filters, fl.classifier) : null,
+    leftOut(feed),
     feed.items && feed.items.length ? feed.items.map(readerCard) : h("p", { class: "muted" }, list.length ? "Nothing unread." : "Subscribe to someone to start reading."),
   );
   renderImporting();
@@ -654,6 +668,116 @@ function importQueue(waiting, failed) {
     failed.length ? h("div", { class: "row" }, h("button", { onclick: async () => {
       if (await attempt(() => api("DELETE", "/subscriptions/imports?status=failed"), "Cleared")) route();
     } }, "Clear failed")) : null);
+}
+
+// What this page of the feed left out, never silently.
+function leftOut(feed) {
+  const parts = [feed.hidden ? `${feed.hidden} hidden` : "", feed.held ? `${feed.held} held until checked` : ""].filter(Boolean);
+  if (!parts.length) return null;
+  return h("p", { class: "muted small" }, `${parts.join(" and ")} by your filters. `,
+    h("a", { href: "#reader", onclick: (e) => { e.preventDefault(); showFiltered = true; route(); } }, "Show them"), ".");
+}
+
+const pct = (p) => (p == null ? "?" : Math.round(p * 100) + "%");
+const matchWords = { mainly: "mainly about it", mentions: "that mention it" };
+
+// The reader's filters: their topics, what each does, how ratings have
+// tuned it, and a form for a new one. Ratings happen on the cards below.
+function filtersPanel(filters, classifier) {
+  const status = !classifier.enabled
+    ? h("p", { class: "problems small" }, "Filters need a classifier, which this server's operator configures (BLYGD_SUBQ_KEY). Until then they are kept and do nothing.")
+    : classifier.halted_until
+      ? h("p", { class: "problems small" }, `The classifier is paused until ${new Date(classifier.halted_until).toLocaleTimeString()}: ${classifier.last_error}`)
+      : null;
+  const name = h("input", { type: "text", name: "filter-name", placeholder: "A topic: politics, AI, spoilers for Severance…", "aria-label": "Topic" });
+  const desc = h("input", { type: "text", name: "filter-desc", placeholder: "What you mean by it (optional)", "aria-label": "What you mean by it" });
+  const action = h("select", { name: "filter-action", "aria-label": "What to do" },
+    h("option", { value: "fold" }, "Fold posts about it"), h("option", { value: "hide" }, "Hide posts about it"));
+  const match = h("select", { name: "filter-match", "aria-label": "Which posts" },
+    h("option", { value: "mainly" }, "mainly about it"), h("option", { value: "mentions" }, "that mention it at all"));
+  const hold = h("input", { type: "checkbox", id: "filter-hold" });
+  const details = h("details", { open: filtersOpen, ontoggle: (e) => (filtersOpen = e.target.open) },
+    h("summary", {}, filters.length ? `Filters (${filters.length})` : "Filters"),
+    status,
+    h("p", { class: "muted small" }, "Name a topic, and posts about it fold or hide. Rate what you read, Yes or No, and each filter tunes itself to your ratings. Filters are yours alone: nobody you read is told."),
+    filters.map(filterRow),
+    h("form", { onsubmit: async (ev) => {
+      ev.preventDefault();
+      const body = { name: name.value.trim(), action: action.value, match: match.value, pending: hold.checked ? "hold" : "show" };
+      if (desc.value.trim()) body.description = desc.value.trim();
+      if (await attempt(() => api("POST", "/filters", body), `Filtering “${body.name}”: posts are checked in the background`)) {
+        filtersOpen = true;
+        route();
+      }
+    } },
+      h("div", { class: "row" }, name), h("div", { class: "row" }, desc),
+      h("div", { class: "row" }, action, match),
+      h("div", { class: "row" }, h("label", { for: "filter-hold", class: "inline" }, hold, " Hold new posts until they are checked (for spoilers)")),
+      h("div", { class: "row" }, h("button", { class: "primary" }, "Add filter"))));
+  return details;
+}
+
+function filterRow(f) {
+  const r = f.ratings;
+  const tuning = f.auto_tune
+    ? (f.tuned_at ? `tuned by ${r.rated} rating${r.rated === 1 ? "" : "s"}` : r.rated ? `${r.rated} rated, tunes at 2 each way` : "tunes as you rate")
+    : "set by hand";
+  const patch = async (body, msg) => { if (await attempt(() => api("PATCH", `/filters/${f.id}`, body), msg)) route(); };
+  return h("div", { class: "card" + (f.enabled ? "" : " off") },
+    h("div", {}, h("strong", {}, f.name), f.enabled ? null : h("span", { class: "badge" }, "paused")),
+    f.description ? h("div", { class: "meta" }, f.description) : null,
+    h("div", { class: "meta" }, `${f.action === "hide" ? "Hides" : "Folds"} posts ${matchWords[f.match]}, from ${pct(f.threshold)} sure · ${tuning}`,
+      r.rated ? ` · ${r.disagree} of ${r.rated} ratings disagree` : "", f.pending === "hold" ? " · holds new posts" : ""),
+    r.suggested_threshold != null ? h("div", { class: "row" }, h("span", { class: "small" }, `Your ratings suggest ${pct(r.suggested_threshold)}.`),
+      h("button", { onclick: () => patch({ auto_tune: true }, "Tuning to your ratings") }, "Tune to my ratings")) : null,
+    h("div", { class: "row" },
+      h("button", { onclick: () => patch({ enabled: !f.enabled }, f.enabled ? "Paused" : "Resumed") }, f.enabled ? "Pause" : "Resume"),
+      f.auto_tune ? h("button", { onclick: () => patch({ auto_tune: false }, "Threshold stays where it is") }, "Stop tuning") : null,
+      h("button", { class: "danger", onclick: async () => {
+        if (!confirm(`Delete the filter “${f.name}”, and your ratings under it?`)) return;
+        if (await attempt(() => api("DELETE", `/filters/${f.id}`), "Deleted")) route();
+      } }, "Delete")));
+}
+
+const foldWords = { fold: "Folded", hide: "Hidden", hold: "Held until checked" };
+
+// Each of the reader's filters that covers a card, as a question they can
+// answer in one tap: is this post about it? The model's guess is shown,
+// and an answer of theirs wins and tunes the filter. Tapping their own
+// answer again takes it back. Nothing moves under the thumb: what the
+// answer does to the feed shows on the next refresh.
+function ratingRow(it, l) {
+  const f = filterByID[l.filter_id];
+  const p = f && f.match === "mentions" ? l.p_mentions : l.p_mainly;
+  const yes = h("button", { class: "mini" }, "Yes");
+  const no = h("button", { class: "mini" }, "No");
+  const guess = h("span", { class: "muted small" });
+  const paint = () => {
+    yes.classList.toggle("on", l.override === true);
+    no.classList.toggle("on", l.override === false);
+    yes.classList.toggle("guess", l.override == null && l.matched === true);
+    no.classList.toggle("guess", l.override == null && l.matched === false);
+    guess.textContent = l.matched == null && l.override == null ? " not checked yet" : ` model: ${pct(p)}`;
+  };
+  const rate = async (answer) => {
+    const path = `/reader/items/${it.subscription_id}/${encodeURIComponent(it.item_id)}/filters/${l.filter_id}`;
+    const undo = l.override === answer;
+    try {
+      const nf = undo ? await api("DELETE", path) : await api("PUT", path, { matched: answer });
+      l.override = undo ? null : answer;
+      paint();
+      const before = filterByID[nf.id];
+      filterByID[nf.id] = nf;
+      if (before && nf.threshold !== before.threshold) toast(`“${nf.name}” now matches from ${pct(nf.threshold)} sure, tuned by ${nf.ratings.rated} ratings`);
+      else toast(undo ? "Rating taken back" : l.matched == null ? "Rated (before the model answered, so it tunes nothing)" : `Rated: ${nf.ratings.rated} for “${nf.name}”`);
+    } catch (e) {
+      toast(e.message);
+    }
+  };
+  yes.addEventListener("click", () => rate(true));
+  no.addEventListener("click", () => rate(false));
+  paint();
+  return h("div", { class: "rating" }, h("span", { class: "small" }, `About “${l.filter}”?`), guess, yes, no);
 }
 
 function subscriptionTools(s) {
@@ -702,13 +826,35 @@ function readerCard(it) {
     }
   };
   paint();
+  // A filtered post arrives folded, saying which filters folded it; Show
+  // opens it without marking it read.
+  const fd = it.filtered;
+  const byNames = fd ? fd.filters.map((id) => (filterByID[id] || {}).name).filter(Boolean).join(", ") : "";
+  const folded = fd ? h("div", { class: "folded" }, h("span", { class: "small" }, `${foldWords[fd.action] || "Filtered"}: ${byNames || "by a filter"}`),
+    h("button", { class: "mini", onclick: (e) => { e.target.parentNode.remove(); textWrap.hidden = false; } }, "Show")) : null;
+  const textWrap = h("div", { class: "tap", hidden: !!fd, onclick: (e) => {
+    if (!e.target.closest("a")) full.classList.toggle("clipped");
+    setRead(true);
+  } }, full);
+  const labels = (it.labels || []).filter((l) => filterByID[l.filter_id]);
+  // With a few filters, ask about each. With more, ask only where it
+  // matters: a match, a rating already given, or an answer near the
+  // threshold. The rest are one tap away, for what the model missed.
+  const worthAsking = (l) => {
+    const f = filterByID[l.filter_id];
+    const p = f.match === "mentions" ? l.p_mentions : l.p_mainly;
+    return labels.length <= 3 || l.matched !== false || l.override != null || (p != null && Math.abs(p - f.threshold) < 0.2);
+  };
+  const asked = labels.filter(worthAsking), rest = labels.filter((l) => !worthAsking(l));
+  const ratings = h("div", { class: "ratings" }, asked.map((l) => ratingRow(it, l)),
+    rest.length ? h("button", { class: "mini", onclick: (e) => e.target.replaceWith(...rest.map((l) => ratingRow(it, l))) },
+      `Rate ${rest.length} more filter${rest.length === 1 ? "" : "s"}`) : null);
   return h("div", { class: "card" },
     h("div", {}, badge,
       h("span", { class: "badge" }, it.l0 ? "rss" : it.kind), it.discrepancy ? h("span", { class: "badge" }, "changed") : null),
-    h("div", { class: "tap", onclick: (e) => {
-      if (!e.target.closest("a")) full.classList.toggle("clipped");
-      setRead(true);
-    } }, full),
+    folded,
+    textWrap,
+    labels.length ? ratings : null,
     h("div", { class: "meta" }, [author, it.source, when(it.sort_at)].filter(Boolean).join(" · ")),
     h("div", { class: "row" },
       it.page ? h("a", { href: it.page, target: "_blank", rel: "noopener noreferrer", onclick: () => setRead(true) }, "Open ↗") : null,

@@ -34,6 +34,10 @@
     },
     {
       "name": "tokens"
+    },
+    {
+      "name": "filters",
+      "description": "A reader's private topics, judged by the classifier the operator configured, and what the reading feed does with posts about them. Never on the wire: the protocol has no AI in it, and a reader needs no models or keys (invariant 3)."
     }
   ],
   "security": [
@@ -104,7 +108,7 @@
           "meta"
         ],
         "summary": "A Server-Sent Events stream of change hints for this user.",
-        "description": "Each event names what changed, never the state: re-fetch what you show. Events, by type:\n\n- `import` (needs reader:read): a poll of one of your subscriptions finished. `{subscription_id, items, more, error?}`, where `more` means a backfill continues with the next batch in about a minute.\n- `subscribe` (needs reader:read): an entry of one of your subscription imports was tried. `{id, status, subscription_id?, error?}`, where status is subscribed, failed, or pending when it will be tried again.\n- `item` (needs items:read): one of your items changed, from any client. `{id, change, version?, draft_rev?}`, where change is created, edited, deleted, published, withdrawn or pinned; version is the one published, withdrawn or pinned; and draft_rev is the draft's revision after a create, edit or publish, so a client can tell its own change from another's.\n- `mention` (needs mentions:read): an inbound mention to your origin arrived or changed. `{id, status, relation?}`.\n- `outbound` (needs mentions:read): one of your outbound mentions was attempted. `{id, status, last_result}`.\n\nA heartbeat comment arrives every 25 s. Events missed while disconnected are not replayed; fetch state on reconnect. Browsers should read this with fetch(), which can send the Authorization header; EventSource cannot. At most 8 streams per user.",
+        "description": "Each event names what changed, never the state: re-fetch what you show. Events, by type:\n\n- `import` (needs reader:read): a poll of one of your subscriptions finished. `{subscription_id, items, more, error?}`, where `more` means a backfill continues with the next batch in about a minute.\n- `subscribe` (needs reader:read): an entry of one of your subscription imports was tried. `{id, status, subscription_id?, error?}`, where status is subscribed, failed, or pending when it will be tried again.\n- `item` (needs items:read): one of your items changed, from any client. `{id, change, version?, draft_rev?}`, where change is created, edited, deleted, published, withdrawn or pinned; version is the one published, withdrawn or pinned; and draft_rev is the draft's revision after a create, edit or publish, so a client can tell its own change from another's.\n- `label` (needs reader:read): the classifier answered for an item of one of your subscriptions, so what your filters do to it may have changed. `{subscription_id, item_id}`.\n- `mention` (needs mentions:read): an inbound mention to your origin arrived or changed. `{id, status, relation?}`.\n- `outbound` (needs mentions:read): one of your outbound mentions was attempted. `{id, status, last_result}`.\n\nA heartbeat comment arrives every 25 s. Events missed while disconnected are not replayed; fetch state on reconnect. Browsers should read this with fetch(), which can send the Authorization header; EventSource cannot. At most 8 streams per user.",
         "security": [
           {
             "bearer": []
@@ -2324,6 +2328,19 @@
               ]
             },
             "description": "Only unread items."
+          },
+          {
+            "name": "filters",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "apply",
+                "off"
+              ]
+            },
+            "description": "apply (the default) leaves out what your filters hide or hold, and counts it. off shows everything, each item still saying what your filters make of it."
           }
         ]
       }
@@ -2653,6 +2670,350 @@
         "responses": {
           "204": {
             "description": "Done."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/api/filters": {
+      "get": {
+        "operationId": "listFilters",
+        "tags": [
+          "filters"
+        ],
+        "summary": "Your filters, and whether the classifier runs.",
+        "security": [
+          {
+            "bearer": [
+              "reader:read"
+            ]
+          }
+        ],
+        "x-blygd-cost": "default",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FilterList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createFilter",
+        "tags": [
+          "filters"
+        ],
+        "summary": "Add a filter.",
+        "description": "Items the filter covers are classified in the background, newest first, back 14 days by feed position. Readers who wrote the same topic in the same words share one answer per item. At most 32 filters.",
+        "security": [
+          {
+            "bearer": [
+              "reader:write"
+            ]
+          }
+        ],
+        "x-blygd-cost": "default",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FilterCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Filter"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/api/filters/{fid}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/FilterID"
+        }
+      ],
+      "get": {
+        "operationId": "getFilter",
+        "tags": [
+          "filters"
+        ],
+        "summary": "One filter.",
+        "security": [
+          {
+            "bearer": [
+              "reader:read"
+            ]
+          }
+        ],
+        "x-blygd-cost": "default",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Filter"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "patchFilter",
+        "tags": [
+          "filters"
+        ],
+        "summary": "Change a filter.",
+        "security": [
+          {
+            "bearer": [
+              "reader:write"
+            ]
+          }
+        ],
+        "x-blygd-cost": "default",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FilterPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Filter"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteFilter",
+        "tags": [
+          "filters"
+        ],
+        "summary": "Delete a filter, and your overrides under it.",
+        "security": [
+          {
+            "bearer": [
+              "reader:write"
+            ]
+          }
+        ],
+        "x-blygd-cost": "default",
+        "responses": {
+          "204": {
+            "description": "Done."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/api/reader/items/{sid}/{iid}/filters/{fid}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/SubscriptionID"
+        },
+        {
+          "$ref": "#/components/parameters/ImportedItemID"
+        },
+        {
+          "$ref": "#/components/parameters/FilterID"
+        }
+      ],
+      "put": {
+        "operationId": "setOverride",
+        "tags": [
+          "filters"
+        ],
+        "summary": "Rate an item under one of your filters: is it about the topic?",
+        "description": "Your rating wins over the classifier's answer for this item, at every version. It keeps the answer you saw, so it can tune the filter (auto_tune). Rate as you read, wherever an answer looks wrong, or right: there is no labelled set to build first.",
+        "security": [
+          {
+            "bearer": [
+              "reader:write"
+            ]
+          }
+        ],
+        "x-blygd-cost": "default",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Override"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The filter as the rating left it: its threshold, if tuning moved it, and its ratings.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Filter"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "clearOverride",
+        "tags": [
+          "filters"
+        ],
+        "summary": "Take a rating back; the classifier's answer applies again, and the filter retunes without it.",
+        "security": [
+          {
+            "bearer": [
+              "reader:write"
+            ]
+          }
+        ],
+        "x-blygd-cost": "default",
+        "responses": {
+          "200": {
+            "description": "The filter as the rating left it: its threshold, if tuning moved it, and its ratings.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Filter"
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
@@ -4424,6 +4785,34 @@
             "items": {
               "$ref": "#/components/schemas/Pin"
             }
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Label"
+            },
+            "description": "One entry per enabled filter of yours that covers this item; empty when none does or no classifier is configured."
+          },
+          "filtered": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Filtered"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null when the item shows plainly."
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "none",
+              "pending",
+              "done",
+              "failed"
+            ],
+            "description": "none: no filter covers it (or no classifier is configured, or it is withdrawn). pending: some answer has not arrived. done. failed: the classifier cannot judge this version; it shows as if unfiltered."
           }
         },
         "required": [
@@ -4441,7 +4830,10 @@
           "sort_at",
           "read",
           "discrepancy",
-          "doc"
+          "doc",
+          "labels",
+          "filtered",
+          "classification"
         ],
         "additionalProperties": false
       },
@@ -4468,13 +4860,23 @@
             "type": "string",
             "format": "date-time",
             "description": "When this page was read. Send the first page's to POST /api/reader/read to mark read what you showed and nothing that arrived since."
+          },
+          "hidden": {
+            "type": "integer",
+            "description": "Items this page's stretch of the feed left out because a filter hides them. Each is counted on exactly one page. Zero with filters=off."
+          },
+          "held": {
+            "type": "integer",
+            "description": "Items left out while a filter that holds waits for an answer."
           }
         },
         "required": [
           "items",
           "next",
           "notice",
-          "as_of"
+          "as_of",
+          "hidden",
+          "held"
         ],
         "additionalProperties": false
       },
@@ -5092,6 +5494,452 @@
           "notice"
         ],
         "additionalProperties": false
+      },
+      "Filter": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "description": "The topic, in your words: \"US politics\", \"spoilers for Severance season 3\". A bare \"spoilers\" is refused: spoilers for what?"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "What you mean by it: what counts, what does not. Sent to the classifier with the name."
+          },
+          "match": {
+            "type": "string",
+            "enum": [
+              "mentions",
+              "mainly"
+            ],
+            "description": "mentions: a post that mentions the topic at all matches. mainly: only a post mainly about it. Default mainly."
+          },
+          "threshold": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "exclusiveMaximum": 1,
+            "description": "A post matches when the probability match names is at least this. Default 0.5. Changing it, match or action applies at once to the answers held; changing name or description asks the classifier again."
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "fold",
+              "hide"
+            ],
+            "description": "fold: shown, with filtered saying why, for the client to collapse. hide: left out of the feed and counted in hidden. Default fold."
+          },
+          "pending": {
+            "type": "string",
+            "enum": [
+              "show",
+              "hold"
+            ],
+            "description": "Before an answer arrives: show the post, or hold it back (counted in held) until it is answered, for at most 10 minutes after blygd first sees that version. A version the classifier cannot judge is never held. Default show."
+          },
+          "subscription_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "description": "Only this subscription's items; null, every subscription's."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "A disabled filter is kept, and does nothing. Default true."
+          },
+          "auto_tune": {
+            "type": "boolean",
+            "description": "Let your ratings set the threshold: after each rating, it moves to the one that agrees with the most of this filter's ratings, once there are at least two each way and only if that disagrees with fewer of them. Setting threshold without auto_tune turns it off. Default true."
+          },
+          "tuned_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When your ratings last moved the threshold."
+          },
+          "ratings": {
+            "$ref": "#/components/schemas/Ratings"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "match",
+          "threshold",
+          "action",
+          "pending",
+          "subscription_id",
+          "enabled",
+          "auto_tune",
+          "tuned_at",
+          "ratings",
+          "created_at",
+          "updated_at"
+        ],
+        "additionalProperties": false
+      },
+      "FilterCreate": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "description": "The topic, in your words: \"US politics\", \"spoilers for Severance season 3\". A bare \"spoilers\" is refused: spoilers for what?"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "What you mean by it: what counts, what does not. Sent to the classifier with the name."
+          },
+          "match": {
+            "type": "string",
+            "enum": [
+              "mentions",
+              "mainly"
+            ],
+            "description": "mentions: a post that mentions the topic at all matches. mainly: only a post mainly about it. Default mainly."
+          },
+          "threshold": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "exclusiveMaximum": 1,
+            "description": "A post matches when the probability match names is at least this. Default 0.5, a starting guess: rate items (PUT /api/reader/items/{sid}/{iid}/filters/{fid}) and auto_tune moves it. Setting it by hand turns auto_tune off unless the same request sets auto_tune. Changing it, match or action applies at once to the answers held; changing name or description asks the classifier again, and earlier ratings stop counting."
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "fold",
+              "hide"
+            ],
+            "description": "fold: shown, with filtered saying why, for the client to collapse. hide: left out of the feed and counted in hidden. Default fold."
+          },
+          "pending": {
+            "type": "string",
+            "enum": [
+              "show",
+              "hold"
+            ],
+            "description": "Before an answer arrives: show the post, or hold it back (counted in held) until it is answered, for at most 10 minutes after blygd first sees that version. A version the classifier cannot judge is never held. Default show."
+          },
+          "subscription_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "description": "Only this subscription's items; null, every subscription's."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "A disabled filter is kept, and does nothing. Default true."
+          },
+          "auto_tune": {
+            "type": "boolean",
+            "description": "Let your ratings set the threshold: after each rating, it moves to the one that agrees with the most of this filter's ratings, once there are at least two each way and only if that disagrees with fewer of them. Setting threshold without auto_tune turns it off. Default true."
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "FilterPatch": {
+        "type": "object",
+        "description": "Members to change; absent ones stay as they are.",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "description": "The topic, in your words: \"US politics\", \"spoilers for Severance season 3\". A bare \"spoilers\" is refused: spoilers for what?"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "What you mean by it: what counts, what does not. Sent to the classifier with the name."
+          },
+          "match": {
+            "type": "string",
+            "enum": [
+              "mentions",
+              "mainly"
+            ],
+            "description": "mentions: a post that mentions the topic at all matches. mainly: only a post mainly about it. Default mainly."
+          },
+          "threshold": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "exclusiveMaximum": 1,
+            "description": "A post matches when the probability match names is at least this. Default 0.5, a starting guess: rate items (PUT /api/reader/items/{sid}/{iid}/filters/{fid}) and auto_tune moves it. Setting it by hand turns auto_tune off unless the same request sets auto_tune. Changing it, match or action applies at once to the answers held; changing name or description asks the classifier again, and earlier ratings stop counting."
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "fold",
+              "hide"
+            ],
+            "description": "fold: shown, with filtered saying why, for the client to collapse. hide: left out of the feed and counted in hidden. Default fold."
+          },
+          "pending": {
+            "type": "string",
+            "enum": [
+              "show",
+              "hold"
+            ],
+            "description": "Before an answer arrives: show the post, or hold it back (counted in held) until it is answered, for at most 10 minutes after blygd first sees that version. A version the classifier cannot judge is never held. Default show."
+          },
+          "subscription_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "description": "Only this subscription's items; null, every subscription's."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "A disabled filter is kept, and does nothing. Default true."
+          },
+          "auto_tune": {
+            "type": "boolean",
+            "description": "Let your ratings set the threshold: after each rating, it moves to the one that agrees with the most of this filter's ratings, once there are at least two each way and only if that disagrees with fewer of them. Setting threshold without auto_tune turns it off. Default true."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ClassifierStatus": {
+        "type": "object",
+        "description": "Whether filters run on this instance. The operator configures the classifier (BLYGD_SUBQ_KEY); without one, filters are kept and do nothing.",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The model answers come from; answers from another model are not used."
+          },
+          "halted_until": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "No requests until then: the classifier refused the key, the credits ran out, or the model is not allowed. Items wait, unfiltered once any hold lapses."
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_error_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "calls_today": {
+            "type": "integer",
+            "description": "Requests so far this UTC day, across every reader."
+          },
+          "daily_calls": {
+            "type": "integer",
+            "description": "The ceiling on calls_today (BLYGD_SUBQ_DAILY_CALLS)."
+          }
+        },
+        "required": [
+          "enabled",
+          "model",
+          "halted_until",
+          "last_error",
+          "last_error_at",
+          "calls_today",
+          "daily_calls"
+        ],
+        "additionalProperties": false
+      },
+      "FilterList": {
+        "type": "object",
+        "properties": {
+          "filters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Filter"
+            }
+          },
+          "classifier": {
+            "$ref": "#/components/schemas/ClassifierStatus"
+          }
+        },
+        "required": [
+          "filters",
+          "classifier"
+        ],
+        "additionalProperties": false
+      },
+      "Override": {
+        "type": "object",
+        "properties": {
+          "matched": {
+            "type": "boolean",
+            "description": "Your judgment: the item is, or is not, about the filter's topic."
+          }
+        },
+        "required": [
+          "matched"
+        ],
+        "additionalProperties": false
+      },
+      "Label": {
+        "type": "object",
+        "description": "One of your filters that covers the item, and what is known.",
+        "properties": {
+          "filter_id": {
+            "type": "integer"
+          },
+          "filter": {
+            "type": "string",
+            "description": "The filter's name."
+          },
+          "matched": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the filter matches: your override when there is one, else the classifier's answer against the filter's match and threshold. Null: no answer yet for this version's words."
+          },
+          "p_mentions": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Probability the post at least mentions the topic."
+          },
+          "p_mainly": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Probability the post is mainly about the topic."
+          },
+          "confidence": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "The classifier's confidence in its answer."
+          },
+          "classified_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When the classifier answered."
+          },
+          "override": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Your judgment, if you gave one (PUT /api/reader/items/{sid}/{iid}/filters/{fid})."
+          }
+        },
+        "required": [
+          "filter_id",
+          "filter",
+          "matched",
+          "p_mentions",
+          "p_mainly",
+          "confidence",
+          "classified_at",
+          "override"
+        ],
+        "additionalProperties": false
+      },
+      "Filtered": {
+        "type": "object",
+        "description": "What your filters do to the item.",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "fold",
+              "hide",
+              "hold"
+            ],
+            "description": "hide wins over hold, and hold over fold."
+          },
+          "filters": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "The filters that did it."
+          }
+        },
+        "required": [
+          "action",
+          "filters"
+        ],
+        "additionalProperties": false
+      },
+      "Ratings": {
+        "type": "object",
+        "description": "Your ratings of this filter's answers: those about its current words, from the current model, rated once the classifier had answered. Other ratings still decide their items, and tune nothing.",
+        "properties": {
+          "rated": {
+            "type": "integer"
+          },
+          "yes": {
+            "type": "integer",
+            "description": "Rated about the topic."
+          },
+          "no": {
+            "type": "integer"
+          },
+          "disagree": {
+            "type": "integer",
+            "description": "Ratings the current match and threshold would decide the other way."
+          },
+          "suggested_threshold": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "A threshold that disagrees with fewer ratings, when there is one (at least two ratings each way). A filter with auto_tune has already taken it, so this is non-null only when auto_tune is off."
+          }
+        },
+        "required": [
+          "rated",
+          "yes",
+          "no",
+          "disagree",
+          "suggested_threshold"
+        ],
+        "additionalProperties": false
       }
     },
     "responses": {
@@ -5270,6 +6118,15 @@
       },
       "BlockID": {
         "name": "bid",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "FilterID": {
+        "name": "fid",
         "in": "path",
         "required": true,
         "schema": {

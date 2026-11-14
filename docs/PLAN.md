@@ -563,6 +563,51 @@ What a second client found missing, all in the API (migration 007):
 - Draft preview (Phase 3), `Subscription.author`, schemas for imported
   documents, and every error code described in `openapi.json`.
 
+## Filters (reader-side labels, 2026-11-09)
+
+Readers' private topics, judged by SubQ's Decisions API
+(`subq-snap-1.1`), and what the feed does with posts about them
+(DESIGN.md "Filters", migration 008). Off without `BLYGD_SUBQ_KEY`
+(invariant 3).
+
+Done:
+
+- `internal/classify`: the Decisions API client, with score questions,
+  documented failures mapped to retry, skip or halt, and no SQL.
+- The labelling worker: leased, outside transactions, one request per
+  item, answers shared by readers asking the same question, reused across
+  versions with unchanged text, and deleted on withdrawal (§13.4). It
+  stops at a daily ceiling and halts on key or credit errors.
+- `fold`, `hide` and `hold`, with `hidden` and `held` counted once per page,
+  `filters=off`, overrides, per-subscription scope, and
+  `GET /api/filters`'s classifier status. Filters run under
+  `reader:read` and `reader:write`.
+- Tests against a fake of the API (the real client end to end) and a fake
+  classifier. Every rule's test was seen failing with the rule broken.
+- Ratings instead of a labelled set (2026-11-14, migration 009). The reader
+  answers "about it? yes or no" on studio cards as they read, and each
+  answer decides its item and tunes the filter's threshold. Checked in
+  Chromium against a running instance with a fake classifier: four
+  ratings moved a threshold from 0.5 to 0.25, and unrated posts at 0.30
+  and 0.40 folded after it.
+
+Not yet:
+
+- **A live run.** No request has gone to the real API: this was built
+  against its documentation, and checked in a browser against a fake of
+  it. 0.5 is only where a filter starts, and ratings move it.
+- **Zero data retention** with SubQ before other readers turn filters on
+  (DESIGN.md "Filters", what leaves the instance).
+- **Where it matched:** number paragraphs `[P1]…` and ask a `choice` over
+  them (the Decisions API's document pattern), so a fold can point at
+  the passage. Escape literal `[P3]` in the post first.
+- **Images** (up to 4 per request) for spoilers in screenshots. That
+  needs other origins' media fetched outside the transaction.
+- Routing matches into
+  a hopper (the reference's auto-hoppers); an author's private view of
+  their own topic balance, from plane 1 and never rendered.
+- Subscription `unread` counts still include hidden items.
+
 ## Operations
 
 - **API description (done).** `internal/web/openapi.json`, OpenAPI 3.1,

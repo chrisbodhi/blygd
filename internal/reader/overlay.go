@@ -313,6 +313,25 @@ type Item struct {
 	Discrepancy    *string         `json:"discrepancy"`
 	Doc            json.RawMessage `json:"doc"` // verbatim; null once withdrawn (§13.4)
 	Pins           []Pin           `json:"pins,omitempty"`
+
+	// Labels are the classifier's answers for each of the reader's filters
+	// that covers this item, and the reader's own judgments (filters.go).
+	Labels json.RawMessage `json:"labels"`
+	// Filtered says what the reader's filters do to the item, and which
+	// did it; nil when it shows plainly.
+	Filtered *Filtered `json:"filtered"`
+	// Classification is none (no filter covers it, or no classifier is
+	// configured), pending, done, or failed (this version will not
+	// classify, and shows as if unfiltered).
+	Classification string `json:"classification"`
+}
+
+// Filtered is what the reader's filters do to one item: fold it (shown
+// collapsed, saying why), hide it (left out of the feed, and counted), or
+// hold it (left out while a filter that holds waits for an answer).
+type Filtered struct {
+	Action  string  `json:"action"`
+	Filters []int64 `json:"filters"`
 }
 
 // Pin is a retained pinned version (§13.4), shown with attribution to the
@@ -325,18 +344,73 @@ type Pin struct {
 
 const itemCols = `ii.id, ii.remote_origin_id, ro.identity_url, coalesce(s.display_title, ro.title, ro.identity_url),
 	ii.item_id, ii.kind, ii.state, ii.version, ii.page_url, ii.claimed_updated, ii.first_seen_at, ii.sort_at,
-	(rd.version IS NOT NULL AND rd.version >= ii.version), ii.discrepancy, ii.doc`
+	(rd.version IS NOT NULL AND rd.version >= ii.version), ii.discrepancy, ii.doc,
+	lab.labels,
+	CASE WHEN lab.hide_by IS NOT NULL THEN 'hide' WHEN lab.hold_by IS NOT NULL THEN 'hold' WHEN lab.fold_by IS NOT NULL THEN 'fold' END,
+	coalesce(lab.hide_by, lab.hold_by, lab.fold_by),
+	CASE WHEN ii.state <> 'current' OR lab.n = 0 THEN 'none' WHEN lab.missing = 0 THEN 'done'
+		WHEN ll.failed THEN 'failed' ELSE 'pending' END`
+
+// itemFrom is where an item row comes from: a user's subscription, its
+// origin and item, the user's read mark, and what their filters make of
+// the item. Named arguments: uid, model (empty when no classifier is
+// configured, which turns every filter off), now and hold (seconds).
+//
+// A filter matches on the reader's own judgment when there is one, else
+// on an answer about the item's current version and hash: an answer about
+// other words never applies (§13.3), and once withdrawn there is none
+// (§13.4). Hide wins over hold, and hold over fold. A failed version
+// holds nothing back: it shows unclassified rather than vanishing.
+const itemFrom = `FROM subscriptions s
+		JOIN remote_origins ro ON ro.id = s.remote_origin_id
+		JOIN imported_items ii ON ii.remote_origin_id = s.remote_origin_id
+		LEFT JOIN reads rd ON rd.user_id = s.user_id AND rd.imported_item_id = ii.id
+		LEFT JOIN label_leases ll ON ll.imported_item_id = ii.id AND ll.failed AND ll.version = ii.version
+			AND ll.content_hash IS NOT DISTINCT FROM ii.content_hash
+		LEFT JOIN LATERAL (
+			SELECT coalesce(jsonb_agg(jsonb_build_object('filter_id', f.id, 'filter', f.name, 'matched', m.matched,
+					'p_mentions', l.p_mentions, 'p_mainly', l.p_mainly, 'confidence', l.confidence,
+					'classified_at', l.classified_at, 'override', o.matched) ORDER BY f.id), '[]'::jsonb) AS labels,
+				count(*) AS n,
+				count(*) FILTER (WHERE m.matched IS NULL) AS missing,
+				array_agg(f.id ORDER BY f.id) FILTER (WHERE m.matched AND f.action = 'hide') AS hide_by,
+				array_agg(f.id ORDER BY f.id) FILTER (WHERE m.matched AND f.action = 'fold') AS fold_by,
+				array_agg(f.id ORDER BY f.id) FILTER (WHERE m.matched IS NULL AND f.pending = 'hold' AND ll.failed IS NOT TRUE
+					AND ii.state = 'current' AND ii.version_seen_at > @now::timestamptz - make_interval(secs => @hold)) AS hold_by
+			FROM filters f
+			LEFT JOIN item_labels l ON l.imported_item_id = ii.id AND l.def_hash = f.def_hash AND l.model = @model
+				AND l.version = ii.version AND l.content_hash IS NOT DISTINCT FROM ii.content_hash
+			LEFT JOIN label_overrides o ON o.filter_id = f.id AND o.imported_item_id = ii.id
+			CROSS JOIN LATERAL (SELECT coalesce(o.matched,
+				CASE f.match WHEN 'mainly' THEN l.p_mainly ELSE l.p_mentions END >= f.threshold) AS matched) m
+			WHERE f.user_id = s.user_id AND f.enabled AND @model <> '' AND ii.state = 'current'
+			  AND (f.remote_origin_id IS NULL OR f.remote_origin_id = s.remote_origin_id)
+		) lab ON true`
+
+// filteredOut is true of a row the feed leaves out: hidden, or held.
+const filteredOut = `(lab.hide_by IS NOT NULL OR lab.hold_by IS NOT NULL)`
+
+func (r *Reader) itemArgs(userID int64) pgx.NamedArgs {
+	return pgx.NamedArgs{"uid": userID, "model": r.model(), "now": r.now(), "hold": r.holdFor().Seconds()}
+}
 
 func scanItem(row pgx.Row) (*Item, error) {
 	var it Item
-	var doc []byte
+	var doc, labels []byte
+	var action *string
+	var by []int64
 	err := row.Scan(&it.ID, &it.SubscriptionID, &it.Origin, &it.Source, &it.ItemID, &it.Kind, &it.State, &it.Version,
-		&it.Page, &it.ClaimedUpdated, &it.FirstSeenAt, &it.SortAt, &it.Read, &it.Discrepancy, &doc)
+		&it.Page, &it.ClaimedUpdated, &it.FirstSeenAt, &it.SortAt, &it.Read, &it.Discrepancy, &doc,
+		&labels, &action, &by, &it.Classification)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if doc != nil {
 		it.Doc = doc
+	}
+	it.Labels = labels
+	if action != nil {
+		it.Filtered = &Filtered{Action: *action, Filters: by}
 	}
 	it.L0 = it.Kind == "l0"
 	return &it, err
@@ -348,12 +422,20 @@ type FeedQuery struct {
 	Before         string // cursor from a previous page
 	SubscriptionID int64  // 0 for every subscription
 	UnreadOnly     bool
+	// Unfiltered shows what filters would hide or hold, each item still
+	// saying what its filters make of it. A reader can always look.
+	Unfiltered bool
 }
 
 // FeedPage is one page of the reading feed.
 type FeedPage struct {
 	Items []*Item
 	Next  string // cursor for the next page; empty at the end
+	// Hidden and Held count the items this page's stretch of the feed
+	// left out, by filters that hide and by filters holding for an answer:
+	// never silently. Each left-out item is counted on exactly one page.
+	Hidden int
+	Held   int
 	// AsOf is when the feed was read. MarkAllRead takes it back, so "mark
 	// all read" covers what the feed could have shown and nothing newer.
 	AsOf time.Time
@@ -377,17 +459,16 @@ func (r *Reader) Feed(ctx context.Context, userID int64, q FeedQuery) (FeedPage,
 		}
 		beforeT, beforeID = &t, id
 	}
-	rows, err := r.Pool.Query(ctx, `SELECT `+itemCols+`
-		FROM subscriptions s
-		JOIN remote_origins ro ON ro.id = s.remote_origin_id
-		JOIN imported_items ii ON ii.remote_origin_id = s.remote_origin_id
-		LEFT JOIN reads rd ON rd.user_id = s.user_id AND rd.imported_item_id = ii.id
-		WHERE s.user_id = $1 AND ii.state = 'current'
-		  AND ($2::bigint = 0 OR s.remote_origin_id = $2)
-		  AND ($3::timestamptz IS NULL OR (ii.sort_at, ii.id) < ($3, $4))
-		  AND (NOT $5 OR rd.version IS NULL OR rd.version < ii.version)
-		ORDER BY ii.sort_at DESC, ii.id DESC LIMIT $6`,
-		userID, q.SubscriptionID, beforeT, beforeID, q.UnreadOnly, q.Limit)
+	args := r.itemArgs(userID)
+	args["sub"], args["before_t"], args["before_id"], args["unread"], args["limit"] = q.SubscriptionID, beforeT, beforeID, q.UnreadOnly, q.Limit
+	args["apply"] = !q.Unfiltered
+	const where = `WHERE s.user_id = @uid AND ii.state = 'current'
+		  AND (@sub::bigint = 0 OR s.remote_origin_id = @sub)
+		  AND (@before_t::timestamptz IS NULL OR (ii.sort_at, ii.id) < (@before_t, @before_id))
+		  AND (NOT @unread OR rd.version IS NULL OR rd.version < ii.version)`
+	rows, err := r.Pool.Query(ctx, `SELECT `+itemCols+` `+itemFrom+` `+where+`
+		  AND (NOT @apply OR NOT `+filteredOut+`)
+		ORDER BY ii.sort_at DESC, ii.id DESC LIMIT @limit`, args)
 	if err != nil {
 		return FeedPage{}, err
 	}
@@ -403,9 +484,26 @@ func (r *Reader) Feed(ctx context.Context, userID int64, q FeedQuery) (FeedPage,
 	if err := rows.Err(); err != nil {
 		return FeedPage{}, err
 	}
-	if len(page.Items) == q.Limit {
+	full := len(page.Items) == q.Limit
+	if full {
 		last := page.Items[len(page.Items)-1]
 		page.Next = strconv.FormatInt(last.SortAt.UnixMicro(), 10) + "." + strconv.FormatInt(last.ID, 10)
+	}
+	if !q.Unfiltered {
+		// What this page's stretch left out: after the cursor, and down to
+		// the last item shown when another page follows, so the next page
+		// counts the rest.
+		args["full"] = full
+		args["last_t"], args["last_id"] = time.Time{}, int64(0)
+		if full {
+			last := page.Items[len(page.Items)-1]
+			args["last_t"], args["last_id"] = last.SortAt, last.ID
+		}
+		if err := r.Pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE lab.hide_by IS NOT NULL), count(*) FILTER (WHERE lab.hide_by IS NULL)
+			`+itemFrom+` `+where+` AND `+filteredOut+`
+			  AND (NOT @full OR (ii.sort_at, ii.id) > (@last_t::timestamptz, @last_id::bigint))`, args).Scan(&page.Hidden, &page.Held); err != nil {
+			return FeedPage{}, err
+		}
 	}
 	return page, nil
 }
@@ -423,12 +521,10 @@ func parseCursor(c string) (time.Time, int64, error) {
 // GetItem returns one imported item from a subscription, with any retained
 // pins. A withdrawn item carries no content, only its pins (§13.4).
 func (r *Reader) GetItem(ctx context.Context, userID, remoteID int64, itemID string) (*Item, error) {
-	it, err := scanItem(r.Pool.QueryRow(ctx, `SELECT `+itemCols+`
-		FROM subscriptions s
-		JOIN remote_origins ro ON ro.id = s.remote_origin_id
-		JOIN imported_items ii ON ii.remote_origin_id = s.remote_origin_id
-		LEFT JOIN reads rd ON rd.user_id = s.user_id AND rd.imported_item_id = ii.id
-		WHERE s.user_id = $1 AND s.remote_origin_id = $2 AND ii.item_id = $3`, userID, remoteID, itemID))
+	args := r.itemArgs(userID)
+	args["sub"], args["item"] = remoteID, itemID
+	it, err := scanItem(r.Pool.QueryRow(ctx, `SELECT `+itemCols+` `+itemFrom+`
+		WHERE s.user_id = @uid AND s.remote_origin_id = @sub AND ii.item_id = @item`, args))
 	if err != nil {
 		return nil, err
 	}

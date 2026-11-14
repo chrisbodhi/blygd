@@ -27,7 +27,7 @@ func TestMentionKeepsThePlanesApart(t *testing.T) {
 			Why:    "this reads the studio's tables: ask the studio (studio.TargetItem, studio.Pinned) instead",
 		},
 		archtest.Rule{
-			Banned:  regexp.MustCompile(`(?i)\b(FROM|JOIN|INTO|UPDATE)\s+(remote_origins|imported_items|imported_pins|subscriptions|subscription_imports|reads|hopper_members)\b`),
+			Banned:  regexp.MustCompile(`(?i)\b(FROM|JOIN|INTO|UPDATE)\s+(remote_origins|imported_items|imported_pins|subscriptions|subscription_imports|reads|hopper_members|filters|label_overrides|item_labels|label_leases|classifier_usage)\b`),
 			Allowed: []string{"importedPage"},
 			Why:     "this queries the import mirror: only importedPage may, for a mention's target",
 		})
