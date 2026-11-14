@@ -47,12 +47,59 @@ Each track names the branch it is on.
 
 ## Track A — isolation, proved (Saturday)
 
-- [ ] `internal/web/tenancy_e2e_test.go`: every operation with an id in its
-  path, called by one user with another user's id, is a 404 and changes
-  nothing. Driven from `openapi.json`, so a new route with a path id fails
-  until it has a case. Break one owner check on purpose and see it fail.
-- [ ] Ids in request bodies: hopper members, `forked_from`, `stub_of`,
-  `![[id]]` and `[[id]]` naming another user's draft, read marks, events.
+`[~]` on `claude/adoring-cray-iexclk-a-isolation`.
+
+One test file, `internal/web/tenancy_e2e_test.go`, on the e2e harness
+(`newEnv`, `e.user`). Both users hold `*` owner tokens, so a scope check
+can never answer before the ownership check does: every refusal under
+test is about whose thing it is.
+
+- [ ] **Alice's fixture, one of everything:** a draft; a published item
+  with a pinned v1; a hopper with an own member and an imported member;
+  uploaded media; a received, verified mention (from a third user's
+  stub) and a block; a subscription with an imported item and a read
+  mark; a subscription import; a second token.
+- [ ] **Path ids, 26 operations.** As Bob, with Alice's ids, each is a 404
+  (not 403, which would say the id exists), and Alice's fixture reads the
+  same afterwards:
+  - items: `GET`, `PATCH`, `DELETE /api/items/{id}`, `…/preview`,
+    `…/publish`, `…/withdraw`, `…/versions/{n}/pin`;
+  - hoppers: `GET`, `PATCH`, `DELETE /api/hoppers/{hid}`,
+    `POST …/members`, `DELETE …/members/{mid}`;
+  - `DELETE /api/media/{file}`;
+  - `PUT` and `DELETE /api/mentions/{mid}/approval`;
+    `DELETE /api/mention-blocks/{bid}`;
+  - subscriptions: `GET`, `PATCH`, `DELETE /api/subscriptions/{sid}`,
+    `…/resolve`, `…/move`, `…/poll`;
+  - reader: `GET /api/reader/items/{sid}/{iid}`, `PUT` and
+    `DELETE …/read`;
+  - `DELETE /api/tokens/{tid}`.
+- [ ] **The list comes from `openapi.json`.** The test walks every
+  operation whose path has a `{param}` and fails on one with no case, so
+  a new route cannot skip this.
+- [ ] **Media is per origin.** Media paths are content-addressed and keyed
+  `(origin_id, path)`, so Bob uploading the same bytes gets the same
+  path. Bob deleting his copy leaves Alice's served.
+- [ ] **Ids in request bodies:**
+  - `POST /api/hoppers/{hid}/members` on Bob's hopper naming Alice's
+    draft, and her published item, is refused (`AddOwn` checks
+    `o.owner_id`), so Bob's public hopper can never show her draft;
+  - `forked_from`, `stub_of`, `![[id]]` and `[[id]]` naming Alice's draft
+    do not resolve; naming her published item resolves only as another
+    origin's would (§10.2), through Bob's own subscription;
+  - `POST /api/reader/read` with Alice's subscription id (already in
+    `reader_e2e_test.go`; keep it, cite it);
+  - Bob's `GET /api/events` hears none of Alice's `item`, `mention`,
+    `outbound` or `subscribe` hints while she works.
+- [ ] **Listings:** Bob's `GET` of `/api/items`, `/api/hoppers`,
+  `/api/media`, `/api/mentions`, `/api/mention-blocks`, `/api/outbound`,
+  `/api/subscriptions`, `/api/subscriptions/imports`, `/api/reader/feed`
+  and `/api/tokens` hold nothing of Alice's.
+- [ ] **Try it:** drop one owner condition (say `origin_id = $1` from
+  `DeleteMedia`) and see the test fail; record which in the commit
+  message.
+- [ ] `make test-all` green, then merge back into
+  `claude/adoring-cray-iexclk`.
 - [ ] Anything that fails here comes before every other track.
 
 ## Track B — studio fixes (Saturday)
