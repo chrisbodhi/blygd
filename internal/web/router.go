@@ -19,7 +19,7 @@ var llmsTxt []byte
 // Router joins the host-rooted API with the origin surfaces.
 func Router(api *API, surface *Surface, log *slog.Logger) http.Handler {
 	mux := http.NewServeMux()
-	mux.Handle("/api/", api.Handler())
+	mux.Handle("/api/", cors(api.Handler(), api.Limits))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		if err := api.Pool.Ping(r.Context()); err != nil {
 			http.Error(w, "database unreachable", http.StatusServiceUnavailable)

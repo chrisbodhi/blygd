@@ -605,6 +605,31 @@ and the description is readable without a token. The reference links
 OAuth endpoints (`authorization_endpoint`, `oauth-metadata`) instead;
 blygd will add those when it has an approval flow.
 
+**Cross-origin clients.** Every `/api/` response carries
+`Access-Control-Allow-Origin: *`, errors and 429s included, and exposes
+`Retry-After` and `WWW-Authenticate`. Preflights are answered for any
+`/api/` path, allowing the methods the API uses and the `Authorization`
+and `Content-Type` headers, cached for a day. So a client can live on its
+own origin (a web app, a hackathon prototype) and still be one more
+client of the API, as the studio is from this one.
+
+- **Why it is safe.** The API authenticates only by the bearer token in
+  `Authorization`, never by a cookie, by where a request comes from, or by
+  anything else a browser attaches on its own. A page on another origin
+  can act as a user only with a token that user gave it. So every origin
+  gets the same answer, `*`, and none gets
+  `Access-Control-Allow-Credentials`: a cookie added later would not be
+  sent cross-origin.
+- **Preflights cost the address.** A preflight carries no token, so it is
+  answered before authentication and charged to the address's public
+  budget, like an origin file.
+- **Only `/api/`.** The origin surface keeps its own `GET`/`HEAD` CORS
+  (§4). The studio sends none, and its CSP still connects to this host
+  only.
+- **The token is the user's to give.** A cross-origin client asks the user
+  to paste a scoped, expiring token, as the studio does, until an
+  OAuth-style approval flow exists (Phase 4).
+
 ## Request budgets
 
 In-memory token buckets (`internal/limit`), so budgets are per process;
@@ -625,7 +650,7 @@ blygd runs one. `BLYGD_RATE_LIMITS=false` turns them off for harnesses.
   Past that the address is refused before its token is looked up, good
   token or not.
 - **Everything public, per address.** Origin files, hopper pages, the
-  studio and llms.txt share 600 a minute in bursts of 300; webmention posts
+  studio, llms.txt and `/api/` preflights share 600 a minute in bursts of 300; webmention posts
   have 30 a minute on top of §15.3's per-source caps. `/healthz` is free.
 - **Addresses.** The peer, or with `BLYGD_TRUST_PROXY` the last
   `X-Forwarded-For` entry, which is the one the proxy saw. Public IPv6 is
@@ -710,8 +735,9 @@ another directory of files, without touching a handler.
   kin.
 - The token shares an origin with the public pages. Those pages sanitize
   every `content_html` they show and run no script under a sandboxing CSP
-  (HTML safety). A real client should still live on its own origin
-  (Phase 4's OAuth-style approval).
+  (HTML safety). A real client should still live on its own origin, which
+  the API allows (Cross-origin clients), and get its token from Phase 4's
+  OAuth-style approval once there is one.
 
 ## HTML safety
 
