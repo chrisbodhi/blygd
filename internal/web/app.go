@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,6 +37,12 @@ type App struct {
 	API      *API
 	Surface  *Surface
 	Handler  http.Handler
+	Log      *slog.Logger
+	// QueueEvery is how often Run logs the depth of the background queues
+	// (a minute when zero), and QueueLate how far past due a queued row
+	// must be to count as late (15 minutes when zero): longer than any
+	// lease, so a late row means a worker is behind or stopped.
+	QueueEvery, QueueLate time.Duration
 }
 
 // New wires an instance. It starts nothing: Run does.
@@ -61,7 +69,7 @@ func New(cfg *config.Config, pool *pgxpool.Pool, log *slog.Logger) *App {
 	return &App{
 		Fetch: fc, Studio: st, Accounts: accts, Reader: rd, Hoppers: hoppers, Mentions: mentions, Hub: hub, Receiver: receiver,
 		Workers: &mention.Workers{Pool: pool, Fetch: fc, Log: log, Display: st.ChangeDisplay},
-		API:     api, Surface: surface, Handler: Router(api, surface, log),
+		API:     api, Surface: surface, Handler: Router(api, surface, log), Log: log,
 	}
 }
 
@@ -75,5 +83,57 @@ func (a *App) Run(ctx context.Context) {
 	wg.Go(func() { a.Workers.Run(ctx) })
 	wg.Go(func() { a.Reader.Run(ctx) })
 	wg.Go(func() { a.Reader.RunImports(ctx) })
+	wg.Go(func() { a.logQueues(ctx) })
 	wg.Wait()
+}
+
+// logQueues logs the depth of every background queue once a minute, as one
+// line: what is waiting, and what is late. A late row means a worker is
+// behind or stopped, so a line with one is a warning, which is what an
+// operator watching the journal (`journalctl -u blygd -p warning`) sees.
+func (a *App) logQueues(ctx context.Context) {
+	every := a.QueueEvery
+	if every <= 0 {
+		every = time.Minute
+	}
+	tick := time.NewTicker(every)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			level, attrs := a.queueLine(ctx)
+			a.Log.Log(ctx, level, "queues", attrs...)
+		}
+	}
+}
+
+// queueLine reads the queues each package keeps, and says how loudly to
+// log them.
+func (a *App) queueLine(ctx context.Context) (slog.Level, []any) {
+	late := a.QueueLate
+	if late <= 0 {
+		late = 15 * time.Minute
+	}
+	level := slog.LevelInfo
+	var attrs []any
+	for _, q := range []func(context.Context, time.Duration) (map[string]int64, error){a.Workers.Queues, a.Reader.Queues} {
+		counts, err := q(ctx, late)
+		if err != nil {
+			return slog.LevelWarn, []any{"err", err}
+		}
+		keys := make([]string, 0, len(counts))
+		for k := range counts {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+		for _, k := range keys {
+			attrs = append(attrs, k, counts[k])
+			if strings.HasSuffix(k, "_late") && counts[k] > 0 {
+				level = slog.LevelWarn
+			}
+		}
+	}
+	return level, attrs
 }

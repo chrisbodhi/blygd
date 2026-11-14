@@ -242,3 +242,12 @@ func (a *Accounts) Revoke(ctx context.Context, userID, tokenID int64) (bool, err
 	tag, err := a.Pool.Exec(ctx, `UPDATE tokens SET revoked_at = now() WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL`, tokenID, userID)
 	return tag.RowsAffected() == 1, err
 }
+
+// RevokeAll revokes every token a user holds, owner token included, and
+// says how many. It is how an operator suspends someone: nothing they hold
+// authenticates any more, while what they published stays published (§4,
+// §9). Minting them a new token (`blygd token mint`) lifts it.
+func (a *Accounts) RevokeAll(ctx context.Context, userID int64) (int64, error) {
+	tag, err := a.Pool.Exec(ctx, `UPDATE tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL`, userID)
+	return tag.RowsAffected(), err
+}

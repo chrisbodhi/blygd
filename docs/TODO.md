@@ -225,22 +225,41 @@ on another origin cannot act as a user without being handed their token.
 
 ## Track F — running it for others (Sunday)
 
-- [ ] Uptime check on `/healthz` (it pings the database) from an external
-  monitor.
-- [ ] `backup.sh` pings a success URL (`BLYGD_BACKUP_PING_URL` in
-  `backup.env`) after `pg_restore --list` passes. No user data goes to
-  either service.
-- [ ] A log line each minute with queue depths: inbound mentions pending,
-  outbox due and failed, remote origins due and failing, subscription
-  imports pending. Each package counts its own tables; `internal/web`
-  holds no SQL.
-- [ ] `blygd user suspend <handle>` revokes every token the user holds.
-- [ ] DEPLOY.md "Operating for other people": a lost owner token
-  (`blygd token mint <handle> owner '*'`), suspension, taking content down
-  (mint `items:withdraw` for the handle; the endcap stays), and that the
-  operator can act as any user, so testers are told.
-- [ ] If invites are for the launch: a per-user cap on total media bytes,
-  checked in the upload transaction.
+`[~]` on `claude/adoring-cray-iexclk-f-ops`, 2026-11-14: the code and the
+runbook are done; the two monitors are yours to make.
+
+- [ ] **Uptime check** on `/healthz` (it pings the database) from an
+  external monitor. Yours: DEPLOY.md step 8 says what to point it at.
+- [x] **Backup ping.** `backup.sh` fetches `BLYGD_BACKUP_PING_URL` (from
+  `backup.env`) last, after the dump was written, listed, sent offsite and
+  pruned. A failed ping is logged and does not fail the backup. Run here
+  against a local database with a ping that answers and one that cannot
+  connect: both exit 0, and the second says so on stderr.
+  - [ ] Yours: make the dead-man's-switch check, and put its URL in
+    `/etc/blygd/backup.env` on the server.
+- [x] **Queue line.** `App.Run` logs `queues` once a minute: `verify`,
+  `send`, `send_abandoned`, `polled`, `poll_failing`, `import`, and a
+  `_late` count for each queue, meaning more than 15 minutes past due
+  (longer than any lease) and not leased. Any late row makes the line a
+  warning. `mention.Workers.Queues` and `reader.Reader.Queues` count their
+  own tables, so `internal/web` still holds no SQL. `TestQueueLine` walks a
+  mention from queued to late to sent, then a poll falling behind. Seen
+  live on a local instance.
+- [x] **Suspension:** `blygd token revoke-all <handle>` (not `user suspend`:
+  it is exactly that, and minting a token lifts it), via
+  `Accounts.RevokeAll`. `TestRevokeAllSuspends`: every token of the user
+  stops authenticating, their published items are still served, nobody
+  else is touched, and a new token works.
+- [x] **DEPLOY.md step 8, "Operating for other people":** the monitors, the
+  queue line and how to read warnings, and a table for adding someone, a
+  lost owner token, suspending, and taking an item down. It says plainly
+  that pinned versions cannot be taken down (§8, schema-enforced), and
+  lists what to tell testers: publishing is permanent, the operator can
+  act as any user, and sign in to the studio again after this deploy.
+- [ ] **Media cap per user**, if invites are for the launch (decision
+  above): total upload bytes, checked in the upload transaction.
+- [x] `go test ./...` green against Postgres 16.
+- [ ] Merge into `claude/adoring-cray-iexclk`.
 
 ## The week
 
