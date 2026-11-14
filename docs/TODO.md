@@ -57,45 +57,54 @@ Each track names the branch it is on.
 
 ## Track B — studio fixes (Saturday)
 
-`[~]` on `claude/adoring-cray-iexclk-b-studio`.
+`[x]` on `claude/adoring-cray-iexclk-b-studio`, 2026-11-14.
 
-No API change: both fixes call operations `openapi.json` already
-describes, so `studio_test.go` holds as it is.
+No API change: everything the studio now does is an operation
+`openapi.json` already describes.
 
-- [ ] **Approving a response always fails.** "Show on your page"
-  (`app.js`, `PUT /api/mentions/{mid}/approval`) needs `origin:write`
-  beside `mentions:write` (`approveMention`, because showing a response
-  publishes, §15.5). `STUDIO_SCOPES` lacks it, so every studio-minted token
-  gets 403.
-  - Add `origin:write` to `STUDIO_SCOPES`, and rewrite the comment above
-    it: the studio now calls approval and origin settings. It still holds
-    no `tokens:write` or `hoppers:*`.
-  - DESIGN.md "The studio", "Its own token": the scope list gains origin
-    settings and approval, and why a stolen studio token is still bounded
-    (it cannot mint, and it ends in 30 days).
-  - Tokens minted before the change keep their old scopes. When `/me`
-    shows a studio token without `origin:write`, the mentions view says
-    to sign out and in again instead of offering a button that will 403.
-  - Test: an e2e case that mints with exactly `STUDIO_SCOPES`, parsed
-    from `app.js`'s source (`studio_test.go` already reads that file), and
-    approves a verified mention. It fails today, and keeps the list
-    honest when a view adds a call.
-- [ ] **Settings view** (`#settings` tab):
-  - reads `GET /api/origin` (`items:read`) and shows the origin URL, read
-    only;
-  - edits `title`, `description`, `author` (§6.1: `name`, optional
-    `url`) and `accept_mentions` with `PATCH /api/origin`, sending only
-    the fields that changed. The schema is `OriginPatch`, which allows no
-    other members;
-  - says before saving that it re-renders every page (cost class
-    `upload`: 30 a minute), and disables the button while it runs;
-  - builds every node as text, like the rest of the studio (no
-    `innerHTML`, which `studio_test.go` refuses).
-- [ ] Try both on a local instance with a fresh studio sign-in: approve a
-  mention and see it on the item's page; change the title and see it in
-  `blyg.json` and the feed page.
-- [ ] `make test-all` green, then merge back into
-  `claude/adoring-cray-iexclk`.
+- [x] **Approving a response always failed.** `STUDIO_SCOPES` lacked
+  `origin:write`, which approval needs beside `mentions:write` (§15.5),
+  so every studio-minted token got 403.
+  - Added, with the comment above it rewritten. DESIGN.md "The studio"
+    says what the token holds and why.
+  - A sign-in from before the change lacks the scope. The mentions view
+    then says to sign in again, rather than show a button that is refused.
+  - `TestStudioHoldsWhatItCalls` reads `STUDIO_SCOPES` and every `api()`
+    call out of `app.js`. It fails when a call needs a scope the list
+    lacks, counting approval's extra `origin:write`. Calls made with the
+    pasted token (`call()`, to mint) are exempt. Without the scope it
+    names approval and `PATCH /api/origin`.
+  - `TestStudioTokenShowsResponsesAndEditsSettings`: a token minted with
+    exactly those scopes approves a verified response, which then shows
+    on the page, and retitles the origin. Without the scope it gets 403.
+- [x] **Found on the way, fixed:**
+  - Show, Hide, Delete (a draft) and Unsubscribe never refreshed the view on
+    success. `attempt()` returned the response body, and a 204 has none,
+    so the caller read success as failure. It now returns `true` for an
+    empty success.
+  - `GET /api/mentions` lists notices too, and the studio offered "Show"
+    on them, which always answers 409 (§15.5). Notices now carry a
+    badge and no Show button, and the view says what they are. The
+    verbs gain `source` ("drew on") and `link` ("linked to").
+  - `operationFor`, the studio tests' path matcher, now prefers a literal
+    segment to a parameter, as the router does. `/api/tokens/self` matched
+    `/api/tokens/{tid}` at random before.
+- [x] **Settings tab** (`#settings`): the permanent origin URL; title;
+  description; name and link as the origin's `author` (§6.1), with
+  "Sign your items with this name" setting the same object as the
+  `byline` (§5.5); accepting mentions; and sign out. It sends only what
+  changed, keeps any other members of `author`, says saving rebuilds
+  every page, and disables Save while it runs.
+- [x] **Tried in a browser** (headless Chromium, a local instance on
+  Postgres 16): signing in with an owner token gives a studio token with
+  `origin:write`. Show re-renders with the "shown" badge and the response
+  is on the public page, and Hide brings Show back. Save with nothing
+  changed says so; a real save reaches `blyg.json`. No page errors. All
+  five tabs fit at 360 px.
+- [x] `go test ./...` green against Postgres 16. Run `make test-all` on
+  18 before deploying.
+- [ ] Merge back into `claude/adoring-cray-iexclk`. Testers already
+  signed in must sign out and in once.
 
 ## Track C — reserved handles or a mount (blocked on the decisions above)
 
