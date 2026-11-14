@@ -47,60 +47,69 @@ Each track names the branch it is on.
 
 ## Track A — isolation, proved (Saturday)
 
-`[~]` on `claude/adoring-cray-iexclk-a-isolation`.
+`[x]` on `claude/adoring-cray-iexclk-a-isolation`, 2026-11-14.
 
-One test file, `internal/web/tenancy_e2e_test.go`, on the e2e harness
-(`newEnv`, `e.user`). Both users hold `*` owner tokens, so a scope check
-can never answer before the ownership check does: every refusal under
-test is about whose thing it is.
+`TestTenantsAreIsolated` in `internal/web/tenancy_e2e_test.go`. Four
+users on one instance; Alice has one of everything, Carol and Dave give
+her a subscription, a received mention and an import. Every user holds a
+`*` owner token, so no scope check can answer before the ownership check
+does.
 
-- [ ] **Alice's fixture, one of everything:** a draft; a published item
-  with a pinned v1; a hopper with an own member and an imported member;
-  uploaded media; a received, verified mention (from a third user's
-  stub) and a block; a subscription with an imported item and a read
-  mark; a subscription import; a second token.
-- [ ] **Path ids, 26 operations.** As Bob, with Alice's ids, each is a 404
-  (not 403, which would say the id exists), and Alice's fixture reads the
-  same afterwards:
-  - items: `GET`, `PATCH`, `DELETE /api/items/{id}`, `…/preview`,
-    `…/publish`, `…/withdraw`, `…/versions/{n}/pin`;
-  - hoppers: `GET`, `PATCH`, `DELETE /api/hoppers/{hid}`,
-    `POST …/members`, `DELETE …/members/{mid}`;
-  - `DELETE /api/media/{file}`;
-  - `PUT` and `DELETE /api/mentions/{mid}/approval`;
-    `DELETE /api/mention-blocks/{bid}`;
-  - subscriptions: `GET`, `PATCH`, `DELETE /api/subscriptions/{sid}`,
-    `…/resolve`, `…/move`, `…/poll`;
-  - reader: `GET /api/reader/items/{sid}/{iid}`, `PUT` and
-    `DELETE …/read`;
-  - `DELETE /api/tokens/{tid}`.
-- [ ] **The list comes from `openapi.json`.** The test walks every
-  operation whose path has a `{param}` and fails on one with no case, so
-  a new route cannot skip this.
-- [ ] **Media is per origin.** Media paths are content-addressed and keyed
-  `(origin_id, path)`, so Bob uploading the same bytes gets the same
-  path. Bob deleting his copy leaves Alice's served.
-- [ ] **Ids in request bodies:**
-  - `POST /api/hoppers/{hid}/members` on Bob's hopper naming Alice's
-    draft, and her published item, is refused (`AddOwn` checks
-    `o.owner_id`), so Bob's public hopper can never show her draft;
-  - `forked_from`, `stub_of`, `![[id]]` and `[[id]]` naming Alice's draft
-    do not resolve; naming her published item resolves only as another
-    origin's would (§10.2), through Bob's own subscription;
-  - `POST /api/reader/read` with Alice's subscription id (already in
-    `reader_e2e_test.go`; keep it, cite it);
-  - Bob's `GET /api/events` hears none of Alice's `item`, `mention`,
-    `outbound` or `subscribe` hints while she works.
-- [ ] **Listings:** Bob's `GET` of `/api/items`, `/api/hoppers`,
-  `/api/media`, `/api/mentions`, `/api/mention-blocks`, `/api/outbound`,
-  `/api/subscriptions`, `/api/subscriptions/imports`, `/api/reader/feed`
-  and `/api/tokens` hold nothing of Alice's.
-- [ ] **Try it:** drop one owner condition (say `origin_id = $1` from
-  `DeleteMedia`) and see the test fail; record which in the commit
-  message.
-- [ ] `make test-all` green, then merge back into
-  `claude/adoring-cray-iexclk`.
-- [ ] Anything that fails here comes before every other track.
+- [x] **Alice's fixture, one of everything:** a draft, a published item
+  pinned at v1, a thread whose `[[id]]` link sends Carol a mention, a
+  hopper with an own and an imported member, media, a subscription with a
+  private display title and a read mark, a verified mention from Carol's
+  stub, a block, a second token, and an OPML import worked off.
+- [x] **Path ids, all 26 operations.** As Bob, with Alice's ids, each
+  answers 404, and everything Alice can read of her own things (15 API
+  reads, and the ETags of 5 surface files) is the same afterwards.
+- [x] **The list comes from `openapi.json`.** The test fails on an
+  operation with a path id and no case, and on a case whose path does not
+  match the operation it is filed under. (That second check caught three
+  of the test's own paths.)
+- [x] **Media is per origin.** Bob uploading Alice's bytes gets the same
+  path; deleting his copy leaves hers.
+- [x] **Ids in request bodies:** Bob's hopper refuses Alice's draft, her
+  published item, and an import named through her subscription.
+  `stub_of`, `![[id]]`, `[[id]]` and `forked_from` naming her draft never
+  resolve, whether or not Bob subscribes to her. Her published item
+  resolves for Bob only once he subscribes (§10.2). `POST
+  /api/reader/read` with her subscription is a 404. Bob's
+  `DELETE /api/subscriptions/imports` deletes only his own.
+- [x] **Events:** Bob's stream, open from the start, hears nothing, while
+  Alice's hears `item`, `mention`, `outbound`, `import` and `subscribe`.
+- [x] **Listings:** none of Bob's 12 listings names Alice's items, media,
+  or the origins she follows.
+- [x] **Nothing Bob is answered carries Alice's private words:** her
+  draft, hopper name, token name, block, or display title.
+- [x] **Tried:** each of these breakages fails the test, and was put back:
+  - `DeleteMedia`'s `DELETE` without `origin_id`;
+  - `AddOwn` without `o.owner_id`;
+  - hopper `Delete` without `user_id`;
+  - the studio's item read without `origin_id`;
+  - `Revoke` without `user_id`;
+  - the event filter without its origin or user check, for `item`,
+    `mention` and `subscribe` hints;
+  - reverting the fix below.
+- [x] **Found and fixed:** `DELETE /api/reader/items/{sid}/{iid}/read`
+  answered 204 for an item the caller does not hold. It changed nothing
+  (the delete was already scoped to the caller), but every other operation
+  answers 404, as `PUT` on the same path does. `Reader.MarkRead` now
+  answers 404 when the caller holds no such item, and still 204 for an
+  item already unread. `openapi.json` says so.
+- [x] **Noted, not changed:** a subscription's `id` in the API is the
+  remote origin's row id, which every subscriber to that origin shares.
+  It is not a key to anything (every query also checks the caller's
+  `user_id`), but ids are sequential and the mirror is shared, so
+  subscribing to an origin tells a user whether someone on the instance
+  already follows it, as the instant backfill already does. That comes
+  with the shared mirror (DESIGN.md "Three planes"), and is fine for
+  testers. Revisit if the instance ever hosts people who must not learn
+  that about each other.
+- [x] `go test ./...` green against Postgres 16 (this container cannot
+  install 18; nothing in the migrations needs it). Run `make test-all` on
+  18 before deploying.
+- [ ] Merge back into `claude/adoring-cray-iexclk`.
 
 ## Track B — studio fixes (Saturday)
 
