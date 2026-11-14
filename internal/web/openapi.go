@@ -15,7 +15,6 @@ var openAPIDoc []byte
 
 func serveOpenAPI(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Write(openAPIDoc) //nolint:errcheck
 }

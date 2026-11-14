@@ -189,29 +189,39 @@ No API change: everything the studio now does is an operation
 
 ## Track E — CORS on `/api/` (Sunday)
 
+`[x]` on `claude/adoring-cray-iexclk-e-cors`, 2026-11-14.
+
 So that a client on another origin (a hackathon team's web app) can call
 the API, as the studio does from this one. Safe because the API
 authenticates only by a bearer token in a header, never by cookie: a page
 on another origin cannot act as a user without being handed their token.
 
-- [ ] Every `/api/` response, errors and 429s included, carries
-  `Access-Control-Allow-Origin: *`. Never `Allow-Credentials`.
-- [ ] `OPTIONS` preflights for `/api/` are answered before routing,
-  authentication and the token budgets (a preflight carries no
-  `Authorization`), charged to the public per-address budget.
-  Allow `GET, POST, PUT, PATCH, DELETE`; headers `Authorization` and
-  `Content-Type`; `Access-Control-Max-Age` of a day.
-- [ ] Expose `Retry-After` and `WWW-Authenticate`, so a browser client can
-  back off and tell an expired token from a missing one.
-- [ ] `/api/events` works from another origin with `fetch()` (it already
-  avoids `EventSource`, which cannot send the header).
-- [ ] The studio's CSP is unchanged: it still connects only to this host.
-- [ ] Tests: a preflight from an arbitrary origin succeeds without a token;
-  a 401, a 404 and a 429 all carry the header; no response carries
-  `Access-Control-Allow-Credentials`.
-- [ ] DESIGN.md: a "Cross-origin clients" note under "Write API and
-  scopes", with why it is safe. `openapi.json` mentions it in its
-  description.
+- [x] `internal/web/cors.go` wraps `/api/` in the router. Every response,
+  errors and 429s included, carries `Access-Control-Allow-Origin: *` and
+  exposes `Retry-After` and `WWW-Authenticate`. Never
+  `Allow-Credentials`. `serveOpenAPI` no longer sets its own header.
+- [x] `OPTIONS` on any `/api/` path is a 204 preflight, answered before
+  routing, authentication and the token budgets: `GET, POST, PUT, PATCH,
+  DELETE`; `Authorization, Content-Type`; `Max-Age` 86400. It is charged
+  to the address's public budget, and over it is a readable 429.
+- [x] The studio's CSP is unchanged and it sends no CORS header; the
+  origin surface keeps its own `GET`/`HEAD` CORS.
+- [x] Tests: `TestCrossOriginClients` (preflights without a token; 200,
+  201, the description, 401 with `WWW-Authenticate`, 403, 404 and the
+  event stream all readable; the studio untouched) and
+  `TestCrossOriginBudgets` (preflights spend the public budget, a token
+  request does not; a token's 429 is readable with `Retry-After`).
+  Removing the wrapper, skipping the budget, narrowing what is exposed, or
+  reflecting the origin with credentials each fails them.
+- [x] Tried in headless Chromium from a page on `127.0.0.1:8091` against
+  `localhost:8080`: `/me`, create, `PATCH` (preflighted), `DELETE`, a 401
+  with its `WWW-Authenticate` readable, and the event stream all work. A
+  `credentials: "include"` request is refused by the browser itself.
+- [x] DESIGN.md "Cross-origin clients" under "Write API and scopes", with
+  why it is safe; preflights in "Request budgets"; `openapi.json`'s
+  description says so.
+- [x] `go test ./...` green against Postgres 16.
+- [ ] Merge into `claude/adoring-cray-iexclk`.
 
 ## Track F — running it for others (Sunday)
 
