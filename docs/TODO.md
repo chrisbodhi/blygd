@@ -175,7 +175,7 @@ No API change: everything the studio now does is an operation
   one spelling), README, DEPLOY.md, PLAN.md, `config.go`, `llms.txt` and
   `openapi.json` say `~{handle}`.
 - [x] `go test ./...` green against Postgres 16.
-- [ ] Merge into `claude/adoring-cray-iexclk`.
+- [x] Merged into `claude/adoring-cray-iexclk`; the merge is green.
 
 **The spec has moved.** blygd implements `protocol-v0.4.md` at its sixth
 revision (2026-10-20). `blygger-spec` `d248bc4` (2026-11-12) has nine more,
