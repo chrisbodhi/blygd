@@ -12,10 +12,12 @@ const tabs = document.getElementById("tabs");
 const toastEl = document.getElementById("toast");
 const updatesEl = document.getElementById("updates");
 const TOKEN_KEY = "blygd.token";
-// What the studio calls, and nothing more: no tokens:write (a stolen studio
-// token cannot mint), no origin or hopper settings.
+// What the studio calls, and nothing more. origin:write is for the origin's
+// settings and for showing a response on a page, which publishes (§15.5).
+// No tokens:write, so a stolen studio token cannot mint, and no hopper
+// scopes, since the studio has no hopper views.
 const STUDIO_SCOPES = ["items:read", "items:write", "items:publish", "items:withdraw", "items:pin",
-  "reader:read", "reader:write", "mentions:read", "mentions:write"];
+  "reader:read", "reader:write", "mentions:read", "mentions:write", "origin:write"];
 const STUDIO_TTL = 30 * 24 * 3600;
 
 // ── small helpers ─────────────────────────────────────────────────────────
@@ -177,12 +179,14 @@ async function api(method, path, body) {
   return json;
 }
 
-// Runs an action, showing what went wrong instead of throwing.
+// Runs an action, showing what went wrong instead of throwing. It returns
+// the response, or true for one with no body (a 204), so a caller can test
+// for success either way; undefined means it failed.
 async function attempt(fn, okMsg) {
   try {
     const r = await fn();
     if (okMsg) toast(okMsg);
-    return r;
+    return r ?? true;
   } catch (e) {
     toast(e.message);
     return undefined;
@@ -193,7 +197,10 @@ let me = null;
 
 // ── routing ───────────────────────────────────────────────────────────────
 
-const views = { write: viewEditor, items: viewItems, item: viewEditor, reader: viewReader, mentions: viewMentions };
+const views = { write: viewEditor, items: viewItems, item: viewEditor, reader: viewReader, mentions: viewMentions, settings: viewSettings };
+
+// can says whether this sign-in holds a scope.
+const can = (scope) => !!me && (me.scopes.includes("*") || me.scopes.includes(scope));
 
 async function route() {
   if (!localStorage.getItem(TOKEN_KEY)) {
@@ -720,14 +727,16 @@ function readerCard(it) {
 
 // ── mentions ──────────────────────────────────────────────────────────────
 
-const verbs = { stub: "responded to", transclusion: "quoted", fork: "forked" };
+const verbs = { stub: "responded to", transclusion: "quoted", fork: "forked", source: "drew on", link: "linked to" };
 
 async function viewMentions() {
   const r = await attempt(() => api("GET", "/mentions"));
   if (!r) return;
   show(
     h("h1", {}, "Mentions"),
-    h("p", { class: "muted small" }, "Verified responses show on your pages only after you approve them."),
+    h("p", { class: "muted small" }, "Verified responses show on your pages only after you approve them. Notices (links, and reposts with no words of their own) are listed but never shown."),
+    can("origin:write") ? null : h("p", { class: "problems" },
+      "This sign-in cannot show responses on your pages. Sign out and sign in again with your owner token to get one that can."),
     r.mentions.length ? r.mentions.map(mentionCard) : h("p", { class: "muted" }, "No mentions yet."),
   );
 }
@@ -736,11 +745,14 @@ function mentionCard(m) {
   const who = (m.source_author && m.source_author.name) || m.source_host;
   const link = m.source_page || m.source_url;
   return h("div", { class: "card" },
-    h("div", {}, h("span", { class: "badge" }, m.status), m.approved_at ? h("span", { class: "badge unread" }, "shown") : null),
+    h("div", {}, h("span", { class: "badge" }, m.status), m.class === "notice" ? h("span", { class: "badge" }, "notice") : null,
+      m.approved_at ? h("span", { class: "badge unread" }, "shown") : null),
     h("div", {}, `${who} ${verbs[m.relation] || "mentioned"} `, h("code", {}, m.target_item_id.slice(0, 8))),
     h("div", { class: "meta" }, h("a", { href: link, target: "_blank", rel: "noopener noreferrer nofollow" }, clip(link, 80)), " · ", when(m.received_at)),
     h("div", { class: "row" },
-      m.status === "verified" && !m.approved_at ? h("button", { class: "primary", onclick: async () => {
+      // A notice (a link, or a repost with no words of its own) is never
+      // shown among responses (§15.5), so it has no Show button.
+      m.status === "verified" && m.class === "response" && !m.approved_at && can("origin:write") ? h("button", { class: "primary", onclick: async () => {
         if (await attempt(() => api("PUT", `/mentions/${m.id}/approval`), "Shown on your page")) route();
       } }, "Show") : null,
       m.approved_at ? h("button", { onclick: async () => {
@@ -750,6 +762,71 @@ function mentionCard(m) {
         if (!confirm(`Block ${m.source_host}? Nothing from it will reach you again.`)) return;
         if (await attempt(() => api("POST", "/mention-blocks", { kind: "host", value: m.source_host }), "Blocked")) route();
       } }, "Block")));
+}
+
+// ── settings ──────────────────────────────────────────────────────────────
+// The origin's own settings (PATCH /api/origin). Saving re-renders every
+// page of the blyg, so it sends only what changed.
+
+async function viewSettings() {
+  const o = await attempt(() => api("GET", "/origin"));
+  if (!o) return;
+  const author = o.author && typeof o.author === "object" ? o.author : {};
+  const sameByline = o.byline == null || JSON.stringify(o.byline) === JSON.stringify(o.author);
+  const title = h("input", { id: "s-title", type: "text", value: o.title });
+  const description = h("textarea", { id: "s-description", rows: 3, class: "short" }, o.description);
+  const name = h("input", { id: "s-name", type: "text", value: author.name || "", autocomplete: "name" });
+  const url = h("input", { id: "s-url", type: "url", value: author.url || "", placeholder: "https://…" });
+  const byline = h("input", { id: "s-byline", type: "checkbox", checked: sameByline });
+  const mentions = h("input", { id: "s-mentions", type: "checkbox", checked: o.accept_mentions });
+  const save = h("button", { class: "primary", disabled: !can("origin:write") }, "Save");
+
+  const changes = () => {
+    const out = {};
+    if (title.value !== o.title) out.title = title.value;
+    if (description.value !== o.description) out.description = description.value;
+    // author is the origin's (§6.1); byline signs its items (§5.5). Other
+    // members a tool may have set are kept.
+    const a = Object.assign({}, author, { name: name.value.trim() });
+    if (url.value.trim()) a.url = url.value.trim();
+    else delete a.url;
+    const next = a.name || a.url ? a : null;
+    if (JSON.stringify(next) !== JSON.stringify(o.author ?? null)) out.author = next;
+    if (byline.checked && JSON.stringify(next) !== JSON.stringify(o.byline ?? null)) out.byline = next;
+    if (!byline.checked && sameByline && o.byline != null) out.byline = null;
+    if (mentions.checked !== o.accept_mentions) out.accept_mentions = mentions.checked;
+    return out;
+  };
+
+  show(
+    h("h1", {}, "Settings"),
+    h("p", { class: "muted small" }, "Your blyg is at ", extLink(o.origin, o.origin), ". That address is permanent."),
+    can("origin:write") ? null : h("p", { class: "problems" },
+      "This sign-in cannot change settings. Sign out and sign in again with your owner token to get one that can."),
+    h("form", {
+      onsubmit: async (ev) => {
+        ev.preventDefault();
+        const body = changes();
+        if (!Object.keys(body).length) return toast("Nothing changed");
+        save.disabled = true;
+        save.textContent = "Saving…";
+        const r = await attempt(() => api("PATCH", "/origin", body), "Saved");
+        save.disabled = false;
+        save.textContent = "Save";
+        if (r) route();
+      },
+    },
+    h("label", { for: "s-title" }, "Title"), title,
+    h("label", { for: "s-description" }, "Description"), description,
+    h("label", { for: "s-name" }, "Your name"), name,
+    h("label", { for: "s-url" }, "Your link"), url,
+    h("label", { class: "check" }, byline, " Sign your items with this name"),
+    h("label", { class: "check" }, mentions, " Accept mentions from other blygs"),
+    h("p", { class: "muted small" }, "Saving rebuilds every page of your blyg, so it can take a moment."),
+    h("div", { class: "row" }, save)),
+    h("p", { class: "muted small" }, me.expires_at ? `Signed in until ${new Date(me.expires_at).toLocaleDateString()} · ` : "Signed in · ",
+      h("a", { href: "#settings", onclick: (e) => { e.preventDefault(); signOut(); } }, "Sign out")),
+  );
 }
 
 route();

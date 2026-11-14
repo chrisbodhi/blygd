@@ -282,3 +282,44 @@ func TestNoticesAreHeldApart(t *testing.T) {
 		}
 	}
 }
+
+// The studio's own token, with exactly the scopes app.js asks for, can do
+// what the studio offers: show a response on a page, and change the
+// origin's settings.
+func TestStudioTokenShowsResponsesAndEditsSettings(t *testing.T) {
+	e := newEnv(t, mention.DefaultRateLimits)
+	alice, bob := e.user("alice"), e.user("bob")
+	ctx := context.Background()
+
+	target := alice.draft(t, map[string]any{"content_md": "A claim."})
+	alice.publish(t, target, 200)
+	bob.subscribe(t, alice.origin)
+	stub := bob.draft(t, map[string]any{"stub_of": map[string]any{"id": target}})
+	bob.edit(t, stub, "![["+target+"]]\n\nA reply with words of its own.") // else a repost: a notice (§15.4)
+	bob.publish(t, stub, 200)
+	if _, err := e.workers.SendBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.workers.VerifyBatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// What the studio does at sign-in with a pasted owner token.
+	studio, _ := alice.mint(t, map[string]any{"name": "studio on test", "scopes": studioScopes(t), "expires_in": 30 * 24 * 3600})
+
+	ms := studio.api("GET", "/mentions", nil).json(t)["mentions"].([]any)
+	if len(ms) != 1 {
+		t.Fatalf("mentions: %v", ms)
+	}
+	mid := itoa(int(ms[0].(map[string]any)["id"].(float64)))
+	expect(t, studio.api("PUT", "/mentions/"+mid+"/approval", nil), 204)
+	if !strings.Contains(string(alice.get("f/"+target+"/").body), "Responses") {
+		t.Fatal("an approved response is not on the page")
+	}
+
+	r := studio.api("PATCH", "/origin", map[string]any{"title": "Alice, retitled", "author": map[string]any{"name": "Alice"}, "byline": map[string]any{"name": "Alice"}})
+	expect(t, r, 200)
+	if m := alice.get("blyg.json").json(t); m["title"] != "Alice, retitled" {
+		t.Fatalf("manifest title: %v", m["title"])
+	}
+}

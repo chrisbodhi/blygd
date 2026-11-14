@@ -688,11 +688,20 @@ there for every client. The studio could be deleted, or replaced by
 another directory of files, without touching a handler.
 
 - **Its own token.** A pasted token that may mint is traded at once for a
-  studio token: only the scopes the studio calls (items, reader,
-  mentions; no `tokens:write`, origin or hopper settings), 30 days, named
-  for the device. Only that one is kept, in `localStorage`. A stolen
-  studio token cannot mint, and it ends on its own. A pasted token that
-  cannot mint is used as it is. Sign out revokes the token.
+  studio token: only the scopes the studio calls, 30 days, named for the
+  device. That is items, reader and mentions, and `origin:write`, for the
+  origin's settings and for showing a response on a page, which publishes
+  (§15.5). It holds no `tokens:write` and no hopper scopes. Only that one
+  is kept, in `localStorage`. A stolen studio token cannot mint, and it
+  ends on its own. A pasted token that cannot mint is used as it is. Sign
+  out revokes the token.
+  - `TestStudioHoldsWhatItCalls` reads the scope list from `app.js` and
+    fails when the studio calls an operation its own token cannot,
+    counting the extra scope an operation checks for itself (approval's
+    `origin:write`).
+  - A token keeps the scopes it was minted with. A studio token from
+    before a scope was added lacks it, so the studio says to sign in again
+    where it would otherwise offer a button that is refused.
 
 - Its CSP allows scripts and styles from itself only, connections to
   this host only, and no framing.

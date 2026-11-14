@@ -113,13 +113,54 @@ does.
 
 ## Track B — studio fixes (Saturday)
 
-- [ ] **Approving a response always fails.** The studio's "Show on your
-  page" (`app.js`, `PUT /api/mentions/{mid}/approval`) needs
-  `origin:write`, which `STUDIO_SCOPES` does not hold, so every
-  studio-minted token gets 403. Add the scope, and update the comment
-  beside it and DESIGN.md "The studio" (its own token).
-- [ ] **Settings:** title, description and author through
-  `PATCH /api/origin`, which the API already describes.
+`[x]` on `claude/adoring-cray-iexclk-b-studio`, 2026-11-14.
+
+No API change: everything the studio now does is an operation
+`openapi.json` already describes.
+
+- [x] **Approving a response always failed.** `STUDIO_SCOPES` lacked
+  `origin:write`, which approval needs beside `mentions:write` (§15.5),
+  so every studio-minted token got 403.
+  - Added, with the comment above it rewritten. DESIGN.md "The studio"
+    says what the token holds and why.
+  - A sign-in from before the change lacks the scope. The mentions view
+    then says to sign in again, rather than show a button that is refused.
+  - `TestStudioHoldsWhatItCalls` reads `STUDIO_SCOPES` and every `api()`
+    call out of `app.js`. It fails when a call needs a scope the list
+    lacks, counting approval's extra `origin:write`. Calls made with the
+    pasted token (`call()`, to mint) are exempt. Without the scope it
+    names approval and `PATCH /api/origin`.
+  - `TestStudioTokenShowsResponsesAndEditsSettings`: a token minted with
+    exactly those scopes approves a verified response, which then shows
+    on the page, and retitles the origin. Without the scope it gets 403.
+- [x] **Found on the way, fixed:**
+  - Show, Hide, Delete (a draft) and Unsubscribe never refreshed the view on
+    success. `attempt()` returned the response body, and a 204 has none,
+    so the caller read success as failure. It now returns `true` for an
+    empty success.
+  - `GET /api/mentions` lists notices too, and the studio offered "Show"
+    on them, which always answers 409 (§15.5). Notices now carry a
+    badge and no Show button, and the view says what they are. The
+    verbs gain `source` ("drew on") and `link` ("linked to").
+  - `operationFor`, the studio tests' path matcher, now prefers a literal
+    segment to a parameter, as the router does. `/api/tokens/self` matched
+    `/api/tokens/{tid}` at random before.
+- [x] **Settings tab** (`#settings`): the permanent origin URL; title;
+  description; name and link as the origin's `author` (§6.1), with
+  "Sign your items with this name" setting the same object as the
+  `byline` (§5.5); accepting mentions; and sign out. It sends only what
+  changed, keeps any other members of `author`, says saving rebuilds
+  every page, and disables Save while it runs.
+- [x] **Tried in a browser** (headless Chromium, a local instance on
+  Postgres 16): signing in with an owner token gives a studio token with
+  `origin:write`. Show re-renders with the "shown" badge and the response
+  is on the public page, and Hide brings Show back. Save with nothing
+  changed says so; a real save reaches `blyg.json`. No page errors. All
+  five tabs fit at 360 px.
+- [x] `go test ./...` green against Postgres 16. Run `make test-all` on
+  18 before deploying.
+- [ ] Merge back into `claude/adoring-cray-iexclk`. Testers already
+  signed in must sign out and in once.
 
 ## Track C — reserved handles or a mount (blocked on the decisions above)
 
