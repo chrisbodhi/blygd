@@ -135,7 +135,7 @@ Left for later:
     schedule, and stop serving the origin under a host it no longer
     controls.
   - **Route by host only.** A custom origin is served only when the
-    request's host and path match its `base_url`: no `/{handle}/`
+    request's host and path match its `base_url`: no `/~{handle}/`
     fallback, and no other path to its pages.
   - **Close the local shortcut.** Without this, another tenant
     subscribing to `https://blyg.google.com/` would read the impostor's

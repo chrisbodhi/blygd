@@ -65,7 +65,7 @@ curl -s localhost:8080/chris/items/$ID.json
 | Variable | Default | |
 |---|---|---|
 | `BLYGD_DATABASE_URL` | (required) | Postgres connection URL |
-| `BLYGD_PUBLIC_URL` | (required) | Where origins mount: `https://host/` gives `https://host/{handle}/` |
+| `BLYGD_PUBLIC_URL` | (required) | Where origins mount: `https://host/` gives `https://host/~{handle}/` |
 | `BLYGD_LISTEN` | `:8080` | |
 | `BLYGD_TRUST_PROXY` | `false` | Honor `X-Forwarded-Proto`, and charge budgets to the last `X-Forwarded-For` address. Set it only behind Caddy or nginx, never when clients reach blygd directly |
 | `BLYGD_FRAGMENT_CAP` | `2000` | Characters (§5.3) |
