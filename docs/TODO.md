@@ -109,7 +109,7 @@ does.
 - [x] `go test ./...` green against Postgres 16 (this container cannot
   install 18; nothing in the migrations needs it). Run `make test-all` on
   18 before deploying.
-- [ ] Merge back into `claude/adoring-cray-iexclk`.
+- [x] Merged into `claude/adoring-cray-iexclk`; the merge is green.
 
 ## Track B — studio fixes (Saturday)
 
@@ -159,8 +159,8 @@ No API change: everything the studio now does is an operation
   five tabs fit at 360 px.
 - [x] `go test ./...` green against Postgres 16. Run `make test-all` on
   18 before deploying.
-- [ ] Merge back into `claude/adoring-cray-iexclk`. Testers already
-  signed in must sign out and in once.
+- [x] Merged into `claude/adoring-cray-iexclk`; the merge is green.
+  Anyone already signed in to the studio must sign out and in once.
 
 ## Track C — reserved handles or a mount (blocked on the decisions above)
 
