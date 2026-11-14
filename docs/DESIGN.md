@@ -22,7 +22,7 @@ three planes apart, and the separation is structural:
 | 1. Own origins | Items this instance publishes, and its blogroll | `origins`, `items`, `item_versions`, `media`, `blogroll_entries`, `surface_files` | Authoritative |
 | 2. Import mirror | Other origins' items, one copy per origin, shared by every subscriber | `remote_origins`, `imported_items`, `imported_pins` | Reconciled copy (§13) |
 | (derived from 2) | Classifier answers about imported items, shared by every reader who asked the same question | `item_labels`, `label_leases`, `classifier_usage` | Derived; an item's answers go when it is withdrawn (§13.4) |
-| 3. Private overlay | Per-user: subscriptions, hoppers, reads, filters | `subscriptions`, `subscription_imports`, `hoppers`, `hopper_members`, `reads`, `filters`, `label_overrides` | Private, never on the wire |
+| 3. Private overlay | Per-user: subscriptions, hoppers, reads, filters and ratings | `subscriptions`, `subscription_imports`, `hoppers`, `hopper_members`, `reads`, `filters`, `label_overrides` | Private, never on the wire |
 
 - **The renderer reads only plane 1.** Imported items can never be
   re-emitted (§13.5) because nothing that writes `surface_files` queries
@@ -616,6 +616,33 @@ nothing, and nothing is held for an answer that will never come.
   or keeps nothing for an organization on zero data retention. That
   matters for §13.4: a withdrawn item's text can outlive its withdrawal
   there. Ask for zero data retention before other readers turn filters on.
+- **Ratings tune each filter as the reader reads**, with no labelled set
+  up front. A rating is the reader's yes or no on an item under one
+  filter (`PUT /api/reader/items/{sid}/{iid}/filters/{fid}`, migration
+  009). It decides that item for every version, as an override always
+  did. It also keeps the classifier's probabilities for the item's
+  current version, the filter's `def_hash` and the model. Only ratings
+  of the current question from the current model count, so new words or
+  a new model start afresh, and a rating made before any answer arrived
+  decides its item and tunes nothing. With `auto_tune` (the default),
+  each rating moves the threshold to the one that disagrees with the
+  fewest ratings (`tune.go`). It moves only once there are at least two
+  ratings each way, and only to a threshold with strictly fewer
+  disagreements. Among equals it takes the one nearest the current
+  threshold, between 0.05 and 0.95. Only the threshold is tuned: `match`
+  says what the reader means, and stays theirs. A threshold set by hand
+  turns tuning off, and the filter then reports `suggested_threshold`
+  instead. A rating answers with the filter as it left it, so a client
+  can say what the rating changed.
+- **In the studio** each reader card asks, per filter, "About politics?
+  Yes / No", beside the model's guess. Tapping one's own answer again
+  takes the rating back. With more than three filters a card asks only
+  where it matters: a match, an existing rating, or an answer within 0.2
+  of the threshold. The rest are one tap away, for what the model missed.
+  A filtered post arrives folded, naming its filters. "Show filtered"
+  (`filters=off`) brings hidden and held posts back to be read and rated.
+  A Filters panel adds, pauses, deletes and untunes filters, and shows
+  the classifier's status.
 - **Status:** `GET /api/filters` carries `classifier`, with whether it runs,
   the model, any halt and its reason, and today's calls. A halt is per
   process: each process learns it from its own next request.

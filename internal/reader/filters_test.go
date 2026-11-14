@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -27,6 +29,8 @@ type fakeClassifier struct {
 
 func (f *fakeClassifier) ModelID() string { return "fake-1" }
 
+var fakeP = regexp.MustCompile(`p=(0\.\d+)`)
+
 func (f *fakeClassifier) Classify(_ context.Context, in classify.Input, topics []classify.Topic) (*classify.Result, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -43,10 +47,12 @@ func (f *fakeClassifier) Classify(_ context.Context, in classify.Input, topics [
 	res := &classify.Result{Answers: map[string]classify.Answer{}, InputTokens: 10}
 	for _, t := range topics {
 		a := classify.Answer{Probabilities: [3]float64{1, 0, 0}, Confidence: 0.9}
-		if strings.Contains(strings.ToLower(in.Text), strings.ToLower(t.Name)) {
+		if m := fakeP.FindStringSubmatch(in.Text); m != nil {
+			// "p=0.35" in a post sets how mainly-about-it it is, for every topic.
+			p, _ := strconv.ParseFloat(m[1], 64)
+			a.Probabilities = [3]float64{1 - p, 0, p}
+		} else if strings.Contains(strings.ToLower(in.Text), strings.ToLower(t.Name)) {
 			a.Probabilities = [3]float64{0.05, 0.15, 0.8}
-		} else if strings.Contains(strings.ToLower(in.Text), "in passing: "+strings.ToLower(t.Name)) {
-			a.Probabilities = [3]float64{0.3, 0.6, 0.1}
 		}
 		a.Score = a.Probabilities[1] + 2*a.Probabilities[2]
 		res.Answers[t.Hash()] = a
@@ -266,7 +272,7 @@ func TestWithdrawalForgetsLabels(t *testing.T) {
 	ctx := context.Background()
 	f := g.mustFilter(FilterInput{Name: str("gardening")})
 	g.labelAll()
-	if err := g.r.SetOverride(ctx, g.uid, g.sid, idA, f.ID, boolp(true)); err != nil {
+	if _, err := g.r.SetOverride(ctx, g.uid, g.sid, idA, f.ID, boolp(true)); err != nil {
 		t.Fatal(err)
 	}
 	count := func(table string) int {
@@ -328,10 +334,10 @@ func TestOverrideWins(t *testing.T) {
 	ctx := context.Background()
 	f := g.mustFilter(FilterInput{Name: str("gardening"), Action: str("hide")})
 	g.labelAll()
-	if err := g.r.SetOverride(ctx, g.uid, g.sid, idA, f.ID, boolp(false)); err != nil {
+	if _, err := g.r.SetOverride(ctx, g.uid, g.sid, idA, f.ID, boolp(false)); err != nil {
 		t.Fatal(err)
 	}
-	if err := g.r.SetOverride(ctx, g.uid, g.sid, idB, f.ID, boolp(true)); err != nil {
+	if _, err := g.r.SetOverride(ctx, g.uid, g.sid, idB, f.ID, boolp(true)); err != nil {
 		t.Fatal(err)
 	}
 	page, _ := g.r.Feed(ctx, g.uid, FeedQuery{})
@@ -341,13 +347,13 @@ func TestOverrideWins(t *testing.T) {
 	if ls := labels(t, page.Items[0]); ls[0].Override == nil || *ls[0].Override {
 		t.Fatalf("override not shown: %s", page.Items[0].Labels)
 	}
-	if err := g.r.SetOverride(ctx, g.uid, g.sid, idA, f.ID, nil); err != nil {
+	if _, err := g.r.SetOverride(ctx, g.uid, g.sid, idA, f.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	if page, _ = g.r.Feed(ctx, g.uid, FeedQuery{}); len(page.Items) != 0 || page.Hidden != 2 {
 		t.Fatalf("forgotten override still applies: %d", len(page.Items))
 	}
-	if err := g.r.SetOverride(ctx, g.uid+1, g.sid, idA, f.ID, boolp(true)); !errors.Is(err, ErrNotFound) {
+	if _, err := g.r.SetOverride(ctx, g.uid+1, g.sid, idA, f.ID, boolp(true)); !errors.Is(err, ErrNotFound) {
 		t.Errorf("another user's filter: %v", err)
 	}
 }
@@ -568,5 +574,96 @@ func TestHiddenCountedOncePerPage(t *testing.T) {
 	}
 	if shown != 3 || hidden != 3 {
 		t.Fatalf("paged: %d shown, %d hidden; want 3 and 3", shown, hidden)
+	}
+}
+
+// Ratings tune a filter as the reader reads: no labelled set first. Once
+// there are two ratings each way, the threshold moves to the one that
+// agrees with them, and so decides unrated posts the reader's way too.
+func TestRatingsTuneTheFilter(t *testing.T) {
+	now := time.Now().UTC()
+	ids := map[string]string{ // the model's probability → item id
+		"0.30": "0100000000000000000000000b", "0.40": "0200000000000000000000000b", "0.90": "0300000000000000000000000b",
+		"0.10": "0400000000000000000000000b", "0.20": "0500000000000000000000000b", "0.35": "0600000000000000000000000b",
+	}
+	var items []*testblyg.Item
+	i := 0
+	for p, id := range ids {
+		i++
+		items = append(items, &testblyg.Item{ID: id, Kind: "fragment", Version: 1, ContentMD: "post p=" + p, Updated: now.Add(-time.Duration(i) * time.Minute)})
+	}
+	g, _ := filterRig(t, items...)
+	ctx := context.Background()
+	f := g.mustFilter(FilterInput{Name: str("gardening"), Action: str("hide")})
+	if !f.AutoTune || f.Threshold != 0.5 {
+		t.Fatalf("new filter: %+v", f)
+	}
+	g.labelAll()
+	hidden := func() int {
+		page, err := g.r.Feed(ctx, g.uid, FeedQuery{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return page.Hidden
+	}
+	if n := hidden(); n != 1 {
+		t.Fatalf("at 0.5, only the 0.90 post is hidden: %d", n)
+	}
+	rate := func(p string, yes bool) *Filter {
+		t.Helper()
+		out, err := g.r.SetOverride(ctx, g.uid, g.sid, ids[p], f.ID, boolp(yes))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	if out := rate("0.30", true); out.Ratings.Rated != 1 || out.Ratings.Disagree != 1 || out.Threshold != 0.5 {
+		t.Fatalf("one rating tuned the filter: %+v", out)
+	}
+	if out := rate("0.10", false); out.Threshold != 0.5 {
+		t.Fatalf("one rating each way tuned the filter: %v", out.Threshold)
+	}
+	if out := rate("0.20", false); out.Threshold != 0.5 {
+		t.Fatalf("one yes tuned the filter: %v", out.Threshold)
+	}
+	out := rate("0.40", true)
+	if out.Threshold != 0.25 || out.TunedAt == nil || out.Ratings.Disagree != 0 || out.Ratings.Yes != 2 || out.Ratings.No != 2 {
+		t.Fatalf("four ratings did not tune the filter: threshold %v, %+v", out.Threshold, out.Ratings)
+	}
+	// The unrated 0.35 post is now decided the reader's way as well.
+	if n := hidden(); n != 4 {
+		t.Fatalf("after tuning: %d hidden, want 4 (0.30, 0.35, 0.40, 0.90)", n)
+	}
+
+	// A threshold set by hand is the reader's: ratings no longer move it,
+	// and say what they would.
+	if out, err := g.r.UpdateFilter(ctx, g.uid, f.ID, FilterInput{Threshold: num(0.5)}); err != nil || out.AutoTune || out.Threshold != 0.5 {
+		t.Fatalf("manual threshold: %+v %v", out, err)
+	}
+	if out := rate("0.90", true); out.Threshold != 0.5 || out.Ratings.Suggested == nil || *out.Ratings.Suggested != 0.25 {
+		t.Fatalf("ratings moved a manual threshold, or suggest nothing: %v %+v", out.Threshold, out.Ratings)
+	}
+	if out, _ := g.r.UpdateFilter(ctx, g.uid, f.ID, FilterInput{AutoTune: boolp(true)}); out.Threshold != 0.25 {
+		t.Fatalf("turning tuning back on did not take the suggestion: %v", out.Threshold)
+	}
+
+	// New words are a new question: the old ratings stop counting.
+	if out, _ := g.r.UpdateFilter(ctx, g.uid, f.ID, FilterInput{Description: str("vegetables only")}); out.Ratings.Rated != 0 {
+		t.Fatalf("ratings of other words still count: %+v", out.Ratings)
+	}
+}
+
+// A rating made before the classifier answered decides its item, and
+// tunes nothing: there was no answer to rate.
+func TestRatingBeforeAnAnswer(t *testing.T) {
+	g, _ := filterRig(t, &testblyg.Item{ID: idA, Kind: "fragment", Version: 1, ContentMD: "post p=0.10", Updated: time.Now().UTC()})
+	ctx := context.Background()
+	f := g.mustFilter(FilterInput{Name: str("gardening"), Action: str("hide")})
+	out, err := g.r.SetOverride(ctx, g.uid, g.sid, idA, f.ID, boolp(true))
+	if err != nil || out.Ratings.Rated != 0 {
+		t.Fatalf("rated before an answer: %+v %v", out, err)
+	}
+	if page, _ := g.r.Feed(ctx, g.uid, FeedQuery{}); page.Hidden != 1 {
+		t.Fatal("the rating did not decide its item")
 	}
 }

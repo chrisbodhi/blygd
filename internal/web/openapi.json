@@ -2942,8 +2942,8 @@
         "tags": [
           "filters"
         ],
-        "summary": "Judge an item yourself under one of your filters.",
-        "description": "Your judgment wins over the classifier's, for every version of the item.",
+        "summary": "Rate an item under one of your filters: is it about the topic?",
+        "description": "Your rating wins over the classifier's answer for this item, at every version. It keeps the answer you saw, so it can tune the filter (auto_tune). Rate as you read, wherever an answer looks wrong, or right: there is no labelled set to build first.",
         "security": [
           {
             "bearer": [
@@ -2963,8 +2963,15 @@
           }
         },
         "responses": {
-          "204": {
-            "description": "Done."
+          "200": {
+            "description": "The filter as the rating left it: its threshold, if tuning moved it, and its ratings.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Filter"
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
@@ -2988,7 +2995,7 @@
         "tags": [
           "filters"
         ],
-        "summary": "Forget your judgment; the classifier's applies again.",
+        "summary": "Take a rating back; the classifier's answer applies again, and the filter retunes without it.",
         "security": [
           {
             "bearer": [
@@ -2998,8 +3005,15 @@
         ],
         "x-blygd-cost": "default",
         "responses": {
-          "204": {
-            "description": "Done."
+          "200": {
+            "description": "The filter as the rating left it: its threshold, if tuning moved it, and its ratings.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Filter"
+                }
+              }
+            }
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
@@ -5540,6 +5554,21 @@
             "type": "boolean",
             "description": "A disabled filter is kept, and does nothing. Default true."
           },
+          "auto_tune": {
+            "type": "boolean",
+            "description": "Let your ratings set the threshold: after each rating, it moves to the one that agrees with the most of this filter's ratings, once there are at least two each way and only if that disagrees with fewer of them. Setting threshold without auto_tune turns it off. Default true."
+          },
+          "tuned_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When your ratings last moved the threshold."
+          },
+          "ratings": {
+            "$ref": "#/components/schemas/Ratings"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time"
@@ -5559,6 +5588,9 @@
           "pending",
           "subscription_id",
           "enabled",
+          "auto_tune",
+          "tuned_at",
+          "ratings",
           "created_at",
           "updated_at"
         ],
@@ -5590,7 +5622,7 @@
             "type": "number",
             "exclusiveMinimum": 0,
             "exclusiveMaximum": 1,
-            "description": "A post matches when the probability match names is at least this. Default 0.5. Changing it, match or action applies at once to the answers held; changing name or description asks the classifier again."
+            "description": "A post matches when the probability match names is at least this. Default 0.5, a starting guess: rate items (PUT /api/reader/items/{sid}/{iid}/filters/{fid}) and auto_tune moves it. Setting it by hand turns auto_tune off unless the same request sets auto_tune. Changing it, match or action applies at once to the answers held; changing name or description asks the classifier again, and earlier ratings stop counting."
           },
           "action": {
             "type": "string",
@@ -5619,6 +5651,10 @@
           "enabled": {
             "type": "boolean",
             "description": "A disabled filter is kept, and does nothing. Default true."
+          },
+          "auto_tune": {
+            "type": "boolean",
+            "description": "Let your ratings set the threshold: after each rating, it moves to the one that agrees with the most of this filter's ratings, once there are at least two each way and only if that disagrees with fewer of them. Setting threshold without auto_tune turns it off. Default true."
           }
         },
         "required": [
@@ -5653,7 +5689,7 @@
             "type": "number",
             "exclusiveMinimum": 0,
             "exclusiveMaximum": 1,
-            "description": "A post matches when the probability match names is at least this. Default 0.5. Changing it, match or action applies at once to the answers held; changing name or description asks the classifier again."
+            "description": "A post matches when the probability match names is at least this. Default 0.5, a starting guess: rate items (PUT /api/reader/items/{sid}/{iid}/filters/{fid}) and auto_tune moves it. Setting it by hand turns auto_tune off unless the same request sets auto_tune. Changing it, match or action applies at once to the answers held; changing name or description asks the classifier again, and earlier ratings stop counting."
           },
           "action": {
             "type": "string",
@@ -5682,6 +5718,10 @@
           "enabled": {
             "type": "boolean",
             "description": "A disabled filter is kept, and does nothing. Default true."
+          },
+          "auto_tune": {
+            "type": "boolean",
+            "description": "Let your ratings set the threshold: after each rating, it moves to the one that agrees with the most of this filter's ratings, once there are at least two each way and only if that disagrees with fewer of them. Setting threshold without auto_tune turns it off. Default true."
           }
         },
         "additionalProperties": false
@@ -5863,6 +5903,41 @@
         "required": [
           "action",
           "filters"
+        ],
+        "additionalProperties": false
+      },
+      "Ratings": {
+        "type": "object",
+        "description": "Your ratings of this filter's answers: those about its current words, from the current model, rated once the classifier had answered. Other ratings still decide their items, and tune nothing.",
+        "properties": {
+          "rated": {
+            "type": "integer"
+          },
+          "yes": {
+            "type": "integer",
+            "description": "Rated about the topic."
+          },
+          "no": {
+            "type": "integer"
+          },
+          "disagree": {
+            "type": "integer",
+            "description": "Ratings the current match and threshold would decide the other way."
+          },
+          "suggested_threshold": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "A threshold that disagrees with fewer ratings, when there is one (at least two ratings each way). A filter with auto_tune has already taken it, so this is non-null only when auto_tune is off."
+          }
+        },
+        "required": [
+          "rated",
+          "yes",
+          "no",
+          "disagree",
+          "suggested_threshold"
         ],
         "additionalProperties": false
       }

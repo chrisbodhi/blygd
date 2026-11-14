@@ -35,12 +35,13 @@ type filterBody struct {
 	Action         *string         `json:"action"`
 	Pending        *string         `json:"pending"`
 	Enabled        *bool           `json:"enabled"`
+	AutoTune       *bool           `json:"auto_tune"`
 	SubscriptionID json.RawMessage `json:"subscription_id"`
 }
 
 func (b filterBody) input() (reader.FilterInput, error) {
 	in := reader.FilterInput{Name: b.Name, Description: b.Description, Match: b.Match, Threshold: b.Threshold,
-		Action: b.Action, Pending: b.Pending, Enabled: b.Enabled}
+		Action: b.Action, Pending: b.Pending, Enabled: b.Enabled, AutoTune: b.AutoTune}
 	if b.SubscriptionID != nil {
 		in.SetScope = true
 		if err := json.Unmarshal(b.SubscriptionID, &in.Scope); err != nil || (in.Scope != nil && *in.Scope <= 0) {
@@ -126,8 +127,10 @@ func (a *API) deleteFilter(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// setOverride records the reader's own judgment of an item under one of
-// their filters: {"matched": true} or false. It wins over the classifier.
+// setOverride records the reader's rating of an item under one of their
+// filters: {"matched": true} or false. It wins over the classifier for
+// that item, may tune the filter, and answers with the filter as the
+// rating left it.
 func (a *API) setOverride(w http.ResponseWriter, r *http.Request) error {
 	var in struct {
 		Matched *bool `json:"matched"`
@@ -154,9 +157,10 @@ func (a *API) override(w http.ResponseWriter, r *http.Request, matched *bool) er
 	if err != nil {
 		return err
 	}
-	if err := a.Reader.SetOverride(r.Context(), principal(r.Context()).UserID, sid, r.PathValue("iid"), fid, matched); err != nil {
+	f, err := a.Reader.SetOverride(r.Context(), principal(r.Context()).UserID, sid, r.PathValue("iid"), fid, matched)
+	if err != nil {
 		return err
 	}
-	w.WriteHeader(http.StatusNoContent)
+	writeJSON(w, 200, f)
 	return nil
 }

@@ -67,3 +67,17 @@ button:disabled { opacity: .5; }
 #toast { position: fixed; left: 1rem; right: 1rem; bottom: calc(1rem + env(safe-area-inset-bottom)); max-width: 40rem; margin: 0 auto;
   background: var(--fg); color: var(--bg); padding: .75rem 1rem; border-radius: .6rem; z-index: 3; }
 code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .9em; overflow-wrap: anywhere; }
+/* Filters: a folded post, and one-tap ratings of each filter's answer. */
+.folded { display: flex; align-items: center; gap: .5rem; margin: .4rem 0; padding: .4rem .6rem; border-radius: .5rem;
+  background: var(--bg); color: var(--muted); }
+.folded span { flex: 1; }
+.ratings { border-top: 1px solid var(--line); margin-top: .6rem; padding-top: .3rem; }
+.rating { display: flex; align-items: center; gap: .35rem; flex-wrap: wrap; margin: .25rem 0; }
+.rating > span:first-child { font-weight: 600; }
+.rating .muted { flex: 1; }
+button.mini { min-height: 2.25rem; padding: .2rem .75rem; font-size: .85rem; }
+button.mini.on { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+button.mini.guess { border-color: var(--accent); border-style: dashed; }
+.card.off { opacity: .65; }
+label.inline { display: flex; align-items: center; gap: .5rem; font-weight: 500; margin: 0; }
+details > summary { cursor: pointer; font-weight: 600; margin: .5rem 0; }

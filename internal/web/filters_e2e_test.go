@@ -154,11 +154,11 @@ func TestFiltersEndToEnd(t *testing.T) {
 
 	// Bob's own judgment wins, and can be taken back.
 	expect(t, bob.api("PUT", "/reader/items/"+itoa(sid)+"/"+politics+"/filters/"+fid, map[string]any{}), 400)
-	expect(t, bob.api("PUT", "/reader/items/"+itoa(sid)+"/"+politics+"/filters/"+fid, map[string]any{"matched": false}), 204)
+	expect(t, bob.api("PUT", "/reader/items/"+itoa(sid)+"/"+politics+"/filters/"+fid, map[string]any{"matched": false}), 200)
 	if n := len(feedItems(t, bob, "")); n != 2 {
 		t.Fatalf("override: %d items", n)
 	}
-	expect(t, bob.api("DELETE", "/reader/items/"+itoa(sid)+"/"+politics+"/filters/"+fid, nil), 204)
+	expect(t, bob.api("DELETE", "/reader/items/"+itoa(sid)+"/"+politics+"/filters/"+fid, nil), 200)
 	if n := len(feedItems(t, bob, "")); n != 1 {
 		t.Fatalf("override forgotten: %d items", n)
 	}

@@ -584,15 +584,18 @@ Done:
   `reader:read` and `reader:write`.
 - Tests against a fake of the API (the real client end to end) and a fake
   classifier. Every rule's test was seen failing with the rule broken.
+- Ratings instead of a labelled set (2026-11-14, migration 009). The reader
+  answers "about it? yes or no" on studio cards as they read, and each
+  answer decides its item and tunes the filter's threshold. Checked in
+  Chromium against a running instance with a fake classifier: four
+  ratings moved a threshold from 0.5 to 0.25, and unrated posts at 0.30
+  and 0.40 folded after it.
 
 Not yet:
 
-- **Calibration.** No request has gone to the real API: this was built
-  against its documentation. Before trusting any threshold, label about
-  200 items from a real feed by hand per topic, run them through
-  `subq-snap-1.1`, and pick each default (`match`, `threshold`) from the
-  precision and recall. The docs ask for this ("Set thresholds from your
-  own data"), and 0.5 is a placeholder.
+- **A live run.** No request has gone to the real API: this was built
+  against its documentation, and checked in a browser against a fake of
+  it. 0.5 is only where a filter starts, and ratings move it.
 - **Zero data retention** with SubQ before other readers turn filters on
   (DESIGN.md "Filters", what leaves the instance).
 - **Where it matched:** number paragraphs `[P1]…` and ask a `choice` over
@@ -600,7 +603,7 @@ Not yet:
   the passage. Escape literal `[P3]` in the post first.
 - **Images** (up to 4 per request) for spoilers in screenshots. That
   needs other origins' media fetched outside the transaction.
-- The studio's UI for filters (the API is complete); routing matches into
+- Routing matches into
   a hopper (the reference's auto-hoppers); an author's private view of
   their own topic balance, from plane 1 and never rendered.
 - Subscription `unread` counts still include hidden items.
