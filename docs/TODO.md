@@ -259,13 +259,17 @@ runbook are done; the two monitors are yours to make.
 - [ ] **Media cap per user**, if invites are for the launch (decision
   above): total upload bytes, checked in the upload transaction.
 - [x] `go test ./...` green against Postgres 16.
-- [ ] Merge into `claude/adoring-cray-iexclk`.
+- [x] Merged into `claude/adoring-cray-iexclk`; the merge is green.
 
 ## The week
 
-- [ ] Saturday night: deploy A and B (no migration).
-- [ ] Sunday night: preflight (`scripts/deploy.sh --check`), deploy D, E, F,
-  and add the DEPLOYS.md row.
+- [ ] Deploy what is merged here (A, B, E, F). None of it migrates, so the
+  old binary is a full rollback. `make test-all` on Postgres 18 and
+  `make vuln` first; then `scripts/deploy.sh --check`, `scripts/deploy.sh`,
+  and the DEPLOYS.md row. Then set `BLYGD_BACKUP_PING_URL` and the uptime
+  check (Track F).
+- [ ] D (invites) and C (handles or a mount) wait on the decisions at the
+  top; D brings migration 008 and its own preflight.
 - [ ] Monday: three testers. Tuesday: the rest, if nothing broke.
 - [ ] An OPML of every tester's origin, imported by each
   (`POST /api/subscriptions/imports`), so everyone follows everyone.
