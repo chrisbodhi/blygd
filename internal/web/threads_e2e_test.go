@@ -440,7 +440,7 @@ func TestForkFlattening(t *testing.T) {
 	r := bob.api("POST", "/items", map[string]any{"forked_from": ref})
 	expect(t, r, 201)
 	fork := r.json(t)
-	host := strings.TrimPrefix(strings.TrimSuffix(alice.origin, "/alice/"), "http://")
+	host := strings.TrimPrefix(strings.TrimSuffix(alice.origin, "/~alice/"), "http://")
 	want := "Mine, see [“Quoted words.”](" + alice.origin + "f/" + f + "/).\n\n" +
 		"> Quoted words.\n>\n> — quoted from [" + host + " · v1](" + alice.origin + "items/" + f + ".json)\n\nAfter."
 	if fork["kind"] != "thread" || fork["draft_md"] != want {

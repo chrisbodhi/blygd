@@ -112,14 +112,30 @@ and a planes test in each package):
 ## Origins and routing
 
 - An origin is a **full base URL** (`origins.base_url`), normalized. Today
-  every origin is path-mounted under `BLYGD_PUBLIC_URL`:
-  `https://host/{handle}/`. Custom domains later need no schema change.
+  every origin is path-mounted under `BLYGD_PUBLIC_URL`, in the users'
+  namespace: `https://host/~{handle}/` (`account.UserMount`), as home
+  directories were on a shared Unix host. Custom domains later need no
+  schema change.
+- **Why `~`.** Nothing host-rooted (`/api/`, `/studio/`, `/healthz`,
+  `/llms.txt`) can begin with it, so a handle never shadows a route, and a
+  route added later never shadows a handle. `h/` was considered and set
+  aside: it is already the public hopper prefix inside an origin, and
+  `https://host/h/alice/h/reading/` reads `h` two ways. Origins made before
+  the namespace keep `https://host/{handle}/`, because an
+  origin's URL is its identity (§12.2); longest-prefix routing serves both.
+- **One spelling.** An origin is compared byte for byte (§12.2, #103), and
+  a WHATWG parser keeps `%7E` as it finds it, so `/%7Ealice/` is not
+  `/~alice/` to a reader. The surface answers a `GET` or `HEAD` that spells
+  `~` as `%7E` with a 301 to `~`, and since identity is taken after
+  redirects, a reader that subscribes by the encoded spelling ends with the
+  one the origin writes. A `POST` is not redirected.
 - Request routing finds the origin whose `base_url` is the longest prefix
   of the request URL, then serves `surface_files` at the remainder. The one
   dynamic path is `{origin}webmention` (§15.1).
 - The API is **host-rooted** at `/api/`, never inside an origin: a studio
-  and its API are client internals, not protocol (§15.1, §16.6). Handles
-  that would collide with host-rooted routes are reserved.
+  and its API are client internals, not protocol (§15.1, §16.6). The
+  reserved handles no longer keep routes apart (the namespace does); they
+  stay so that `~api` or `~studio` cannot pass for the service itself.
 - `/llms.txt` (llmstxt.org) is host-rooted too: a static, embedded
   description of the service and where to read more (the spec, the
   reference client, `/api/openapi.json`, `/studio/`). It names no origin

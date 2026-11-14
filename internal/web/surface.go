@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/chrisbodhi/blygd/internal/blyg"
@@ -41,6 +42,8 @@ type Surface struct {
 	Log        *slog.Logger
 }
 
+var percentTilde = regexp.MustCompile(`%7[Ee]`)
+
 func (h *Surface) requestURL(r *http.Request) (string, bool) {
 	scheme := h.Scheme
 	if h.TrustProxy {
@@ -53,6 +56,19 @@ func (h *Surface) requestURL(r *http.Request) (string, bool) {
 }
 
 func (h *Surface) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// "%7E" and "~" are the same character to a server, but an origin has
+	// one spelling and is compared byte for byte (§12.2, #103), and a WHATWG
+	// parser keeps whichever it was given. So a read that spells the user
+	// mount "%7E" is sent to the one spelling, and the reader's identity,
+	// taken after redirects, comes out right.
+	if p := r.URL.EscapedPath(); (r.Method == http.MethodGet || r.Method == http.MethodHead) && strings.Contains(strings.ToUpper(p), "%7E") {
+		target := percentTilde.ReplaceAllString(p, "~")
+		if r.URL.RawQuery != "" {
+			target += "?" + r.URL.RawQuery
+		}
+		http.Redirect(w, r, target, http.StatusMovedPermanently)
+		return
+	}
 	u, ok := h.requestURL(r)
 	if !ok {
 		http.Error(w, "bad request", http.StatusBadRequest)

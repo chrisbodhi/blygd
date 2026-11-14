@@ -19,7 +19,7 @@ type Config struct {
 	DatabaseURL string // BLYGD_DATABASE_URL (required)
 	Listen      string // BLYGD_LISTEN, default :8080
 	// PublicURL is where origins mount: https://host/ gives
-	// https://host/{handle}/. BLYGD_PUBLIC_URL (required).
+	// https://host/~{handle}/ (account.UserMount). BLYGD_PUBLIC_URL (required).
 	PublicURL string
 	// TrustProxy honors X-Forwarded-Proto, and charges request budgets to
 	// the last X-Forwarded-For address (BLYGD_TRUST_PROXY). Set it only

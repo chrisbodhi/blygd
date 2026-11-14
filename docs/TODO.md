@@ -20,27 +20,14 @@ Each track names the branch it is on.
   for good. Choose it before the first tester's origin exists. A sandbox
   that is wiped later breaks the promise to anyone who subscribed or
   quoted, the reference studio included.
-- [ ] **How users are mounted.** Today an origin is
-  `https://host/{handle}/`, so every handle competes with host-rooted
-  routes, which is what `ReservedHandles` is for. Namespacing users
-  (`https://host/{x}/{handle}/`) leaves one name to reserve instead of a
-  list that has to anticipate every future route. Points to weigh:
-  - `h/` is already the public hopper prefix inside an origin
-    (`{origin}h/{slug}/`), and `h` is reserved at the host root. Users under
-    `h/` would give `https://host/h/alice/h/reading/`. Another letter
-    (`u/`), `~alice` or `@alice` avoids reading `h` two ways.
-  - The operator's origin already lives at `https://host/{handle}/` and
-    stays there (its `base_url` is permanent). Routing is by longest
-    `base_url` prefix, so mixed mounts work, but the new mount must be
-    decided before any tester's origin is made.
-  - `CreateUser` builds `base + handle + "/"`. The mount becomes a setting
-    or a constant there, and DESIGN.md "Origins and routing" changes.
-  - On a new domain with no existing origins, the mount can be chosen
-    freely.
-- [ ] **Reserved handles.** Depends on the mount. With the path at the
-  host root, add `invite`, `login`, `signup`, `docs`, `status`, `help` and
-  `about` before anyone chooses a handle, since a taken handle cannot be
-  taken back. Under a namespace, the list mostly stops mattering.
+- [x] **How users are mounted: `https://host/~{handle}/`** (decided
+  2026-11-14), as home directories were on a shared Unix host. Nothing
+  host-rooted can begin with `~`, so no handle shadows a route. The
+  operator's existing origin keeps `https://host/{handle}/`; routing by the
+  longest `base_url` serves both. Done in Track C.
+- [x] **Reserved handles.** Settled by the mount: the list no longer keeps
+  routes apart, and stays as it is so that `~api` or `~studio` cannot pass
+  for the service. Nothing added.
 - [ ] **Invites or the CLI.** Invites if people at the launch should get an
   account on the spot; otherwise `blygd user add` and a one-time secret
   link to send the owner token.
@@ -162,11 +149,40 @@ No API change: everything the studio now does is an operation
 - [x] Merged into `claude/adoring-cray-iexclk`; the merge is green.
   Anyone already signed in to the studio must sign out and in once.
 
-## Track C — reserved handles or a mount (blocked on the decisions above)
+## Track C — users under `~` (Saturday)
 
-- [ ] Whichever is decided, with a test that a handle colliding with a
-  host-rooted route is refused, and DESIGN.md "Origins and routing"
-  updated.
+`[x]` on `claude/adoring-cray-iexclk-c-tilde`, 2026-11-14.
+
+- [x] `account.UserMount = "~"`: `CreateUser` makes
+  `publicURL + "~" + handle + "/"`. No migration: `base_url` already holds
+  the whole URL, and its CHECK allows `~`.
+- [x] **One spelling.** The spec now says an origin has one spelling and
+  is compared byte for byte (§12.2, revision of 2026-11-12, #103), and a
+  WHATWG parser keeps `%7E` as given. So a `GET` or `HEAD` that spells `~`
+  as `%7E` is redirected (301) to `~`. Identity is taken after redirects,
+  so a reader subscribing by `/%7Ealice/` gets `/~alice/`. Without the
+  redirect it was a 404.
+- [x] `TestUsersMountUnderTilde`: the origin's URL and manifest `site`;
+  `/alice/` is a 404; `%7E` and `%7e` redirect, query kept; subscribing
+  by `%7E` yields the `~` identity; an origin moved to the old
+  `https://host/{handle}/` is served beside the new ones, and `/me` names
+  it. Removing the redirect, or going back to the old mount, fails it.
+  Every other e2e test now runs on `~` origins, and all pass.
+- [x] `scripts/interop/run.sh` reads the origin from `blygd user add`
+  rather than assuming `/alice/`. Not run here (it needs the reference
+  client); rerun it before the demo.
+- [x] DESIGN.md "Origins and routing" (why `~`, why not `h/`, old origins,
+  one spelling), README, DEPLOY.md, PLAN.md, `config.go`, `llms.txt` and
+  `openapi.json` say `~{handle}`.
+- [x] `go test ./...` green against Postgres 16.
+- [ ] Merge into `claude/adoring-cray-iexclk`.
+
+**The spec has moved.** blygd implements `protocol-v0.4.md` at its sixth
+revision (2026-10-20). `blygger-spec` `d248bc4` (2026-11-12) has nine more,
+the seventh to the fifteenth, including #103's one-spelling rule above.
+Nothing in them was implemented here beyond the redirect. Read them and
+rerun parity and interop before Friday, and decide what ships before the
+demo and what waits.
 
 ## Track D — invites (Sunday)
 

@@ -25,7 +25,7 @@ certificate requests fail and count against Let's Encrypt's limits. If the
 domain has a `CAA` record, it must allow `letsencrypt.org`.
 
 Choose the host name with care. `BLYGD_PUBLIC_URL` is where origins mount
-(`https://host/{handle}/`), published items stay permanent (DESIGN.md
+(`https://host/~{handle}/`), published items stay permanent (DESIGN.md
 "Invariants"), and the URL is the origin's identity. To try things first, use
 a throwaway name such as `<ip-with-dashes>.sslip.io`, then drop and recreate
 the database before real use.
@@ -148,7 +148,8 @@ That prints an owner token once; keep it in a password manager. The env file
 is `root:blygd 0640`, so source it inside the `blygd` user's shell (an
 `$(grep …)` outside `sudo` runs as you and cannot read it). Use the same
 pattern for `blygd token mint`, `rebuild` and `export`. Then open
-`https://<host>/studio/` and paste the token. A handle cannot contain a dot.
+`https://<host>/studio/` and paste the token. A handle is 1–63 lowercase letters, digits or
+hyphens, and the blyg is at `https://<host>/~<handle>/`.
 
 Expect scanners within minutes (new certificates appear in public
 Certificate Transparency logs). They get 404s; blygd serves only what is in
