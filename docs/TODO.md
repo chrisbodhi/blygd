@@ -57,13 +57,45 @@ Each track names the branch it is on.
 
 ## Track B — studio fixes (Saturday)
 
-- [ ] **Approving a response always fails.** The studio's "Show on your
-  page" (`app.js`, `PUT /api/mentions/{mid}/approval`) needs
-  `origin:write`, which `STUDIO_SCOPES` does not hold, so every
-  studio-minted token gets 403. Add the scope, and update the comment
-  beside it and DESIGN.md "The studio" (its own token).
-- [ ] **Settings:** title, description and author through
-  `PATCH /api/origin`, which the API already describes.
+`[~]` on `claude/adoring-cray-iexclk-b-studio`.
+
+No API change: both fixes call operations `openapi.json` already
+describes, so `studio_test.go` holds as it is.
+
+- [ ] **Approving a response always fails.** "Show on your page"
+  (`app.js`, `PUT /api/mentions/{mid}/approval`) needs `origin:write`
+  beside `mentions:write` (`approveMention`, because showing a response
+  publishes, §15.5). `STUDIO_SCOPES` lacks it, so every studio-minted token
+  gets 403.
+  - Add `origin:write` to `STUDIO_SCOPES`, and rewrite the comment above
+    it: the studio now calls approval and origin settings. It still holds
+    no `tokens:write` or `hoppers:*`.
+  - DESIGN.md "The studio", "Its own token": the scope list gains origin
+    settings and approval, and why a stolen studio token is still bounded
+    (it cannot mint, and it ends in 30 days).
+  - Tokens minted before the change keep their old scopes. When `/me`
+    shows a studio token without `origin:write`, the mentions view says
+    to sign out and in again instead of offering a button that will 403.
+  - Test: an e2e case that mints with exactly `STUDIO_SCOPES`, parsed
+    from `app.js`'s source (`studio_test.go` already reads that file), and
+    approves a verified mention. It fails today, and keeps the list
+    honest when a view adds a call.
+- [ ] **Settings view** (`#settings` tab):
+  - reads `GET /api/origin` (`items:read`) and shows the origin URL, read
+    only;
+  - edits `title`, `description`, `author` (§6.1: `name`, optional
+    `url`) and `accept_mentions` with `PATCH /api/origin`, sending only
+    the fields that changed. The schema is `OriginPatch`, which allows no
+    other members;
+  - says before saving that it re-renders every page (cost class
+    `upload`: 30 a minute), and disables the button while it runs;
+  - builds every node as text, like the rest of the studio (no
+    `innerHTML`, which `studio_test.go` refuses).
+- [ ] Try both on a local instance with a fresh studio sign-in: approve a
+  mention and see it on the item's page; change the title and see it in
+  `blyg.json` and the feed page.
+- [ ] `make test-all` green, then merge back into
+  `claude/adoring-cray-iexclk`.
 
 ## Track C — reserved handles or a mount (blocked on the decisions above)
 
