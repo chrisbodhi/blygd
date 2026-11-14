@@ -7,6 +7,7 @@
 //	blygd migrate [status]                   apply pending schema migrations, or report them
 //	blygd user add <handle> [title]          create a user, their origin and an owner token
 //	blygd token mint <handle> <name> [--expires 30d] <scope>…  mint a scoped token (paste-a-token path, §16.6)
+//	blygd token revoke-all <handle>          revoke every token a user holds (suspend them; minting lifts it)
 //	blygd rebuild <handle>                   re-render an origin's surface
 //	blygd export <handle> > site.tar.gz      write an origin's static export (§15.7)
 package main
@@ -47,6 +48,7 @@ var usage = `usage:
   blygd migrate [status]
   blygd user add <handle> [title]
   blygd token mint <handle> <name> [--expires 30d] <scope>...
+  blygd token revoke-all <handle>
   blygd rebuild <handle>
   blygd export <handle> > site.tar.gz
 
@@ -111,6 +113,17 @@ func run(log *slog.Logger, args []string) error {
 		if expires != nil {
 			fmt.Printf("expires: %s\n", expires.Format(time.RFC3339))
 		}
+		return nil
+	case len(args) == 3 && args[0] == "token" && args[1] == "revoke-all":
+		uid, err := accts.UserByHandle(ctx, args[2])
+		if err != nil {
+			return fmt.Errorf("no user %q", args[2])
+		}
+		n, err := accts.RevokeAll(ctx, uid)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("revoked %d token(s) of %s; what they published stays published\n", n, args[2])
 		return nil
 	case len(args) == 2 && args[0] == "rebuild":
 		uid, err := accts.UserByHandle(ctx, args[1])

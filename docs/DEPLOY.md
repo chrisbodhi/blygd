@@ -202,6 +202,60 @@ compromised VM cannot delete or read what it has already sent.
 For restores, make a separate read-only key
 (`listBuckets,listFiles,readFiles`) and keep it off the server.
 
+## 8. Operating for other people
+
+Once anyone else publishes here, a failure is no longer only yours to
+notice, and you hold powers over their blygs that they should know about.
+
+### Alerts
+
+- **Uptime.** Point an external monitor at `https://<host>/healthz`, which
+  answers 200 only while blygd can reach Postgres. Any provider that
+  checks a URL every few minutes will do; it learns only the URL.
+- **Backups.** Make a dead-man's-switch check (healthchecks.io and the
+  like) expecting one ping a day, with a few hours' grace past 03:15 UTC,
+  and put its URL in `/etc/blygd/backup.env`:
+  ```
+  BLYGD_BACKUP_PING_URL=https://<the check's ping URL>
+  ```
+  `backup.sh` fetches it last, only after the dump was written, listed,
+  sent offsite and pruned. A night with no ping is the alert. A failed
+  ping does not fail the backup.
+- **Queues.** Once a minute blygd logs one `queues` line: mentions to
+  verify and send, origins polled, imports waiting, and how many of each
+  are more than 15 minutes late. Late means a worker is behind or stopped,
+  and the line is then a warning:
+  ```sh
+  sudo journalctl -u blygd -p warning --since today --no-pager
+  ```
+  `send_abandoned` counts mentions that gave up after their retries; a
+  jump means a receiver, or the network, is refusing them.
+
+### People
+
+Run these as the `blygd` user, as in step 6:
+
+```sh
+sudo -u blygd sh -c 'set -a; . /etc/blygd/blygd.env; blygd <command>'
+```
+
+| To | Command |
+|---|---|
+| Add someone | `user add <handle> "Title"`. The handle is in their URL for good. Send the owner token through a one-time secret link, never plain chat. They paste it into `/studio/` once and keep it in a password manager. |
+| Replace a lost owner token | `token mint <handle> owner '*'`. Revoke the old one from the new token if it may have leaked (`DELETE /api/tokens/{id}`). |
+| Suspend someone | `token revoke-all <handle>`. Nothing they hold authenticates any more; what they published stays published. Minting them a token lifts it. |
+| Take an item down | Suspend them if needed, then `token mint <handle> takedown --expires 1d items:withdraw` and `POST /api/items/{id}/withdraw` with it. The item becomes an endcap (§9) and its unpinned versions stop being served. **Pinned versions are served forever** (§8, enforced in the schema), and nothing here removes one. |
+
+Tell testers, before their first publish:
+
+- Publishing is permanent: versions are never deleted, a withdrawal leaves
+  an endcap, and a pin cannot be undone. Drafts and preview are the place
+  to experiment.
+- The operator can act as any user (the commands above), and can read
+  everything in the database, drafts included.
+- After an upgrade that widens the studio's token, sign out of the studio
+  and back in once.
+
 ## Upgrading
 
 ### Before you ship
