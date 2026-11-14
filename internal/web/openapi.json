@@ -2430,6 +2430,7 @@
           "reader"
         ],
         "summary": "Mark unread.",
+        "description": "Unmarking an item that is already unread is not an error. An item the caller does not hold, through a subscription of their own, is a 404, as it is for marking it read.",
         "security": [
           {
             "bearer": [

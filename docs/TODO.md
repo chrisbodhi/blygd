@@ -47,13 +47,69 @@ Each track names the branch it is on.
 
 ## Track A — isolation, proved (Saturday)
 
-- [ ] `internal/web/tenancy_e2e_test.go`: every operation with an id in its
-  path, called by one user with another user's id, is a 404 and changes
-  nothing. Driven from `openapi.json`, so a new route with a path id fails
-  until it has a case. Break one owner check on purpose and see it fail.
-- [ ] Ids in request bodies: hopper members, `forked_from`, `stub_of`,
-  `![[id]]` and `[[id]]` naming another user's draft, read marks, events.
-- [ ] Anything that fails here comes before every other track.
+`[x]` on `claude/adoring-cray-iexclk-a-isolation`, 2026-11-14.
+
+`TestTenantsAreIsolated` in `internal/web/tenancy_e2e_test.go`. Four
+users on one instance; Alice has one of everything, Carol and Dave give
+her a subscription, a received mention and an import. Every user holds a
+`*` owner token, so no scope check can answer before the ownership check
+does.
+
+- [x] **Alice's fixture, one of everything:** a draft, a published item
+  pinned at v1, a thread whose `[[id]]` link sends Carol a mention, a
+  hopper with an own and an imported member, media, a subscription with a
+  private display title and a read mark, a verified mention from Carol's
+  stub, a block, a second token, and an OPML import worked off.
+- [x] **Path ids, all 26 operations.** As Bob, with Alice's ids, each
+  answers 404, and everything Alice can read of her own things (15 API
+  reads, and the ETags of 5 surface files) is the same afterwards.
+- [x] **The list comes from `openapi.json`.** The test fails on an
+  operation with a path id and no case, and on a case whose path does not
+  match the operation it is filed under. (That second check caught three
+  of the test's own paths.)
+- [x] **Media is per origin.** Bob uploading Alice's bytes gets the same
+  path; deleting his copy leaves hers.
+- [x] **Ids in request bodies:** Bob's hopper refuses Alice's draft, her
+  published item, and an import named through her subscription.
+  `stub_of`, `![[id]]`, `[[id]]` and `forked_from` naming her draft never
+  resolve, whether or not Bob subscribes to her. Her published item
+  resolves for Bob only once he subscribes (§10.2). `POST
+  /api/reader/read` with her subscription is a 404. Bob's
+  `DELETE /api/subscriptions/imports` deletes only his own.
+- [x] **Events:** Bob's stream, open from the start, hears nothing, while
+  Alice's hears `item`, `mention`, `outbound`, `import` and `subscribe`.
+- [x] **Listings:** none of Bob's 12 listings names Alice's items, media,
+  or the origins she follows.
+- [x] **Nothing Bob is answered carries Alice's private words:** her
+  draft, hopper name, token name, block, or display title.
+- [x] **Tried:** each of these breakages fails the test, and was put back:
+  - `DeleteMedia`'s `DELETE` without `origin_id`;
+  - `AddOwn` without `o.owner_id`;
+  - hopper `Delete` without `user_id`;
+  - the studio's item read without `origin_id`;
+  - `Revoke` without `user_id`;
+  - the event filter without its origin or user check, for `item`,
+    `mention` and `subscribe` hints;
+  - reverting the fix below.
+- [x] **Found and fixed:** `DELETE /api/reader/items/{sid}/{iid}/read`
+  answered 204 for an item the caller does not hold. It changed nothing
+  (the delete was already scoped to the caller), but every other operation
+  answers 404, as `PUT` on the same path does. `Reader.MarkRead` now
+  answers 404 when the caller holds no such item, and still 204 for an
+  item already unread. `openapi.json` says so.
+- [x] **Noted, not changed:** a subscription's `id` in the API is the
+  remote origin's row id, which every subscriber to that origin shares.
+  It is not a key to anything (every query also checks the caller's
+  `user_id`), but ids are sequential and the mirror is shared, so
+  subscribing to an origin tells a user whether someone on the instance
+  already follows it, as the instant backfill already does. That comes
+  with the shared mirror (DESIGN.md "Three planes"), and is fine for
+  testers. Revisit if the instance ever hosts people who must not learn
+  that about each other.
+- [x] `go test ./...` green against Postgres 16 (this container cannot
+  install 18; nothing in the migrations needs it). Run `make test-all` on
+  18 before deploying.
+- [ ] Merge back into `claude/adoring-cray-iexclk`.
 
 ## Track B — studio fixes (Saturday)
 
