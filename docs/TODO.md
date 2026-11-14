@@ -221,7 +221,7 @@ on another origin cannot act as a user without being handed their token.
   why it is safe; preflights in "Request budgets"; `openapi.json`'s
   description says so.
 - [x] `go test ./...` green against Postgres 16.
-- [ ] Merge into `claude/adoring-cray-iexclk`.
+- [x] Merged into `claude/adoring-cray-iexclk`; the merge is green.
 
 ## Track F — running it for others (Sunday)
 
