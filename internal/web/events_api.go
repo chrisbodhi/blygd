@@ -24,7 +24,11 @@ const maxStreams = 8
 
 // heartbeat keeps intermediaries from timing out an idle stream, and finds
 // dead clients.
-const heartbeat = 25 * time.Second
+//
+// Each heartbeat also re-checks the token, so a stream opened before its
+// token was revoked or expired ends within one heartbeat. A var, so a test
+// can shorten it.
+var heartbeat = 25 * time.Second
 
 type streamCount struct {
 	mu sync.Mutex
@@ -89,6 +93,9 @@ func (a *API) streamEvents(w http.ResponseWriter, r *http.Request) error {
 		case <-r.Context().Done():
 			return nil
 		case <-tick.C:
+			if live, err := a.Accounts.TokenLive(r.Context(), p.TokenID); err == nil && !live {
+				return nil
+			}
 			if !write(": ping\n\n") {
 				return nil
 			}

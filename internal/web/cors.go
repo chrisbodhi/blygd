@@ -19,26 +19,26 @@ const (
 	// What a client must read to behave: when to come back after a 429, and
 	// why a token was refused.
 	corsExpose = "Retry-After, WWW-Authenticate"
-	corsMaxAge = 24 * time.Hour
+	// Chromium caps a preflight cache at two hours; asking for more is a
+	// promise browsers do not keep.
+	corsMaxAge = 2 * time.Hour
 )
 
 // cors answers preflights for /api/ and marks every /api/ response, errors
 // and 429s included, as readable from any origin. It runs before
 // authentication and the token budgets, since a preflight carries no
-// Authorization header. Preflights are charged to the address's public
-// budget instead, like the rest of the unauthenticated surface.
-func cors(next http.Handler, l *Limits) http.Handler {
+// Authorization header. A preflight is a constant answer that touches
+// nothing, cheaper than a limiter lookup, so like /healthz it is free:
+// charged to an address, it would compete with every page view behind a
+// shared NAT (a hackathon room), and a refused preflight hides Retry-After
+// from the script, which sees only a network error.
+func cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("Access-Control-Allow-Origin", "*")
 		h.Set("Access-Control-Expose-Headers", corsExpose)
 		if r.Method != http.MethodOptions {
 			next.ServeHTTP(w, r)
-			return
-		}
-		if ok, wait := l.public(r); !ok {
-			retryAfter(w, wait)
-			writeError(w, http.StatusTooManyRequests, "rate_limited", "too many requests from this address")
 			return
 		}
 		h.Set("Access-Control-Allow-Methods", corsMethods)

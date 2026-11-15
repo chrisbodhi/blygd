@@ -128,7 +128,11 @@ and a planes test in each package):
   `/~alice/` to a reader. The surface answers a `GET` or `HEAD` that spells
   `~` as `%7E` with a 301 to `~`, and since identity is taken after
   redirects, a reader that subscribes by the encoded spelling ends with the
-  one the origin writes. A `POST` is not redirected.
+  one the origin writes. A `POST` is not redirected; instead the
+  Webmention receiver reads a target's `%7E` as `~`, because §15.3 asks
+  only whether the target is an address this blyg serves for an item, and
+  to a server the two are one address (RFC 3986 §6.2.2.2). Only targets are
+  folded, never an identity.
 - Request routing finds the origin whose `base_url` is the longest prefix
   of the request URL, then serves `surface_files` at the remainder. The one
   dynamic path is `{origin}webmention` (§15.1).
@@ -625,7 +629,7 @@ blygd will add those when it has an approval flow.
 `Access-Control-Allow-Origin: *`, errors and 429s included, and exposes
 `Retry-After` and `WWW-Authenticate`. Preflights are answered for any
 `/api/` path, allowing the methods the API uses and the `Authorization`
-and `Content-Type` headers, cached for a day. So a client can live on its
+and `Content-Type` headers, cached for two hours (Chromium's cap). So a client can live on its
 own origin (a web app, a hackathon prototype) and still be one more
 client of the API, as the studio is from this one.
 
@@ -636,9 +640,12 @@ client of the API, as the studio is from this one.
   gets the same answer, `*`, and none gets
   `Access-Control-Allow-Credentials`: a cookie added later would not be
   sent cross-origin.
-- **Preflights cost the address.** A preflight carries no token, so it is
-  answered before authentication and charged to the address's public
-  budget, like an origin file.
+- **Preflights are free.** A preflight carries no token, so it is answered
+  before authentication, and it is a constant answer that touches nothing,
+  cheaper than a limiter lookup, so like `/healthz` it is not budgeted.
+  Charged to the address, it would compete with every page view behind a
+  shared NAT (a hackathon room), and a refused preflight hides
+  `Retry-After` from the script, which sees only a network error.
 - **Only `/api/`.** The origin surface keeps its own `GET`/`HEAD` CORS
   (§4). The studio sends none, and its CSP still connects to this host
   only.
@@ -664,10 +671,14 @@ blygd runs one. `BLYGD_RATE_LIMITS=false` turns them off for harnesses.
   tokens cannot multiply a user. Over budget is 429 with `Retry-After`.
 - **Failed authentication, per address.** 30 at once, then 10 a minute.
   Past that the address is refused before its token is looked up, good
-  token or not.
+  token or not. Only a presented secret counts: a request with no
+  `Authorization` at all is a client asking before its user pasted a
+  token, not a guess, and charging it would let one such client lock out
+  everyone behind its address.
 - **Everything public, per address.** Origin files, hopper pages, the
-  studio, llms.txt and `/api/` preflights share 600 a minute in bursts of 300; webmention posts
-  have 30 a minute on top of §15.3's per-source caps. `/healthz` is free.
+  studio and llms.txt share 600 a minute in bursts of 300; webmention posts
+  have 30 a minute on top of §15.3's per-source caps. `/healthz` and `/api/`
+  preflights are free.
 - **Addresses.** The peer, or with `BLYGD_TRUST_PROXY` the last
   `X-Forwarded-For` entry, which is the one the proxy saw. Public IPv6 is
   charged per /64; loopback and private addresses are kept whole, since a
@@ -707,7 +718,9 @@ reconnect, re-fetch.
   `reader:read`; their own items with `items:read`; their origin's
   mentions and sends with `mentions:read`). The server's write deadline
   is lifted for the stream, there is a heartbeat every 25 s, and at most
-  8 streams per user. Requests share the process context, so a shutdown
+  8 streams per user. Each heartbeat re-checks the token, so a stream
+  opened before its token was revoked or expired ends within one; the
+  studio then signs out rather than retry a refused token. Requests share the process context, so a shutdown
   ends streams at once.
 - Browsers read it with `fetch()`, because `EventSource` cannot send the
   `Authorization` header.

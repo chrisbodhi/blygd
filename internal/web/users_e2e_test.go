@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -80,6 +81,44 @@ func TestUsersMountUnderTilde(t *testing.T) {
 			t.Errorf("%s: %d to %q, want 301 to %q", spelling, r.StatusCode, r.Header.Get("Location"), want)
 		}
 	}
+	// Never a way off the host: ServeMux cleans "//host" paths before the
+	// surface sees them, and every hop of the chain stays here.
+	for _, path := range []string{"//evil.example/%7Ealice/blyg.json", "///evil.example/%7Ealice/", "/%2F%2Fevil.example/%7Ealice/"} {
+		at := e.srv.URL + path
+		for hop := 0; hop < 4; hop++ {
+			req, _ := http.NewRequest("GET", at, nil)
+			r, err := noFollow.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r.Body.Close()
+			loc := r.Header.Get("Location")
+			if loc == "" {
+				break
+			}
+			next, err := r.Request.URL.Parse(loc)
+			if err != nil || next.Host != r.Request.URL.Host {
+				t.Fatalf("%s: hop %d redirects off the host, to %q", path, hop, loc)
+			}
+			at = next.String()
+		}
+	}
+
+	// A mention whose target spells "~" as "%7E" names the same item
+	// (§15.3 is membership): accepted, and stored as "~".
+	item := alice.draft(t, map[string]any{"content_md": "Mention me."})
+	alice.publish(t, item, 200)
+	encoded := e.srv.URL + "/%7Ealice/f/" + item + "/"
+	claim := url.Values{"source": {"https://elsewhere.test/a-reply"}, "target": {encoded}}
+	expect(t, e.do("POST", alice.origin+"webmention", "", claim), 202)
+	var stored string
+	if err := e.pool.QueryRow(ctx, `SELECT target_url FROM inbound_mentions WHERE target_item_id = $1`, item).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored != alice.origin+"f/"+item+"/" {
+		t.Fatalf("stored target %s", stored)
+	}
+
 	r := bob.api("POST", "/subscriptions", map[string]any{"url": e.srv.URL + "/%7Ealice/"})
 	expect(t, r, 201)
 	if got := r.json(t)["subscription"].(map[string]any)["origin"]; got != alice.origin {

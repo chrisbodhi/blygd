@@ -261,3 +261,13 @@ func (a *Accounts) RevokeAll(ctx context.Context, userID int64) (int64, error) {
 	tag, err := a.Pool.Exec(ctx, `UPDATE tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL`, userID)
 	return tag.RowsAffected(), err
 }
+
+// TokenLive says whether a token still authenticates: not revoked, not
+// expired. A long-lived request, the event stream, asks it again as it
+// runs, so a revoked token's stream ends.
+func (a *Accounts) TokenLive(ctx context.Context, tokenID int64) (bool, error) {
+	var live bool
+	err := a.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM tokens WHERE id = $1 AND revoked_at IS NULL
+		AND (expires_at IS NULL OR expires_at > now()))`, tokenID).Scan(&live)
+	return live, err
+}

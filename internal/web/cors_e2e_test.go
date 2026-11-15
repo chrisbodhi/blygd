@@ -65,7 +65,7 @@ func TestCrossOriginClients(t *testing.T) {
 		for k, want := range map[string]string{
 			"Access-Control-Allow-Methods": "PATCH",
 			"Access-Control-Allow-Headers": "Authorization",
-			"Access-Control-Max-Age":       "86400",
+			"Access-Control-Max-Age":       "7200",
 		} {
 			if !strings.Contains(r.Header.Get(k), want) {
 				t.Errorf("preflight %s: %s %q lacks %q", path, k, r.Header.Get(k), want)
@@ -121,8 +121,9 @@ func (u *user) mintScoped(t *testing.T, scopes ...string) string {
 }
 
 // A 429 is readable cross-origin, with its Retry-After, so a browser client
-// can back off; and preflights are charged to the address's public budget,
-// since they carry no token to charge.
+// can back off. Preflights are free: behind one address (a venue's NAT)
+// they would otherwise compete with every page view, and a refused one
+// hides Retry-After from the script.
 func TestCrossOriginBudgets(t *testing.T) {
 	saved := SurfaceBudget
 	SurfaceBudget = limit.Rate{PerMinute: 60, Burst: 3}
@@ -132,24 +133,17 @@ func TestCrossOriginBudgets(t *testing.T) {
 	now := time.Unix(1_000_000, 0)
 	e.withLimits(&now)
 
+	// Spend the address's public budget on pages; preflights still pass,
+	// many more of them than the budget holds.
 	for i := 0; i < 3; i++ {
+		expect(t, e.do("GET", alice.origin+"blyg.json", "", nil, "X-Forwarded-For", "203.0.113.40"), 200)
+	}
+	expect(t, e.do("GET", alice.origin+"blyg.json", "", nil, "X-Forwarded-For", "203.0.113.40"), 429)
+	for i := 0; i < 20; i++ {
 		if r := preflight(t, e, "/items", "X-Forwarded-For", "203.0.113.40"); r.StatusCode != 204 {
-			t.Fatalf("preflight %d inside the budget: %d", i, r.StatusCode)
+			t.Fatalf("preflight %d from an address whose public budget is spent: %d", i, r.StatusCode)
 		}
 	}
-	r := preflight(t, e, "/items", "X-Forwarded-For", "203.0.113.40")
-	if r.StatusCode != 429 || r.Header.Get("Retry-After") == "" {
-		t.Fatalf("preflight over the public budget: %d, Retry-After %q", r.StatusCode, r.Header.Get("Retry-After"))
-	}
-	readable(t, "preflight 429", r.Header)
-	// One public budget: the address's surface requests are refused too.
-	expect(t, e.do("GET", alice.origin+"blyg.json", "", nil, "X-Forwarded-For", "203.0.113.40"), 429)
-	// Another address is untouched, and a token's requests are charged to
-	// the token, not the address.
-	if r := preflight(t, e, "/items", "X-Forwarded-For", "203.0.113.41"); r.StatusCode != 204 {
-		t.Fatalf("another address: %d", r.StatusCode)
-	}
-	expect(t, alice.apiFrom("203.0.113.40", "GET", "/me"), 200)
 
 	// export: 2 per token. The third is a 429 a browser can read.
 	for i := 0; i < 2; i++ {

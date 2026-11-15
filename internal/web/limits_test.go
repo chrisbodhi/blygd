@@ -174,6 +174,14 @@ func TestFailedAuthenticationBudget(t *testing.T) {
 	expect(t, alice.apiFrom("2001:db8:1:3::1", "GET", "/me"), 200)
 	now = now.Add(time.Minute)
 	expect(t, alice.apiFrom("203.0.113.9", "GET", "/me"), 200)
+
+	// No Authorization at all is not a guess, so it costs nothing: a
+	// client asking before its user pasted a token cannot lock out
+	// everyone behind its address.
+	for i := 0; i < 3*int(AuthFailBudget.Burst); i++ {
+		expect(t, e.do("GET", e.srv.URL+"/api/me", "", nil, "X-Forwarded-For", "198.51.100.1, 203.0.113.11"), 401)
+	}
+	expect(t, alice.apiFrom("203.0.113.11", "GET", "/me"), 200)
 }
 
 func TestPublicBudgets(t *testing.T) {

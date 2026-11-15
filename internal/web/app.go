@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -136,4 +137,27 @@ func (a *App) queueLine(ctx context.Context) (slog.Level, []any) {
 		}
 	}
 	return level, attrs
+}
+
+// Suspend stops a user acting through this instance: every token they hold
+// is revoked, so their open event streams end at the next heartbeat, and
+// every mention their origin has yet to send is abandoned, so their queued
+// stubs and quotes stop reaching the people they were suspended over.
+// What they published stays published (§4, §9); withdrawing it is a
+// separate, deliberate act. Minting them a token lifts the suspension, but
+// abandoned sends stay abandoned. Their subscriptions are still polled.
+func (a *App) Suspend(ctx context.Context, handle string) (tokens, sends int64, err error) {
+	uid, err := a.Accounts.UserByHandle(ctx, handle)
+	if err != nil {
+		return 0, 0, fmt.Errorf("no user %q", handle)
+	}
+	if tokens, err = a.Accounts.RevokeAll(ctx, uid); err != nil {
+		return 0, 0, err
+	}
+	o, err := a.Studio.OriginForOwner(ctx, uid)
+	if err != nil {
+		return tokens, 0, err
+	}
+	sends, err = a.Mentions.AbandonSends(ctx, o.ID, "sender suspended by the operator")
+	return tokens, sends, err
 }

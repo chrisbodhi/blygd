@@ -221,7 +221,12 @@ notice, and you hold powers over their blygs that they should know about.
   ```
   `backup.sh` fetches it last, only after the dump was written, listed,
   sent offsite and pruned. A night with no ping is the alert. A failed
-  ping does not fail the backup.
+  ping does not fail the backup. `scripts/deploy.sh` installs each
+  release's `backup.sh` as `blygd-backup`, so the ping arrives with the
+  first deploy that carries it; on a host set up by hand, install it as in
+  step 5. Check it once: `sudo systemctl start blygd-backup`, then
+  `sudo journalctl -u blygd-backup -n 5 --no-pager` should end with
+  `pinged the monitor`.
 - **Queues.** Once a minute blygd logs one `queues` line: mentions to
   verify and send, origins polled, imports waiting, and how many of each
   are more than 15 minutes late. Late means a worker is behind or stopped,
@@ -229,8 +234,10 @@ notice, and you hold powers over their blygs that they should know about.
   ```sh
   sudo journalctl -u blygd -p warning --since today --no-pager
   ```
-  `send_abandoned` counts mentions that gave up after their retries; a
-  jump means a receiver, or the network, is refusing them.
+  `send_abandoned_24h` counts mentions that gave up after their retries in
+  the last day; a rise means a receiver, or the network, is refusing them.
+  An import is late only at the head of a user's list, so a big OPML
+  import worked off one entry a batch does not warn.
 
 ### People
 
@@ -244,7 +251,8 @@ sudo -u blygd sh -c 'set -a; . /etc/blygd/blygd.env; blygd <command>'
 |---|---|
 | Add someone | `user add <handle> "Title"`. The handle is in their URL for good. Send the owner token through a one-time secret link, never plain chat. They paste it into `/studio/` once and keep it in a password manager. |
 | Replace a lost owner token | `token mint <handle> owner '*'`. Revoke the old one from the new token if it may have leaked (`DELETE /api/tokens/{id}`). |
-| Suspend someone | `token revoke-all <handle>`. Nothing they hold authenticates any more; what they published stays published. Minting them a token lifts it. |
+| Suspend someone | `user suspend <handle>`. Every token they hold is revoked, their open event streams end within 25 s, and every mention their blyg had yet to send is abandoned, so their queued stubs and quotes stop reaching anyone. What they published stays published; their subscriptions are still polled. Minting them a token lifts it; abandoned sends stay abandoned. |
+| Revoke every token, nothing else | `token revoke-all <handle>`, after a leak, say. |
 | Take an item down | Suspend them if needed, then `token mint <handle> takedown --expires 1d items:withdraw` and `POST /api/items/{id}/withdraw` with it. The item becomes an endcap (§9) and its unpinned versions stop being served. **Pinned versions are served forever** (§8, enforced in the schema), and nothing here removes one. |
 
 Tell testers, before their first publish:
@@ -256,6 +264,22 @@ Tell testers, before their first publish:
   everything in the database, drafts included.
 - After an upgrade that widens the studio's token, sign out of the studio
   and back in once.
+
+### A room on one address
+
+At a hackathon or a meetup everyone reaches blygd from the venue's one
+public address, so every per-address budget is shared by the room:
+origin pages, hopper pages and the studio's files (600 a minute, bursts of
+300), and failed authentication (30, then 10 a minute). Preflights and
+requests with no token cost nothing, so only a client sending a wrong or
+revoked token spends the room's authentication budget; the studio signs
+out on a refused token instead of retrying. With `BLYGD_TRUST_PROXY=true`
+behind Caddy the address is the venue's, as it should be. The budgets are
+constants in `internal/web/limits.go` (`BLYGD_RATE_LIMITS` only turns them
+all on or off), so a bigger allowance for an event is a change and a
+deploy: decide before the day, from `journalctl -u blygd | grep status=429`
+during the testers' week. Never turn proxy trust off to spread the load: the
+budgets would then be charged to Caddy, one address for everyone.
 
 ## Upgrading
 

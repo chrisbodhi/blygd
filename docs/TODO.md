@@ -277,6 +277,48 @@ runbook are done; the two monitors are yours to make.
 - [x] `go test ./...` green against Postgres 16.
 - [x] Merged into `claude/adoring-cray-iexclk`; the merge is green.
 
+## Review of PR #2 (2026-11-15)
+
+An adversarial review, mostly on security and on what breaks with a room
+of people. Each fix has a test that fails without it.
+
+- [x] **2. Suspension stopped logins but not work in motion.**
+  `blygd user suspend` (`App.Suspend`) revokes every token, abandons the
+  origin's unsent mentions (`mention.Store.AbandonSends`), and the event
+  stream re-checks its token every heartbeat, so an open one ends within
+  25 s. `TestSuspendStopsWorkInMotion`. `token revoke-all` stays, for a leak.
+- [x] **3. A room on one address.** Preflights are no longer budgeted, a
+  request with no `Authorization` no longer counts as a failed
+  authentication, and `Max-Age` is 2 h (Chromium's cap). DEPLOY.md "A room
+  on one address". `TestCrossOriginBudgets`, `TestFailedAuthenticationBudget`.
+- [x] **4. The studio's stream retried a refused token forever**, spending
+  the address's authentication budget. It now signs out on 401, as `api()`
+  does. Tried in Chromium: suspended mid-session, signed out 26 s later,
+  one 401, no retries.
+- [x] **5. Settings checked "Sign your items" when `byline` was null**, so
+  any save started signing items. Checked only when the byline is the
+  author, or both are unset. Tried in Chromium: a title-only save sends
+  only the title.
+- [x] **6. `import_late` warned during every big OPML import**: lateness is
+  now the head of each user's line only. **6b.** `send_abandoned` became
+  `send_abandoned_24h`. `TestQueueLine`.
+- [x] **7. The new `backup.sh` never reached the host.** `deploy.sh` ships it
+  and `upgrade.sh` installs it after a healthy start. DEPLOY.md says how to
+  check the ping.
+- [x] **8. A Webmention target spelling `~` as `%7E` was a 400.** The
+  receiver folds `%7E` in targets only (§15.3 is membership; RFC 3986
+  §6.2.2.2), never in an identity. Plus a test that the `%7E` redirect never
+  leaves the host (`//evil.example/%7E…` and kin). `TestUsersMountUnderTilde`.
+- [ ] **1. No takedown for a pinned version** while every studio token can
+  pin. Yours to decide before the launch: an operator serve-denylist (451,
+  rows and triggers untouched), and/or `items:pin` out of `STUDIO_SCOPES`
+  for the tester period.
+- [ ] **Per-user subscription ids.** The shared, sequential id lets a user
+  learn whether anyone here follows an origin; with ten users that is close
+  to "this person does". Per-user ids close it (a migration and an API
+  change); the instant backfill of an already-mirrored origin would remain
+  and should be named in DESIGN.md. Yours to decide.
+
 ## The week
 
 - [ ] Deploy what is merged here (A, B, E, F). None of it migrates, so the

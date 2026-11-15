@@ -249,6 +249,15 @@ async function startStream() {
     let connected = false;
     try {
       const res = await fetch("/api/events", { headers: { Authorization: "Bearer " + localStorage.getItem(TOKEN_KEY) } });
+      if (res.status === 401) {
+        // The token was revoked or expired. Retrying would only spend this
+        // address's failed-authentication budget, for everyone behind it:
+        // sign out, as api() does, and the loop ends with the token.
+        localStorage.removeItem(TOKEN_KEY);
+        me = null;
+        route();
+        break;
+      }
       if (!res.ok || !res.body) throw new Error("HTTP " + res.status);
       connected = true;
       retryDelay = 1000;
@@ -772,7 +781,10 @@ async function viewSettings() {
   const o = await attempt(() => api("GET", "/origin"));
   if (!o) return;
   const author = o.author && typeof o.author === "object" ? o.author : {};
-  const sameByline = o.byline == null || JSON.stringify(o.byline) === JSON.stringify(o.author);
+  // A null byline means the items carry no author of their own (§5.5): the
+  // box is checked only when the byline already is the author, or both are
+  // unset, so a save that changes something else never starts signing items.
+  const sameByline = o.byline == null ? o.author == null : JSON.stringify(o.byline) === JSON.stringify(o.author);
   const title = h("input", { id: "s-title", type: "text", value: o.title });
   const description = h("textarea", { id: "s-description", rows: 3, class: "short" }, o.description);
   const name = h("input", { id: "s-name", type: "text", value: author.name || "", autocomplete: "name" });
