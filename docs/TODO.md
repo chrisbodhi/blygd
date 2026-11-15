@@ -309,6 +309,21 @@ of people. Each fix has a test that fails without it.
   receiver folds `%7E` in targets only (§15.3 is membership; RFC 3986
   §6.2.2.2), never in an identity. Plus a test that the `%7E` redirect never
   leaves the host (`//evil.example/%7E…` and kin). `TestUsersMountUnderTilde`.
+- [x] **Re-review of `ba43908`:**
+  - A send in flight when `user suspend` ran wrote its retryable result
+    over the abandonment and went back in the queue. The worker's result
+    write now lands only on a row still pending.
+    `TestSuspendWinsOverASendInFlight` holds a target's endpoint mid-POST,
+    suspends, then releases a 503; without the guard the row is back to
+    `pending`. A publish that authenticated just before the revoke can
+    still queue sends; DEPLOY.md says to run the command again.
+  - `import_late` still warned while the worker steadily worked a long
+    list, since its next unclaimed entry has been due since the import was
+    made. A user's imports are now late only when nothing in their list has
+    been claimed or finished within the window. `TestQueueLine` models a
+    list made 20 minutes ago with ten entries done in the last minute.
+  - `openapi.json` says the event stream ends within a heartbeat once its
+    token is revoked or expires, and that a reconnect then answers 401.
 - [ ] **1. No takedown for a pinned version** while every studio token can
   pin. Yours to decide before the launch: an operator serve-denylist (451,
   rows and triggers untouched), and/or `items:pin` out of `STUDIO_SCOPES`

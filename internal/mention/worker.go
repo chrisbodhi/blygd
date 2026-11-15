@@ -292,13 +292,20 @@ func (wk *Workers) SendBatch(ctx context.Context) (int, error) {
 				next = RetryDelay(c.attempts, res.RetryAfter).Seconds()
 			}
 		}
-		if _, err := wk.Pool.Exec(ctx, `UPDATE outbound_mentions SET status = $2,
+		// Only a row still pending takes the result: a claim leaves the row
+		// pending while it sends, and one abandoned meanwhile (a suspension,
+		// Store.AbandonSends) stays abandoned rather than being put back in
+		// the queue by a retryable answer.
+		tag, err := wk.Pool.Exec(ctx, `UPDATE outbound_mentions SET status = $2,
 			next_attempt_at = CASE WHEN $3::float8 IS NULL THEN NULL ELSE now() + make_interval(secs => $3::float8) END,
 			endpoint = coalesce(nullif($4, ''), endpoint), last_result = $5, updated_at = now()
-			WHERE id = $1`, c.id, status, next, res.Endpoint, res.Detail); err != nil {
+			WHERE id = $1 AND status = 'pending'`, c.id, status, next, res.Endpoint, res.Detail)
+		if err != nil {
 			return err
 		}
-		wk.notify(ctx, "outbound", c.originID, map[string]any{"id": c.id, "status": status, "last_result": res.Detail})
+		if tag.RowsAffected() == 1 {
+			wk.notify(ctx, "outbound", c.originID, map[string]any{"id": c.id, "status": status, "last_result": res.Detail})
+		}
 		return nil
 	})
 	ids := make([]int64, len(rest))

@@ -236,8 +236,9 @@ notice, and you hold powers over their blygs that they should know about.
   ```
   `send_abandoned_24h` counts mentions that gave up after their retries in
   the last day; a rise means a receiver, or the network, is refusing them.
-  An import is late only at the head of a user's list, so a big OPML
-  import worked off one entry a batch does not warn.
+  A user's imports are late only when nothing in their list has been
+  claimed or finished for 15 minutes, so a big OPML import that the worker
+  is working through, one entry a batch, does not warn.
 
 ### People
 
@@ -251,7 +252,7 @@ sudo -u blygd sh -c 'set -a; . /etc/blygd/blygd.env; blygd <command>'
 |---|---|
 | Add someone | `user add <handle> "Title"`. The handle is in their URL for good. Send the owner token through a one-time secret link, never plain chat. They paste it into `/studio/` once and keep it in a password manager. |
 | Replace a lost owner token | `token mint <handle> owner '*'`. Revoke the old one from the new token if it may have leaked (`DELETE /api/tokens/{id}`). |
-| Suspend someone | `user suspend <handle>`. Every token they hold is revoked, their open event streams end within 25 s, and every mention their blyg had yet to send is abandoned, so their queued stubs and quotes stop reaching anyone. What they published stays published; their subscriptions are still polled. Minting them a token lifts it; abandoned sends stay abandoned. |
+| Suspend someone | `user suspend <handle>`. Every token they hold is revoked, their open event streams end within 25 s, and every mention their blyg had yet to send is abandoned, so their queued stubs and quotes stop reaching anyone. A send already in flight may still arrive, once, but is never retried. A publish that authenticated just before the revoke can still queue sends after it, so run the command again a minute later to catch them. What they published stays published; their subscriptions are still polled. Minting them a token lifts it; abandoned sends stay abandoned. |
 | Revoke every token, nothing else | `token revoke-all <handle>`, after a leak, say. |
 | Take an item down | Suspend them if needed, then `token mint <handle> takedown --expires 1d items:withdraw` and `POST /api/items/{id}/withdraw` with it. The item becomes an endcap (§9) and its unpinned versions stop being served. **Pinned versions are served forever** (§8, enforced in the schema), and nothing here removes one. |
 

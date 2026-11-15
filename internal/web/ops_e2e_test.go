@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -87,8 +88,9 @@ func TestQueueLine(t *testing.T) {
 	}
 
 	// A long import is due all at once and worked off one entry per user
-	// per batch: its tail waiting is not the worker failing. Only the head
-	// of a user's line can be late.
+	// per batch, so while the worker works, its earliest pending entry has
+	// been due since the import was made. Late means nothing in the user's
+	// list has moved: the worker stuck, not busy.
 	var opml strings.Builder
 	opml.WriteString(`<?xml version="1.0"?><opml version="2.0"><head><title>x</title></head><body>`)
 	for i := 0; i < 50; i++ {
@@ -96,16 +98,27 @@ func TestQueueLine(t *testing.T) {
 	}
 	opml.WriteString(`</body></opml>`)
 	expect(t, alice.api("POST", "/subscriptions/imports", map[string]any{"opml": opml.String()}), 202)
-	if _, err := e.pool.Exec(ctx, `UPDATE subscription_imports SET next_attempt_at = now() - interval '20 minutes'`); err != nil {
-		t.Fatal(err)
+	exec := func(sql string) {
+		t.Helper()
+		if _, err := e.pool.Exec(ctx, sql); err != nil {
+			t.Fatal(err)
+		}
 	}
+	// Made 20 minutes ago and never touched: stuck.
+	exec(`UPDATE subscription_imports SET next_attempt_at = now() - interval '20 minutes', updated_at = now() - interval '20 minutes'`)
 	l, m = line()
 	want(l, slog.LevelWarn, m, "import", "50", "import_late", "1")
-	if _, err := e.pool.Exec(ctx, `UPDATE subscription_imports SET next_attempt_at = now()`); err != nil {
-		t.Fatal(err)
-	}
+	// The same list, ten entries worked off in the last minute: busy, and
+	// the rest still due since the import was made.
+	exec(`UPDATE subscription_imports SET status = 'failed', error = 'x', updated_at = now() - interval '1 minute'
+		WHERE id IN (SELECT id FROM subscription_imports ORDER BY id LIMIT 10)`)
 	l, m = line()
-	want(l, slog.LevelInfo, m, "import", "50", "import_late", "0")
+	want(l, slog.LevelInfo, m, "import", "40", "import_late", "0")
+	// And then nothing more for 20 minutes: stuck again.
+	exec(`UPDATE subscription_imports SET updated_at = now() - interval '20 minutes'`)
+	l, m = line()
+	want(l, slog.LevelWarn, m, "import", "40", "import_late", "1")
+	exec(`DELETE FROM subscription_imports`)
 
 	// Abandoned sends count over a day, so the number reads on its own.
 	if _, err := e.pool.Exec(ctx, `UPDATE outbound_mentions SET status = 'abandoned', updated_at = now()`); err != nil {
@@ -213,5 +226,67 @@ func TestSuspendStopsWorkInMotion(t *testing.T) {
 	expect(t, alice.get("t/"+stub+"/"), 200) // what they published stays published
 	if _, _, err := app.Suspend(ctx, "nobody"); err == nil {
 		t.Error("suspended a user who does not exist")
+	}
+}
+
+// A send already in flight when its sender is suspended does not put
+// itself back in the queue: the worker's result only lands on a row still
+// pending, so the abandonment wins whatever the target answered.
+func TestSuspendWinsOverASendInFlight(t *testing.T) {
+	e := newEnv(t, mention.DefaultRateLimits)
+	alice := e.user("alice")
+	ctx := context.Background()
+	app := &App{Accounts: e.accts, Studio: e.studio, Mentions: &mention.Store{Pool: e.pool}}
+
+	// A plain-web target whose endpoint holds the POST until released, then
+	// answers 503, a retryable answer.
+	inFlight, release := make(chan struct{}), make(chan struct{})
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			close(inFlight)
+			<-release
+			http.Error(w, "busy", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, `<html><head><link rel="webmention" href="/wm"></head><body>A post.</body></html>`)
+	}))
+	t.Cleanup(target.Close)
+
+	r := alice.api("POST", "/items", map[string]any{"stub_of": map[string]any{"url": target.URL + "/post/",
+		"cited": map[string]any{"source": "A weblog", "excerpt": "A post."}}})
+	expect(t, r, 201)
+	stub := r.json(t)["id"].(string)
+	alice.edit(t, stub, "A reply.")
+	alice.publish(t, stub, 200)
+
+	done := make(chan error, 1)
+	go func() { _, err := e.workers.SendBatch(ctx); done <- err }()
+	select {
+	case <-inFlight:
+	case <-time.After(10 * time.Second):
+		close(release)
+		t.Fatal("the send never reached the target")
+	}
+	if _, sends, err := app.Suspend(ctx, "alice"); err != nil || sends != 1 {
+		close(release)
+		t.Fatalf("suspend mid-send: %d sends, %v", sends, err)
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	var status string
+	if err := e.pool.QueryRow(ctx, `SELECT status FROM outbound_mentions WHERE source_item_id = $1`, stub).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "abandoned" {
+		t.Fatalf("a send in flight at suspension came back as %q", status)
+	}
+	if _, err := e.pool.Exec(ctx, `UPDATE outbound_mentions SET next_attempt_at = now() - interval '1 hour'`); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := e.workers.SendBatch(ctx); err != nil || n != 0 {
+		t.Fatalf("a later batch sent %d, %v", n, err)
 	}
 }
