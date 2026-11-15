@@ -73,7 +73,8 @@ curl -s localhost:8080/chris/items/$ID.json
 | `BLYGD_MIGRATE_ON_START` | `true` | Apply pending migrations before any command; `false` leaves it to `blygd migrate` |
 | `BLYGD_MANUAL_POLL_FLOOR` | `60` | Seconds between user-asked polls of one origin; lower only for development |
 | `BLYGD_MEDIA_MAX_BYTES` | `10485760` | Largest accepted upload (PNG, JPEG, GIF, WebP) |
-| `BLYGD_GENERATOR_URL` | this repo | Manifest `generator_url` |
+| `BLYGD_GENERATOR_URL` | this repo | Manifest `generator_url`, and the source link on the host root page |
+| `BLYGD_OPERATOR_LINKS` | (none) | Your own pages, listed on the host root page with `rel="me"`: comma-separated `Label=https://url` pairs |
 | `BLYGD_ALLOW_PRIVATE_FETCH` | `false` | Development only: lets fetches reach private addresses |
 | `BLYGD_RATE_LIMITS` | `true` | Request budgets (docs/DESIGN.md); `false` for test harnesses only |
 

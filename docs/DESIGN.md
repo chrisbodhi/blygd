@@ -126,6 +126,15 @@ and a planes test in each package):
   and lists no users, so it says nothing about who publishes here. No
   handle can contain a dot, and no surface file is called `llms.txt`, so
   it shadows nothing, even at a future root-mounted custom domain.
+- The host root `/` is a plain HTML page for people and crawlers
+  (`internal/web/home.html`): what the service is, Blygger, the source
+  (`BLYGD_GENERATOR_URL`), `/api/openapi.json` (also as
+  `rel="service-desc"`, §16.6), `/studio/api/` and `/llms.txt`. It names
+  no origin and lists no users; the one person it names is the operator,
+  through `BLYGD_OPERATOR_LINKS`, linked `rel="me"` so a profile that
+  links back can verify the host. It loads nothing and runs nothing. The
+  surface serves it only when no origin is mounted at the root, so a
+  root-mounted custom domain keeps its own index.
 
 ## Webmentions (§15)
 

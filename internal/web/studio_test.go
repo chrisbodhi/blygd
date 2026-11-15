@@ -101,7 +101,7 @@ func TestLLMSTxt(t *testing.T) {
 		t.Fatalf("llms.txt: %d %q %.80q", rec.Code, rec.Header().Get("Content-Type"), body)
 	}
 	// A client that holds a token learns where the blyg is mounted from
-	// /api/me: nothing is served at the host root.
+	// /api/me: the host root names no origin.
 	for _, want := range []string{"(/api/openapi.json)", "(/studio/api/)", "(/studio/)", "https://github.com/blygger/blygger-spec", "`GET /api/me`"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("llms.txt lacks %s", want)
