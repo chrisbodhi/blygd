@@ -25,7 +25,7 @@ type snapshotDoc struct {
 // come back with the reason, so the author is told why.
 func (r *Reader) Snapshots(ctx context.Context, userID int64, ids []string) (map[string][]studio.Snapshot, error) {
 	rows, err := r.Pool.Query(ctx, `SELECT ro.identity_url, ro.kind, coalesce(ro.title, ''), ro.manifest, ii.item_id, ii.kind, ii.state,
-			ii.version, ii.page_url, ii.doc, p.version, p.doc
+			ii.version, ii.page_url, ii.doc, coalesce(ii.kind_changed, ''), p.version, p.doc
 		FROM subscriptions s
 		JOIN remote_origins ro ON ro.id = s.remote_origin_id
 		JOIN imported_items ii ON ii.remote_origin_id = s.remote_origin_id
@@ -48,7 +48,7 @@ func (r *Reader) Snapshots(ctx context.Context, userID int64, ids []string) (map
 			doc, pinDoc         []byte
 			pinVersion          *int
 		)
-		if err := rows.Scan(&s.Origin, &roKind, &s.SourceTitle, &manifest, &s.ID, &kind, &state, &s.Version, &page, &doc, &pinVersion, &pinDoc); err != nil {
+		if err := rows.Scan(&s.Origin, &roKind, &s.SourceTitle, &manifest, &s.ID, &kind, &state, &s.Version, &page, &doc, &s.KindChanged, &pinVersion, &pinDoc); err != nil {
 			return nil, err
 		}
 		switch {

@@ -762,3 +762,49 @@ func TestMarkAllRead(t *testing.T) {
 		t.Fatalf("marking again marked %d, %v", n, err)
 	}
 }
+
+func TestAChangeOfKindIsRecorded(t *testing.T) {
+	// §13.3 (decision #100): a fragment fetched as a thread is a change of
+	// kind, which §5.3 forbids. Adopted, recorded, and kept for a quoter's
+	// warning; to and from withdrawn is not one.
+	g := newRig(t)
+	ctx := context.Background()
+	now := time.Date(2026, 11, 12, 12, 0, 0, 0, time.UTC)
+	a := &testblyg.Item{ID: idA, Kind: "fragment", Version: 1, ContentMD: "a leaf", Updated: now}
+	b := &testblyg.Item{ID: idB, Kind: "fragment", Version: 1, ContentMD: "another leaf", Updated: now}
+	g.b.Items = []*testblyg.Item{a, b}
+	g.subscribe()
+	g.poll()
+
+	a.Kind, a.Version, a.ContentMD = "thread", 2, "now it quotes"
+	b.Kind, b.Version, b.ContentMD = "withdrawn", 2, ""
+	g.b.Publish()
+	g.poll()
+	if ra := g.row(idA); ra.kind != "thread" || ra.version != 2 || !strings.Contains(ra.discrepancy, "change of kind") {
+		t.Fatalf("a change of kind must be adopted and recorded: %+v", ra)
+	}
+	if rb := g.row(idB); strings.Contains(rb.discrepancy, "change of kind") {
+		t.Fatalf("a withdrawal is not a change of kind: %+v", rb)
+	}
+	// Same version, same words, other kind: still a change of kind.
+	b.Kind, b.Version, b.ContentMD = "fragment", 3, "back"
+	g.b.Publish()
+	g.poll()
+	b.Kind = "thread"
+	g.b.Publish()
+	g.reconcileNext()
+	g.poll()
+	if rb := g.row(idB); rb.kind != "thread" || !strings.Contains(rb.discrepancy, "change of kind") {
+		t.Fatalf("a kind change at one version and hash: %+v", rb)
+	}
+	if _, err := g.r.Pool.Exec(ctx, `INSERT INTO subscriptions (user_id, remote_origin_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, g.uid, g.sid); err != nil {
+		t.Fatal(err)
+	}
+	snaps, err := g.r.Snapshots(ctx, g.uid, []string{idA, idB})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snaps[idA]) != 1 || snaps[idA][0].KindChanged != "fragment at v1, thread at v2" {
+		t.Fatalf("the snapshot must carry the change for the quoter: %+v", snaps[idA])
+	}
+}

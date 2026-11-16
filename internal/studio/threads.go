@@ -38,6 +38,9 @@ type Snapshot struct {
 	Pinned      bool
 	Author      json.RawMessage // the source's own, passed through (§5.5)
 	SourceTitle string          // the origin's title as we hold it, for cited.source
+	// KindChanged describes a change of kind the importer saw (§13.3,
+	// decision #100), or is "" when there was none.
+	KindChanged string
 	// Unusable is why §10.2 step 2 refuses this copy (withdrawn with
 	// nothing retained, or an L0 wrapper), or "" when it may be quoted.
 	Unusable string

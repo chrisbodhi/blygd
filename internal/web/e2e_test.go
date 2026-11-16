@@ -178,7 +178,7 @@ func TestPublishLifecycle(t *testing.T) {
 		t.Errorf("empty index: %s", idx.body)
 	}
 
-	id := alice.draft(t, map[string]any{"content_md": "Hello *world* <b>x</b> [link](../)"})
+	id := alice.draft(t, map[string]any{"content_md": "Hello *world* <b>x</b> [link](notes/)"})
 	expect(t, alice.get("items/"+id+".json"), 404) // drafts 404 (§4)
 
 	r := alice.api("POST", "/items/"+id+"/publish", map[string]any{"note": "first"})
@@ -189,7 +189,7 @@ func TestPublishLifecycle(t *testing.T) {
 		*d.Changelog[0].Note != "first" || d.Media == nil {
 		t.Fatalf("v1 doc: %+v", d)
 	}
-	if !strings.Contains(d.ContentHTML, "&lt;b&gt;") || !strings.Contains(d.ContentHTML, `href="`+alice.origin+`f/"`) {
+	if !strings.Contains(d.ContentHTML, "&lt;b&gt;") || !strings.Contains(d.ContentHTML, `href="`+alice.origin+`notes/"`) {
 		t.Errorf("content_html not escaped/absolute: %s", d.ContentHTML)
 	}
 

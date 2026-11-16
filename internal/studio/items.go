@@ -527,9 +527,7 @@ func (s *Studio) Publish(ctx context.Context, originID int64, id string, opts Pu
 				}
 				// §5.9: each remote entry carries its human half, frozen now.
 				c.Transclusions[i].Cited = cited(rs.quoted[t.Origin+" "+t.ID], at)
-				if !t.Pinned {
-					res.Warnings = append(res.Warnings, unpinnedQuote(t))
-				}
+				res.Warnings = append(res.Warnings, quoteWarnings(t, rs)...)
 			}
 			b, err := json.Marshal(c.Transclusions)
 			if err != nil {
@@ -618,10 +616,21 @@ func (s *Studio) Publish(ctx context.Context, originID int64, id string, opts Pu
 	return res, nil
 }
 
-// unpinnedQuote is §10.2's notice for a remote quote of an unpinned version.
-func unpinnedQuote(t *blyg.Target) string {
-	return fmt.Sprintf("![[%s]] quotes v%d at %s, which is not pinned: if it is withdrawn, this thread cannot be republished until the quote is removed (§10.2)",
-		t.ID, t.Version, t.Origin)
+// quoteWarnings is what the author should know about a remote quote: that
+// it is unpinned (§10.2 SHOULD), and that its origin changed its kind
+// (§13.3 SHOULD, decision #100), so it may carry words of third parties
+// the author never chose.
+func quoteWarnings(t *blyg.Target, rs *resolver) []string {
+	var out []string
+	if !t.Pinned {
+		out = append(out, fmt.Sprintf("![[%s]] quotes v%d at %s, which is not pinned: if it is withdrawn, this thread cannot be republished until the quote is removed (§10.2)",
+			t.ID, t.Version, t.Origin))
+	}
+	if snap := rs.quoted[t.Origin+" "+t.ID]; snap != nil && snap.KindChanged != "" {
+		out = append(out, fmt.Sprintf("![[%s]] changed kind at %s (%s), which §5.3 forbids: v%d is a %s, and what it quotes is baked into this thread with it (§13.3)",
+			t.ID, t.Origin, snap.KindChanged, t.Version, t.Kind))
+	}
+	return out
 }
 
 // built is a draft composed as publishing it now would compose it.
@@ -740,8 +749,8 @@ func (s *Studio) Preview(ctx context.Context, originID int64, id string, content
 			p.Problems = []blyg.Problem{}
 		}
 		for _, t := range b.Quoted {
-			if t.Origin != "" && !t.Pinned {
-				p.Warnings = append(p.Warnings, unpinnedQuote(t))
+			if t.Origin != "" {
+				p.Warnings = append(p.Warnings, quoteWarnings(t, b.rs)...)
 			}
 		}
 		return nil

@@ -194,7 +194,7 @@ func TestThreadsImported(t *testing.T) {
 	}
 	d := bob.itemDoc(t, th)
 	if !strings.Contains(d.ContentHTML, `data-blyg-id="`+pinned+`" data-blyg-version="1" data-blyg-origin="`+alice.origin+`"`) ||
-		!strings.Contains(d.ContentHTML, `href="`+alice.origin+`f/`+pinned+`/notes/"`) {
+		!strings.Contains(d.ContentHTML, `href="`+alice.origin+`notes/"`) { // §5.2: against the origin (decision #102)
 		t.Fatalf("remote bake: %s", d.ContentHTML)
 	}
 	refs := *d.Transclusions
@@ -687,4 +687,15 @@ func TestPreview(t *testing.T) {
 	tok = bob.api("POST", "/tokens", map[string]any{"name": "w", "scopes": []string{"items:write"}}).json(t)["token"].(string)
 	expect(t, (&user{e: e, token: tok, origin: bob.origin}).api("POST", "/items/"+th+"/preview", nil), 403)
 	expect(t, alice.api("POST", "/items/"+th+"/preview", nil), 404)
+
+	// §13.3 (decision #100): once the importer has seen alice's item change
+	// kind, quoting it warns before the bake, in a preview and a publish.
+	if _, err := e.pool.Exec(context.Background(), `UPDATE imported_items SET kind_changed = 'fragment at v1, thread at v2' WHERE item_id = $1`, f); err != nil {
+		t.Fatal(err)
+	}
+	r = bob.api("POST", "/items/"+th+"/preview", map[string]any{"content_md": "Mine.\n\n![[" + f + "]]"})
+	expect(t, r, 200)
+	if w := fmt.Sprint(r.json(t)["warnings"]); !strings.Contains(w, "changed kind") || !strings.Contains(w, "§5.3") {
+		t.Fatalf("a quote of an item that changed kind must warn: %s", w)
+	}
 }
