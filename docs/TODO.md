@@ -340,7 +340,17 @@ of people. Each fix has a test that fails without it.
 
 ## The week
 
-- [ ] Deploy what is merged here (A, B, E, F). None of it migrates, so the
+- [x] **GO-2026-6859** (an HTTP/1 server crash in `net/http`, reachable
+  from blygd's own handlers) is in go1.26.10, which the live binary was
+  built with. `go.mod` now names `toolchain go1.26.11`, which fixes it. The
+  full suite passes on go1.26.11. `make vuln` on go1.26.11 reports nothing
+  that affects the code (the owner's run; `vuln.go.dev` is blocked from this
+  container). The DEPLOYS.md row for this release names the toolchain and
+  the GO id, as the 2026-10-28 row does.
+- [x] `make interop` at `ed7d4ce`: all seven scenarios pass, the `~` mount
+  included, against blygger-studio 0.49.1 (`2582d73`). The reference is now
+  at 0.61.0, so rerun it against a current checkout before Friday.
+- [ ] Deploy what is merged here (A, B, C, E, F). None of it migrates, so the
   old binary is a full rollback. `make test-all` on Postgres 18 and
   `make vuln` first; then `scripts/deploy.sh --check`, `scripts/deploy.sh`,
   and the DEPLOYS.md row. Then set `BLYGD_BACKUP_PING_URL` and the uptime
