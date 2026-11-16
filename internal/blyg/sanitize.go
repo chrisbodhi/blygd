@@ -51,10 +51,12 @@ func PageHTML(contentHTML string) template.HTML {
 // so that damage stays inside the stranger's own bytes: an unclosed
 // <math> runs to its </math>, or to the end tag of any element that was
 // open outside it (the </p> or </blockquote> of the bake that holds it),
-// whichever comes first, and never past (review of PR #5). Whatever the
-// tokenizer reads as inside is dropped, so where it and a browser
-// disagree about MathML's foreign content, more is dropped, never less;
-// bluemonday still sanitizes what is kept.
+// whichever comes first, and never past (review of PR #5). Inside, no tag
+// starts raw text, as in foreign content. Where this reading and a
+// browser's still differ (raw text inside <mtext>, an HTML integration
+// point), the difference is only in how much of the stranger's math is
+// dropped: nothing is passed on unsanitized, because bluemonday sanitizes
+// every byte that is kept.
 func mathText(h string) string {
 	if !strings.Contains(strings.ToLower(h), "<math") {
 		return h
@@ -126,6 +128,12 @@ func mathText(h string) string {
 		// Inside a math element.
 		switch tt {
 		case html.StartTagToken:
+			// MathML is foreign content, where a browser reads style,
+			// script, textarea, title, xmp, plaintext and the rest as
+			// ordinary elements, never as raw text; read as raw text here,
+			// they would run the skip past every end tag to the end of
+			// the input (review of PR #5). The tree parser's own hook.
+			z.NextIsNotRawText()
 			switch {
 			case tok.Data == "math":
 				depth++

@@ -184,3 +184,14 @@ func TestAnUnclosedMathCannotEatTheQuotersWords(t *testing.T) {
 		t.Errorf("got %s", got)
 	}
 }
+
+func TestRawTextTagsInsideMathCannotEatTheQuotersWords(t *testing.T) {
+	// Review of PR #5: inside MathML a browser does not switch to raw text
+	// on these, so neither may the skip, or it runs to the end of input.
+	for _, tag := range []string{"<style>", "<textarea>", "<title>", "<script>", "<plaintext>", "<mtext><xmp>", "<noscript>", "<iframe>", "<noembed>", "<noframes>"} {
+		in := `<blockquote class="blyg-transclusion" data-blyg-id="x"><p>q <math>` + tag + `</p></blockquote><p>My words</p>`
+		if got := string(PageHTML(in)); !strings.Contains(got, "<p>My words</p>") {
+			t.Errorf("%s: %s", tag, got)
+		}
+	}
+}

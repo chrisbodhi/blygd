@@ -897,9 +897,11 @@ another directory of files, without touching a handler.
   damage stays inside the stranger's bytes: an unclosed `<math>` ends at
   its `</math>` or at the end tag of any element open outside it (the
   bake's own `</p>` or `</blockquote>`), never in the quoter's words after
-  the bake. Where the tokenizer and a browser disagree about foreign
-  content, more is dropped, never less, and bluemonday still sanitizes
-  what is kept. blygd's own renderer emits no MathML: `$…$` publishes as
+  the bake. Inside the skip no tag starts raw text, as in foreign content,
+  so a `<style>` or `<textarea>` inside `<math>` cannot run it to the end
+  of the input. Where this reading and a browser's still differ (raw text
+  inside `<mtext>`), it changes only how much of the stranger's math is
+  dropped: bluemonday sanitizes every byte kept. blygd's own renderer emits no MathML: `$…$` publishes as
   written.
 - **Text that reorders text** (§14, #103): a baked quote on a page gets
   `dir="auto"`, and a response's author and a hopper entry's author,
