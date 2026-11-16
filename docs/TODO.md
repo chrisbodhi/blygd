@@ -324,15 +324,21 @@ of people. Each fix has a test that fails without it.
     list made 20 minutes ago with ten entries done in the last minute.
   - `openapi.json` says the event stream ends within a heartbeat once its
     token is revoked or expires, and that a reconnect then answers 401.
-- [ ] **1. No takedown for a pinned version** while every studio token can
-  pin. Yours to decide before the launch: an operator serve-denylist (451,
-  rows and triggers untouched), and/or `items:pin` out of `STUDIO_SCOPES`
-  for the tester period.
-- [ ] **Per-user subscription ids.** The shared, sequential id lets a user
-  learn whether anyone here follows an origin; with ten users that is close
-  to "this person does". Per-user ids close it (a migration and an API
-  change); the instant backfill of an already-mirrored origin would remain
-  and should be named in DESIGN.md. Yours to decide.
+- [x] **1. No takedown for a pinned version.** Decided 2026-11-16: no
+  change. The hackathon group is high-trust and the chance of griefers is
+  low, so there's no takedown denylist and the studio keeps its Pin button.
+  DEPLOY.md already tells testers a pin is permanent.
+- [ ] **What one user can learn of another's subscriptions.** Waiting on
+  a decision. The mirror is shared, so subscribing to an origin tells a
+  user whether anyone here follows it, or ever did (mirror rows are never
+  collected), through four signals:
+  - the id, which is the shared, sequential remote-origin id;
+  - history and counts that are there at once;
+  - `last_polled_at`, earlier than the subscription's `created_at`;
+  - a poll-now refused within a minute of someone else's poll.
+
+  Per-user ids close only the first. Closing all four means hiding shared
+  mirror state per user. Accepting it means a paragraph in DESIGN.md.
 
 ## The week
 
