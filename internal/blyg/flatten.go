@@ -107,7 +107,25 @@ func FlattenFork(src ForkSource, link QuoteLink) (md string, exact bool) {
 	md = strings.Join(out, "\n")
 
 	cursor := 0
-	for i, span := range ownGenerated(tree) {
+	spans := ownGenerated(tree)
+	// A wrapper is a run of one generation's words, and a quote inside it
+	// divides it (§5.7, decision #102), so wrappers and generated[] entries
+	// need not pair. A model is carried over only where they do, or where
+	// every entry names the same one.
+	modelOf := func(i int) string {
+		if len(spans) == len(src.Generated) {
+			return src.Generated[i].Model
+		}
+		model := ""
+		for j, g := range src.Generated {
+			if j > 0 && g.Model != model {
+				return ""
+			}
+			model = g.Model
+		}
+		return model
+	}
+	for i, span := range spans {
 		var text string
 		if span.DataAtom == atom.Div {
 			text = strings.Join(f.blocks(children(span), src.Origin), "\n\n")
@@ -118,11 +136,7 @@ func FlattenFork(src ForkSource, link QuoteLink) (md string, exact bool) {
 		if text == "" || at < 0 {
 			return fallback()
 		}
-		model := ""
-		if i < len(src.Generated) {
-			model = src.Generated[i].Model
-		}
-		wrapped := impyrt(model, text)
+		wrapped := impyrt(modelOf(i), text)
 		md = md[:at] + wrapped + md[at+len(text):]
 		cursor = at + len(wrapped)
 	}

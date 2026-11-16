@@ -32,9 +32,11 @@ func RenderMarkdown(contentMD, pageURL string) (string, error) {
 }
 
 // RenderMarkdownIn is RenderMarkdown for an item of the origin at
-// originURL: a destination written media/… names one of the origin's media
-// objects (§5.4: media URLs are relative to the origin), so it resolves
-// against the origin, not the page.
+// originURL: a relative URL the author wrote resolves, by RFC 3986, against
+// the item's identity origin, never its page or its document's address
+// (§5.2, decision #102). That is the base page and media[].url already
+// resolve against, so media/… names one of the origin's media objects
+// (§5.4). pageURL is the base only when there is no origin.
 func RenderMarkdownIn(contentMD, pageURL, originURL string) (string, error) {
 	md := goldmark.New(
 		goldmark.WithExtensions(extension.Linkify),
@@ -70,22 +72,23 @@ func safeParser(pageURL, originURL string) parser.Parser {
 	)
 }
 
-// absoluteURLs rewrites link and image destinations to absolute URLs.
+// absoluteURLs rewrites link and image destinations to absolute URLs,
+// against the origin when there is one (§5.2), else against base.
 type absoluteURLs struct{ base, origin string }
 
 func (a absoluteURLs) Transform(doc *ast.Document, _ text.Reader, _ parser.Context) {
-	base, err := url.Parse(a.base)
-	if err != nil || a.base == "" {
+	baseURL := a.base
+	if a.origin != "" {
+		baseURL = a.origin
+	}
+	base, err := url.Parse(baseURL)
+	if err != nil || baseURL == "" {
 		return
 	}
-	origin, _ := url.Parse(a.origin)
 	abs := func(dest []byte) []byte {
 		ref, err := url.Parse(string(dest))
 		if err != nil {
 			return dest
-		}
-		if a.origin != "" && strings.HasPrefix(string(dest), "media/") {
-			return []byte(origin.ResolveReference(ref).String())
 		}
 		return []byte(base.ResolveReference(ref).String())
 	}

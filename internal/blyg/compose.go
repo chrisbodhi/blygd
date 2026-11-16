@@ -81,7 +81,7 @@ type Problem struct {
 type ComposeInput struct {
 	ContentMD  string // the draft, TK grammar included
 	Thread     bool
-	PageURL    string // the item's absolute page: links resolve against it
+	PageURL    string // the item's absolute page; links resolve against it only when Origin is ""
 	Origin     string // the publishing origin: media/… resolves against it (§5.4)
 	Resolve    Resolver
 	Generation []GenMeta
@@ -133,11 +133,18 @@ func Compose(in ComposeInput) (*Composed, error) {
 	}
 	stripped, spans := stripScopes(in.ContentMD, scopes)
 	c.out.ContentMD = stripped
-	for _, sp := range spans {
-		for _, l := range strings.Split(stripped[sp.start:sp.end], "\n") {
-			if id, _, _ := directiveAt(l); id != "" || reservedLine.MatchString(l) {
-				// §5.7 rule 3: generated prose and quotation are disjoint.
-				c.problem(strings.TrimSpace(l), "a directive inside generated text: move it outside the [TK] scope")
+	if in.Thread {
+		// Generated output may carry a directive on a line of its own, which
+		// transcludes like any other; the wrapper divides around the bake so
+		// that no quoted word is marked as generated, and the scope keeps
+		// its one generated[] entry (§5.7, decision #102).
+		spans = splitAroundDirectives(stripped, spans)
+	} else {
+		for _, sp := range spans {
+			for _, l := range strings.Split(stripped[sp.start:sp.end], "\n") {
+				if isDirectiveLine(l) {
+					c.problem(strings.TrimSpace(l), "a directive belongs to a thread (§10.1): publish this as a thread, or write the directive in code")
+				}
 			}
 		}
 	}
@@ -157,6 +164,54 @@ func Compose(in ComposeInput) (*Composed, error) {
 	c.out.ContentHTML = body
 	c.out.Links = c.linksInOrder(stripped)
 	return c.out, nil
+}
+
+// splitAroundDirectives divides each generated span around the directive
+// lines inside it, and the selection attached to each, so that a bake is
+// never inside a blyg-tk-gen wrapper (§5.7, decision #102). The pieces keep
+// their scope, and leading and trailing whitespace stays outside them.
+func splitAroundDirectives(md string, spans []genSpan) []genSpan {
+	lines := strings.Split(md, "\n")
+	starts := lineOffsets(lines)
+	var code []span
+	var out []genSpan
+	add := func(a, b, scope int) {
+		for a < b && strings.ContainsRune(" \t\r\n", rune(md[a])) {
+			a++
+		}
+		for b > a && strings.ContainsRune(" \t\r\n", rune(md[b-1])) {
+			b--
+		}
+		if a < b {
+			out = append(out, genSpan{a, b, scope})
+		}
+	}
+	for _, sp := range spans {
+		cur := sp.start
+		for i := 0; i < len(lines); i++ {
+			ls, le := starts[i], starts[i]+len(lines[i])
+			if ls < cur || le > sp.end || !isDirectiveLine(lines[i]) {
+				continue
+			}
+			if code == nil {
+				code = append(codeSpans(md), span{-1, -1})
+			}
+			if inSpans(code, ls+strings.IndexByte(lines[i], '!')) {
+				continue
+			}
+			end := le
+			if _, _, ok := labelledDirective(lines[i]); ok {
+				if _, next, ok := attachedQuote(lines, i); ok {
+					end = starts[next-1] + len(lines[next-1])
+					i = next - 1
+				}
+			}
+			add(cur, ls, sp.scope)
+			cur = min(end, sp.end)
+		}
+		add(cur, sp.end, sp.scope)
+	}
+	return out
 }
 
 // linksInOrder is links[]: one entry per resolved link, in document order
@@ -278,7 +333,7 @@ func (c *composer) refuseDirectives(md string) {
 	starts := lineOffsets(lines)
 	for i, l := range lines {
 		if id, _, at := directiveAt(l); id != "" && !inSpans(code, starts[i]+at) {
-			c.problem(strings.TrimSpace(l), "only threads transclude (§10): publish this as a thread, or use [["+id+"]] to link")
+			c.problem(strings.TrimSpace(l), "a directive belongs to a thread (§10.1, §5.3): publish this as a thread, use [["+id+"]] to link, or write the directive in code")
 		} else if reservedLine.MatchString(l) && !inSpans(code, starts[i]+strings.IndexByte(l, '!')) {
 			c.problem(strings.TrimSpace(l), "explicit versions (![[id@vN]]) are reserved (§10.1)")
 		}

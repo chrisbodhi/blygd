@@ -184,7 +184,7 @@ func TestReservedAndUnknown(t *testing.T) {
 
 func TestFragmentsDoNotTransclude(t *testing.T) {
 	out := compose(t, "![["+ownID+"]]", false)
-	if len(out.Problems) != 1 || !strings.Contains(out.Problems[0].Reason, "only threads transclude") {
+	if len(out.Problems) != 1 || !strings.Contains(out.Problems[0].Reason, "belongs to a thread") {
 		t.Fatalf("problems: %+v", out.Problems)
 	}
 }
@@ -281,7 +281,6 @@ func TestTKProblems(t *testing.T) {
 		"x [TK]never closed":                        "never closed",
 		"[TK]a [TK]b[/TK]":                          "cannot nest",
 		"[TK]write something[/TK]":                  "no output",
-		"[TK]impyrt=a\n![[" + ownID + "]]\nb[/TK]":  "inside generated text",
 		"[TK]from ![[" + draftID + "]][=]text[/TK]": "unknown item",
 	}
 	for md, want := range cases {
@@ -570,5 +569,44 @@ func TestLabelsArePlainText(t *testing.T) {
 	clean(t, out)
 	if !strings.Contains(out.ContentHTML, `data-blyg-label="*not* &lt;b&gt;x&lt;/b&gt; &amp; y"`) {
 		t.Errorf("directive label not escaped as text: %s", out.ContentHTML)
+	}
+}
+
+func TestABakeDividesTheGeneratedWrapper(t *testing.T) {
+	// §5.7 (decision #102): a directive in generated output transcludes, the
+	// wrapper closes before the bake and reopens after, and the scope keeps
+	// one generated[] entry.
+	md := "Mine.\n\n[TK]impyrt m-2=Para A.\n\n![[" + ownID + "]]\n> looks like from inside.\n\nPara B.[/TK]\n\nTail."
+	out := compose(t, md, true)
+	clean(t, out)
+	want := "<p>Mine.</p>\n" +
+		`<div class="blyg-tk-gen"><p>Para A.</p>` + "\n</div>\n\n" +
+		`<blockquote class="blyg-transclusion blyg-partial" data-blyg-id="` + ownID + `" data-blyg-version="3">` + "\n<p>looks like from inside.</p>\n</blockquote>\n" +
+		`<div class="blyg-tk-gen"><p>Para B.</p>` + "\n</div>\n" +
+		"<p>Tail.</p>\n"
+	if out.ContentHTML != want {
+		t.Fatalf("got\n%s\nwant\n%s", out.ContentHTML, want)
+	}
+	if len(out.Generated) != 1 || len(out.Transclusions) != 1 {
+		t.Fatalf("one scope, one quote: %+v %+v", out.Generated, out.Transclusions)
+	}
+	if out.ContentMD != "Mine.\n\nPara A.\n\n![["+ownID+"]]\n> looks like from inside.\n\nPara B.\n\nTail." {
+		t.Fatalf("wire content_md: %q", out.ContentMD)
+	}
+	// Inline, the span closes and reopens the same way.
+	out = compose(t, "Intro [TK]impyrt=said\n![["+ownID+"]]\nand more[/TK] tail.", true)
+	clean(t, out)
+	want = `<p>Intro <span class="blyg-tk-gen">said</span></p>` + "\n\n" +
+		`<blockquote class="blyg-transclusion" data-blyg-id="` + ownID + `" data-blyg-version="3">`
+	if !strings.HasPrefix(out.ContentHTML, want) || !strings.Contains(out.ContentHTML, `<p><span class="blyg-tk-gen">and more</span> tail.</p>`) {
+		t.Fatalf("inline span around a bake:\n%s", out.ContentHTML)
+	}
+	if strings.Count(out.ContentHTML, "blyg-tk-gen") != 2 {
+		t.Fatalf("a quoted word is marked generated: %s", out.ContentHTML)
+	}
+	// In a fragment a directive is a publish error wherever it stands.
+	out = compose(t, "[TK]impyrt=a\n![["+ownID+"]]\nb[/TK]", false)
+	if len(out.Problems) != 1 || !strings.Contains(out.Problems[0].Reason, "belongs to a thread") {
+		t.Fatalf("fragment: %+v", out.Problems)
 	}
 }

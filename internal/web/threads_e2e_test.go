@@ -163,7 +163,7 @@ func TestThreadsLocal(t *testing.T) {
 		t.Errorf("withdrawn source: %s", p)
 	}
 	frag := alice.draft(t, map[string]any{"content_md": "![[" + t2 + "]]"})
-	if p := problems(t, alice.publish(t, frag, 422)); !strings.Contains(p, "only threads transclude") {
+	if p := problems(t, alice.publish(t, frag, 422)); !strings.Contains(p, "belongs to a thread") {
 		t.Errorf("fragment directive: %s", p)
 	}
 

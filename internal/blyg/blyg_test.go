@@ -172,3 +172,24 @@ func TestMarshalKeepsHTML(t *testing.T) {
 		t.Errorf("HTML was escaped: %s", b)
 	}
 }
+
+func TestRelativeURLsResolveAgainstTheOrigin(t *testing.T) {
+	// §5.2 (decision #102): against the item's identity origin, by RFC 3986,
+	// never its page.
+	origin := "https://example.com/~me/"
+	got, err := RenderMarkdownIn("[a](notes/) [b](../x/) [c](/root) [d](#top) ![m](media/a.png)", origin+"t/abc/", origin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`href="https://example.com/~me/notes/"`,
+		`href="https://example.com/x/"`,
+		`href="https://example.com/root"`,
+		`href="https://example.com/~me/#top"`,
+		`src="https://example.com/~me/media/a.png"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %s in %s", want, got)
+		}
+	}
+}

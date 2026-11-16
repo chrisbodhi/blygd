@@ -139,3 +139,18 @@ func TestFlattenForkUsesTheDirectiveLabel(t *testing.T) {
 		t.Fatalf("attribution:\n%s", md)
 	}
 }
+
+func TestFlattenForkOfAGeneratedSpanAroundAQuote(t *testing.T) {
+	// §5.7 (decision #102): the quote divides the wrapper; the fork gets two
+	// disclosed scopes with the quote outside both, and the one model.
+	src := pinned(t, "[TK]impyrt m-2=Para A.\n\n![["+ownID+"]]\n\nPara B.[/TK]", GenMeta{})
+	md, _ := FlattenFork(src, quoteLink)
+	if strings.Count(md, "[TK]impyrt m-2=") != 2 {
+		t.Fatalf("both runs must stay disclosed with their model: %q", md)
+	}
+	c := compose(t, md, false)
+	clean(t, c)
+	if strings.Contains(c.ContentHTML, `blyg-tk-gen"><blockquote`) || strings.Count(c.ContentHTML, "blyg-tk-gen") != 2 {
+		t.Fatalf("the flattened quote must stay outside the generated runs: %s", c.ContentHTML)
+	}
+}
