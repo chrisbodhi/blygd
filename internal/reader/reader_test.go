@@ -2,6 +2,7 @@ package reader
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -806,5 +807,34 @@ func TestAChangeOfKindIsRecorded(t *testing.T) {
 	}
 	if len(snaps[idA]) != 1 || snaps[idA][0].KindChanged != "fragment at v1, thread at v2" {
 		t.Fatalf("the snapshot must carry the change for the quoter: %+v", snaps[idA])
+	}
+}
+
+func TestTextThatIsNotTextIsMalformed(t *testing.T) {
+	// §5.1 and §13.2 (decision #103): a content_md with a C0 control or an
+	// unpaired surrogate is malformed input: skipped, nothing changed, and
+	// never repaired into bytes the hash does not cover.
+	g := newRig(t)
+	now := time.Date(2026, 11, 12, 12, 0, 0, 0, time.UTC)
+	a := &testblyg.Item{ID: idA, Kind: "fragment", Version: 1, ContentMD: "fine", Updated: now}
+	b := &testblyg.Item{ID: idB, Kind: "fragment", Version: 1, ContentMD: "a bell\a", Updated: now}
+	g.b.Items = []*testblyg.Item{a, b}
+	g.subscribe()
+	g.r.PollNow(context.Background(), g.sid) // the bad document fails its part of the poll
+	if g.row(idA) == nil || g.row(idB) != nil {
+		t.Fatalf("the good document is imported and the bad one skipped: %v %v", g.row(idA), g.row(idB))
+	}
+
+	a.Version, a.ContentMD = 2, "fine, then not"
+	g.b.Publish()
+	path := "/blyg/items/" + idA + ".json"
+	g.b.S.Set(path, strings.Replace(mustGet(t, g.b, path), `"fine, then not"`, `"fine, then \ud800not"`, 1))
+	g.r.PollNow(context.Background(), g.sid)
+	if ra := g.row(idA); ra.version != 1 || g.docField(idA, "content_md") != "fine" {
+		t.Fatalf("a lone surrogate must not change stored state: %+v %q", ra, g.docField(idA, "content_md"))
+	}
+	_, err := g.r.ApplyDocument(context.Background(), g.sid, blyg.Surface{Origin: g.b.Origin()}, idA, []byte(mustGet(t, g.b, path)), g.b.Origin()+"items/"+idA+".json")
+	if !errors.Is(err, errMalformedText) {
+		t.Fatalf("want errMalformedText, got %v", err)
 	}
 }

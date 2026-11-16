@@ -70,6 +70,12 @@ func TestNormalizeOrigin(t *testing.T) {
 		"http://example.com:80/a/b/?q=1#f": "http://example.com/a/b/",
 		"https://example.com:8443/Chris/":  "https://example.com:8443/Chris/",
 		"http://[::1]:8080/x/":             "http://[::1]:8080/x/",
+		// §12.2 (decision #103): ASCII, an A-label, uppercase escapes, never
+		// decoded, path case kept.
+		"https://Bücher.example/café/":   "https://xn--bcher-kva.example/caf%C3%A9/",
+		"https://example.com/caf%c3%a9/": "https://example.com/caf%C3%A9/",
+		"https://example.com/%7ealice/":  "https://example.com/%7Ealice/",
+		"https://example.com/~alice/":    "https://example.com/~alice/",
 	}
 	for in, want := range cases {
 		got, err := NormalizeOrigin(in)

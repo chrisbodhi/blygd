@@ -101,6 +101,7 @@ type Composed struct {
 	Generated     []Generated // §5.7, scope order
 	Links         []Link      // §10.3a, document order
 	Problems      []Problem   // non-empty means do not publish
+	Warnings      []string    // publishable, but the author should know
 }
 
 // Compose turns a draft into a version. It never touches the network or a
@@ -133,6 +134,17 @@ func Compose(in ComposeInput) (*Composed, error) {
 	}
 	stripped, spans := stripScopes(in.ContentMD, scopes)
 	c.out.ContentMD = stripped
+	// §5.1 (decision #103): content_md is text.
+	if fault := PublishFault(stripped); fault != "" {
+		c.problem("content_md", "content_md holds "+fault+", which cannot be published as text (§5.1)")
+		return c.out, nil
+	}
+	if !IsNFC(stripped) {
+		c.out.Warnings = append(c.out.Warnings, "content_md is not in Unicode Normalization Form C: a quote or a search of it may not match what the eye sees (§5.1 SHOULD)")
+	}
+	if UnpairedBidi(stripped) {
+		c.out.Warnings = append(c.out.Warnings, "content_md opens or closes a bidirectional control it does not pair within its line, which reorders the text beside it wherever it is shown (§14)")
+	}
 	if in.Thread {
 		// Generated output may carry a directive on a line of its own, which
 		// transcludes like any other; the wrapper divides around the bake so
@@ -725,9 +737,8 @@ func AbsolutizeHTML(h, base string) string {
 }
 
 func clip(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
+	if cut, ok := Truncate(s, n); ok {
+		return cut + "…"
 	}
-	return string(r[:n]) + "…"
+	return s
 }

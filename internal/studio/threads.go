@@ -218,7 +218,7 @@ const citeExcerpt = 80
 
 // cited is the human half of a reference to a snapshot, frozen now (§5.9).
 func cited(s *Snapshot, at time.Time) *blyg.Cited {
-	c := &blyg.Cited{Source: s.SourceTitle, Excerpt: blyg.Excerpt(s.ContentHTML, citeExcerpt), URL: s.Page, Retrieved: blyg.Time(at)}
+	c := &blyg.Cited{Source: s.SourceTitle, Excerpt: capExcerpt(blyg.Excerpt(s.ContentHTML, citeExcerpt)), URL: s.Page, Retrieved: blyg.Time(at)}
 	var author struct {
 		Name string `json:"name"`
 	}
@@ -254,6 +254,11 @@ func stubAgreement(raw json.RawMessage, own string, refs []blyg.Reference) (json
 // citedExcerptCap is §5.9's SHOULD: an excerpt is a caption, near 200
 // characters, never a second quotation channel.
 const citedExcerptCap = 200
+
+// capExcerpt holds an excerpt counted in grapheme clusters to the cap, which
+// counts code points (§5.3): heavy combining text can need more than one
+// per cluster.
+func capExcerpt(s string) string { return blyg.Clip(s, citedExcerptCap) }
 
 // stubOf resolves a stub's target at creation and freezes what the author
 // saw: the version and the cited label (§10.6, §5.9). It returns the
@@ -367,9 +372,7 @@ func clientCited(raw json.RawMessage, now time.Time) (*blyg.Cited, error) {
 	} else {
 		c.Retrieved = blyg.Time(t)
 	}
-	if r := []rune(c.Excerpt); len(r) > citedExcerptCap {
-		c.Excerpt = string(r[:citedExcerptCap-1]) + "…"
-	}
+	c.Excerpt = blyg.Clip(c.Excerpt, citedExcerptCap) // §5.3: code points, clusters whole
 	return &c, nil
 }
 

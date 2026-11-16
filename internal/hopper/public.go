@@ -160,10 +160,4 @@ func deref(s *string) string {
 	return *s
 }
 
-func clip(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
-	}
-	return string(r[:n-1]) + "…"
-}
+func clip(s string, n int) string { return blyg.Clip(s, n) }

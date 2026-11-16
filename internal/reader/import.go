@@ -147,6 +147,9 @@ func (r *Reader) ApplyDocument(ctx context.Context, remoteID int64, s blyg.Surfa
 	if err := json.Unmarshal(body, &d); err != nil {
 		return ApplyResult{}, fmt.Errorf("item document %s: %w", itemID, err)
 	}
+	if err := checkText(body, d.ContentMD); err != nil {
+		return ApplyResult{}, fmt.Errorf("item document %s: %w", itemID, err)
+	}
 	if !knownKind(d.Kind) {
 		return ApplyResult{Outcome: "ignored"}, nil // §5.3, §13.1 rule 4
 	}
@@ -272,6 +275,29 @@ func (r *Reader) ApplyDocument(ctx context.Context, remoteID int64, s blyg.Surfa
 		return err
 	})
 	return res, err
+}
+
+// errMalformedText is a content_md that is not text (§5.1): a C0 control
+// other than tab, LF and CR, an unpaired surrogate, U+FFFE or U+FFFF. The
+// document is malformed input (§13.2): skipped like one that does not
+// parse, and nothing stored changes. Never normalized or repaired: a
+// reader holds only bytes the hash covers (§5.1).
+var errMalformedText = errors.New("content_md is not text (§5.1); the document is malformed input and is skipped (§13.2)")
+
+func checkText(body []byte, md *string) error {
+	if md == nil {
+		return nil
+	}
+	var raw struct {
+		ContentMD json.RawMessage `json:"content_md"`
+	}
+	if json.Unmarshal(body, &raw) == nil && blyg.LoneSurrogate(raw.ContentMD) {
+		return fmt.Errorf("%w: an unpaired surrogate", errMalformedText)
+	}
+	if fault := blyg.TextFault(*md); fault != "" {
+		return fmt.Errorf("%w: %s", errMalformedText, fault)
+	}
+	return nil
 }
 
 func joinNotes(notes []string) any {

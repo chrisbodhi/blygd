@@ -196,11 +196,8 @@ func shownResponses(ctx context.Context, tx pgx.Tx, itemID string) ([]blyg.PageR
 			Name string `json:"name"`
 		}
 		_ = json.Unmarshal(author, &a)
-		name := []rune(strings.TrimSpace(a.Name))
-		if len(name) > authorCap {
-			name = append(name[:authorCap-1], '…')
-		}
-		out = append(out, blyg.PageResponse{Verb: responseVerbs[rel], Author: string(name), Host: host, URL: link})
+		name := blyg.Clip(strings.TrimSpace(a.Name), authorCap) // §5.3: no cluster split
+		out = append(out, blyg.PageResponse{Verb: responseVerbs[rel], Author: name, Host: host, URL: link})
 	}
 	return out, rows.Err()
 }
