@@ -265,6 +265,39 @@ Tell testers, before their first publish:
   everything in the database, drafts included.
 - After an upgrade that widens the studio's token, sign out of the studio
   and back in once.
+- What other testers can and cannot see of their reading: the section below,
+  in words they can take as they are.
+
+### What testers can see of each other
+
+Tell testers this as it stands; it is accurate and complete.
+
+**Private to you.** No other tester can list, open or change your
+subscriptions, what you call them, what you have read, your imports, your
+private hoppers, your drafts, your tokens, or how you moderate the mentions
+you receive. Every route of the API is tested for exactly that: another
+user's ids answer as if they did not exist.
+
+**Public because you chose it.** Your published items, your blogroll if you
+add subscriptions to it, and any hopper you make public. A public hopper
+lists items from blygs you follow, so it shows that you follow them.
+
+**What another tester can work out.** blygd keeps one shared copy of each
+blyg it reads, fetched once for everyone who follows it, so that a blyg's
+author is not polled once per reader. Because of that, when you subscribe
+to a blyg you can tell whether someone here already follows it, or once
+did: it arrives with its history already in place, its last poll is older
+than your subscription, and a "poll now" can be refused because someone
+else polled it in the last minute. You learn *that someone here reads it*,
+never who, how many, or what they have read. It is the same thing you could
+learn by asking the room "does anyone here read X?", and the room is small.
+
+**What the operator can see.** Everything in the database, drafts and
+subscriptions included, and they can act as any user (the commands above).
+That is true of every hosted service; here it is said out loud.
+
+DESIGN.md ("What one user can infer of another's reading") has the reasons,
+and what closing it would cost.
 
 ### A room on one address
 

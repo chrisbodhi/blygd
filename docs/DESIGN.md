@@ -240,6 +240,39 @@ within a minute of its last poll (the mirror is shared, so one tenant
 cannot hammer an origin for everyone), and while another poll of it
 runs. `poll_lease_until` marks a poll in flight.
 
+**What one user can infer of another's reading.** Subscriptions are
+private overlay (plane 3): no request lets one user list, read or change
+another's subscriptions, display titles, read marks, imports or private
+hoppers, and `TestTenantsAreIsolated` holds every route to that. The mirror
+under them (plane 2) is shared on purpose, so that ten readers of one blyg
+cost it one poll (§12.3). So a user who subscribes to an origin can tell
+whether the instance already had it in the mirror. They can tell from four
+things:
+
+- **The subscription id**, which is the shared `remote_origins` id. Ids are
+  assigned in order, so a low one means the origin was mirrored earlier.
+- **History at once.** A newly mirrored origin's items arrive over its first
+  polls; an origin already mirrored comes with its items and counts in place.
+- **`last_polled_at`** earlier than the subscription's own `created_at`.
+- **Poll-now refused** (`TooSoon`) within a minute of another user's poll of
+  the same origin, because the floor protects the publisher, not the user.
+
+What this tells them is that someone on this instance follows that origin,
+or once did, since mirror rows are never collected (Phase 2, left for
+later). It never tells them who, how many, or what anyone read, and none of
+it is visible outside the instance. A user's public blogroll (§11) and
+public hoppers (§13.5) do name what they follow, and only because they chose
+to publish them.
+
+**Why it stays.** Hiding it would mean a separate view of the mirror per user:
+ids of their own, no history until their own subscription has polled,
+per-user poll times and a per-user poll-now floor. That gives up most of what
+sharing the mirror buys, the publisher's single poll included, to close an
+inference that, among a few people who know each other, is a question they
+could ask out loud. Revisit it if an instance hosts people who must not
+learn even that much about each other. Per-user subscription ids alone would
+close only the first signal.
+
 **The poller** leases due remote origins with the mention workers'
 pattern, and only origins someone subscribes to. Every URL it fetches
 comes from the stored manifest through `blyg.Surface`: `feed` and `items`

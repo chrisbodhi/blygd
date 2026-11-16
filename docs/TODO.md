@@ -328,14 +328,12 @@ of people. Each fix has a test that fails without it.
   change. The hackathon group is high-trust and the chance of griefers is
   low, so there's no takedown denylist and the studio keeps its Pin button.
   DEPLOY.md already tells testers a pin is permanent.
-- [ ] **What one user can learn of another's subscriptions.** Waiting on
-  a decision. The mirror is shared, so subscribing to an origin tells a
-  user whether anyone here follows it, or ever did (mirror rows are never
-  collected), through four signals:
-  - the id, which is the shared, sequential remote-origin id;
-  - history and counts that are there at once;
-  - `last_polled_at`, earlier than the subscription's `created_at`;
-  - a poll-now refused within a minute of someone else's poll.
+- [x] **What one user can learn of another's subscriptions.** Decided
+  2026-11-16: accepted and documented, not closed. DESIGN.md, "What one
+  user can infer of another's reading", lists the four signals, what they
+  never reveal, and what closing them would cost. DEPLOY.md, "What testers
+  can see of each other", says what is private, what is public by choice,
+  what can be worked out, and what the operator sees.
 
   Per-user ids close only the first. Closing all four means hiding shared
   mirror state per user. Accepting it means a paragraph in DESIGN.md.
