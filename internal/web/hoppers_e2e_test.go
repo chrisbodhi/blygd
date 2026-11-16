@@ -165,8 +165,8 @@ func TestHopperFeeds(t *testing.T) {
 	r = alice.get(feed)
 	expect(t, r, 200)
 	body := string(r.body)
-	if ct := r.header.Get("Content-Type"); !strings.HasPrefix(ct, "application/rss+xml") {
-		t.Errorf("content type %q", ct)
+	if ct := r.header.Get("Content-Type"); !strings.HasPrefix(ct, "application/rss+xml") || r.header.Get("Access-Control-Allow-Origin") != "*" {
+		t.Errorf("headers: %v", r.header)
 	}
 	if strings.Contains(body, "blyg:") || strings.Contains(body, blyg.Namespace) {
 		t.Errorf("rule (b): no blyg: namespace anywhere, own items included:\n%s", body)

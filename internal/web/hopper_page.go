@@ -163,6 +163,9 @@ func (h *Surface) serveHopperFeed(w http.ResponseWriter, r *http.Request, o *stu
 	hd.Set("ETag", etag)
 	hd.Set("Cache-Control", "no-cache") // live, like the page
 	hd.Set("X-Content-Type-Options", "nosniff")
+	// §4: public XML SHOULD carry permissive CORS, as feed.xml does.
+	hd.Set("Access-Control-Allow-Origin", "*")
+	hd.Set("Access-Control-Expose-Headers", "ETag")
 	if etagMatch(r.Header.Get("If-None-Match"), etag) {
 		w.WriteHeader(http.StatusNotModified)
 		return
