@@ -60,7 +60,7 @@ func TestPublicHoppers(t *testing.T) {
 	expect(t, r, 200)
 	body := string(r.body)
 	for _, want := range []string{"Alice&#39;s own note.", "Bob, pinned.", "Bob, unpinned.", "harmless words",
-		`<a href="` + bob.origin + `f/` + pinned + `/">read it there</a>`, `<a href="` + bob.origin + `">Bob&#39;s blyg</a>`} {
+		`<a href="` + bob.origin + `f/` + pinned + `/">read it there</a>`, `<a href="` + bob.origin + `"><bdi>Bob&#39;s blyg</bdi></a>`} { // §14: isolated
 		if !strings.Contains(body, want) {
 			t.Errorf("public hopper lacks %q:\n%s", want, body)
 		}

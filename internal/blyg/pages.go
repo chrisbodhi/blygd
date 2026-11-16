@@ -137,7 +137,7 @@ var permalinkTmpl = template.Must(template.New("permalink").Funcs(pageFuncs).Par
 <section class="responses"><h2 class="meta">Responses</h2>
 <ul class="meta">
 {{- range .Item.Responses}}
-<li>{{if .Author}}{{.Author}}, at {{end}}<a href="{{.URL}}" rel="nofollow ugc">{{.Host}}</a>, {{.Verb}}</li>
+<li>{{if .Author}}<bdi>{{.Author}}</bdi>, at {{end}}<a href="{{.URL}}" rel="nofollow ugc">{{.Host}}</a>, {{.Verb}}</li>
 {{- end}}
 </ul></section>
 {{- end}}

@@ -384,7 +384,7 @@ func TestPageHTML(t *testing.T) {
 			t.Errorf("page HTML kept %q: %s", bad, got)
 		}
 	}
-	if !strings.Contains(got, `<blockquote class="blyg-transclusion blyg-partial" data-blyg-id="`+remoteID+`" data-blyg-version="1" data-blyg-origin="https://pi.test/">`) {
+	if !strings.Contains(got, `<blockquote dir="auto" class="blyg-transclusion blyg-partial" data-blyg-id="`+remoteID+`" data-blyg-version="1" data-blyg-origin="https://pi.test/">`) {
 		t.Errorf("the bake's wire attributes must survive: %s", got)
 	}
 	// Our own renderer's output passes through unchanged.

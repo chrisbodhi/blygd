@@ -38,8 +38,8 @@ var hopperTmpl = template.Must(template.New("hopper").Funcs(template.FuncMap{"ti
 {{- if .View.Entries}}
 <ol>
 {{- range .View.Entries}}
-<li><p>{{.Excerpt}}</p>
-<p class="meta">{{if .Author}}{{.Author}} · {{end}}{{if .Origin}}<a href="{{.Origin}}">{{if .Source}}{{.Source}}{{else}}{{.Origin}}{{end}}</a>{{end}}
+<li><p dir="auto">{{.Excerpt}}</p>
+<p class="meta">{{if .Author}}<bdi>{{.Author}}</bdi> · {{end}}{{if .Origin}}<a href="{{.Origin}}">{{if .Source}}<bdi>{{.Source}}</bdi>{{else}}{{.Origin}}{{end}}</a>{{end}}
 {{- if .URL}} · <a href="{{.URL}}">read it there</a>{{end}}{{if .Note}} · {{.Note}}{{end}} · added {{time .AddedAt}}</p></li>
 {{- end}}
 </ol>

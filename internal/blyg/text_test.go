@@ -103,3 +103,37 @@ func TestComposeRefusesWhatIsNotText(t *testing.T) {
 		t.Fatalf("NFC text warned: %+v", out.Warnings)
 	}
 }
+
+func TestPagesNeverPassMathThroughUnexamined(t *testing.T) {
+	// §14 (decision #105): a math element is kept under an allowlist,
+	// redrawn, replaced by its TeX as text, or dropped. Ours replace or drop.
+	formula := `<p>Euler: <math><semantics><mrow><msup><mi>e</mi><mrow><mi>i</mi><mi>π</mi></mrow></msup><mo>+</mo><mn>1</mn><mo>=</mo><mn>0</mn></mrow>` +
+		`<annotation encoding="application/x-tex">e^{i\pi} + 1 = 0</annotation></semantics></math>, famously.</p>`
+	got := string(PageHTML(formula))
+	if !strings.Contains(got, `<code>e^{i\pi} + 1 = 0</code>, famously.`) || strings.Contains(got, "msup") || strings.Contains(got, "<math") {
+		t.Errorf("inline formula: %s", got)
+	}
+	block := `<math display="block"><semantics><mi>x</mi><annotation encoding="application/x-tex">x &lt; y</annotation></semantics></math>`
+	if got := string(PageHTML(block)); got != "<pre><code>x &lt; y</code></pre>" {
+		t.Errorf("display formula: %q", got)
+	}
+	// No annotation: dropped whole, not left as loose presentation text.
+	if got := string(PageHTML(`<p>a<math><mi>x</mi><mn>2</mn></math>b</p>`)); got != "<p>ab</p>" {
+		t.Errorf("formula without TeX: %q", got)
+	}
+	// The classic: markup inert in one vocabulary and live in the other.
+	for _, attack := range []string{
+		`<math><mtext><table><mglyph><style><img src=x onerror=alert(1)>`,
+		`<math><annotation-xml encoding="text/html"><img src=x onerror=alert(1)></annotation-xml></math>`,
+		`<math><maction actiontype="statusline" xlink:href="javascript:alert(1)">x</maction></math>`,
+		`<math><annotation encoding="application/x-tex"><img src=x onerror=alert(1)></annotation></math>`,
+		`<MATH><mi>x</mi></MATH><img src=x onerror=alert(1)>`,
+	} {
+		got := string(PageHTML(attack))
+		for _, bad := range []string{"onerror", "javascript:", "<math", "<style", "annotation"} {
+			if strings.Contains(strings.ToLower(got), bad) {
+				t.Errorf("%s\n  kept %q: %s", attack, bad, got)
+			}
+		}
+	}
+}
