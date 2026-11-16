@@ -40,6 +40,9 @@ type Surface struct {
 	Scheme     string
 	TrustProxy bool
 	Log        *slog.Logger
+	// Home is the page at the host root (HomePage), served when no origin
+	// is mounted there. Nil serves nothing.
+	Home []byte
 }
 
 var percentTilde = regexp.MustCompile(`%7[Ee]`)
@@ -83,6 +86,10 @@ func (h *Surface) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				http.Redirect(w, r, o2.BaseURL, http.StatusMovedPermanently)
 				return
 			}
+		}
+		if r.URL.Path == "/" && (r.Method == http.MethodGet || r.Method == http.MethodHead) && h.Home != nil {
+			serveHome(w, h.Home)
+			return
 		}
 		http.NotFound(w, r)
 		return

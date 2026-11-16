@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/chrisbodhi/blygd/internal/blyg"
 )
@@ -43,7 +44,14 @@ type Config struct {
 	// RateLimits turns the request budgets on (BLYGD_RATE_LIMITS, default
 	// true). Off is for test harnesses only (scripts/interop).
 	RateLimits bool
+	// OperatorLinks are the host operator's own pages, listed on the page
+	// at the host root with rel="me" (BLYGD_OPERATOR_LINKS: comma-separated
+	// Label=https://url pairs, e.g. "Mastodon=https://social.example/@me").
+	OperatorLinks []Link
 }
+
+// Link is a labelled absolute http(s) URL.
+type Link struct{ Label, URL string }
 
 // Load reads the environment.
 func Load() (*Config, error) {
@@ -69,6 +77,9 @@ func Load() (*Config, error) {
 	}
 	if c.Level, err = intEnv("BLYGD_LEVEL", 2); err != nil {
 		return nil, err
+	}
+	if c.OperatorLinks, err = parseLinks(os.Getenv("BLYGD_OPERATOR_LINKS")); err != nil {
+		return nil, fmt.Errorf("BLYGD_OPERATOR_LINKS: %w", err)
 	}
 	if c.DatabaseURL == "" {
 		return nil, errors.New("BLYGD_DATABASE_URL is required")
@@ -108,4 +119,27 @@ func intEnv(k string, def int) (int, error) {
 		return 0, fmt.Errorf("%s: %w", k, err)
 	}
 	return n, nil
+}
+
+// parseLinks reads comma-separated Label=URL pairs. A label holds neither
+// "=" nor ","; a URL must be absolute http or https.
+func parseLinks(v string) ([]Link, error) {
+	var links []Link
+	for pair := range strings.SplitSeq(v, ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		label, raw, ok := strings.Cut(pair, "=")
+		label, raw = strings.TrimSpace(label), strings.TrimSpace(raw)
+		if !ok || label == "" {
+			return nil, fmt.Errorf("%q is not Label=URL", pair)
+		}
+		u, err := url.Parse(raw)
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+			return nil, fmt.Errorf("%s: %q is not an absolute http(s) URL", label, raw)
+		}
+		links = append(links, Link{Label: label, URL: u.String()})
+	}
+	return links, nil
 }
