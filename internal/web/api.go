@@ -697,7 +697,22 @@ func (a *API) patchHopper(w http.ResponseWriter, r *http.Request) error {
 	if in.Name == nil && in.Public == nil {
 		return badRequest("give name, public, or both")
 	}
-	var h *hopper.Hopper
+	o, err := a.origin(r)
+	if err != nil {
+		return err
+	}
+	// The manifest names public hoppers (§6.1), and MUST NOT name one that
+	// is not public: unlist before going private, list after going public,
+	// so a failure between the two can only leave a public hopper unlisted.
+	h, _, err := a.Hoppers.Get(r.Context(), p.UserID, id)
+	if err != nil {
+		return err
+	}
+	if in.Public != nil && !*in.Public {
+		if err := a.Studio.SetPublicHopper(r.Context(), o.ID, h.Slug, "", false); err != nil {
+			return err
+		}
+	}
 	if in.Name != nil {
 		if h, err = a.Hoppers.Rename(r.Context(), p.UserID, id, *in.Name); err != nil {
 			return err
@@ -705,6 +720,12 @@ func (a *API) patchHopper(w http.ResponseWriter, r *http.Request) error {
 	}
 	if in.Public != nil {
 		if h, err = a.Hoppers.SetPublic(r.Context(), p.UserID, id, *in.Public); err != nil {
+			return err
+		}
+	}
+	if h.Public {
+		// Going public, or a public hopper renamed: its entry follows.
+		if err := a.Studio.SetPublicHopper(r.Context(), o.ID, h.Slug, h.Name, true); err != nil {
 			return err
 		}
 	}
@@ -717,7 +738,22 @@ func (a *API) deleteHopper(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if err := a.Hoppers.Delete(r.Context(), principal(r.Context()).UserID, id); err != nil {
+	uid := principal(r.Context()).UserID
+	h, _, err := a.Hoppers.Get(r.Context(), uid, id)
+	if err != nil {
+		return err
+	}
+	if h.Public {
+		// Unlisted first (§6.1), as for going private.
+		o, err := a.origin(r)
+		if err != nil {
+			return err
+		}
+		if err := a.Studio.SetPublicHopper(r.Context(), o.ID, h.Slug, "", false); err != nil {
+			return err
+		}
+	}
+	if err := a.Hoppers.Delete(r.Context(), uid, id); err != nil {
 		return err
 	}
 	w.WriteHeader(http.StatusNoContent)

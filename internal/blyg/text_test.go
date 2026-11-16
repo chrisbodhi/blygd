@@ -1,8 +1,12 @@
 package blyg
 
 import (
+	"bytes"
+	"encoding/xml"
+	"io"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
 
@@ -135,5 +139,32 @@ func TestPagesNeverPassMathThroughUnexamined(t *testing.T) {
 				t.Errorf("%s\n  kept %q: %s", attack, bad, got)
 			}
 		}
+	}
+}
+
+func TestHopperFeedIsWellFormedAndPlain(t *testing.T) {
+	// §13.5 rules (b) and (d): no blyg: namespace, one guid per membership,
+	// <source> for others' members, an excerpt and a link. An imported
+	// noncharacter, which a reader accepts (§5.1), must not break the XML.
+	at := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	body := RenderHopperFeed(HopperFeed{Title: "Reads", Page: "https://h.test/~a/h/reads/", Origin: "https://h.test/~a/", Site: "A's", BuiltAt: at},
+		[]HopperFeedEntry{
+			{Identity: "https://b.test/", ID: remoteID, Link: "https://b.test/f/" + remoteID + "/", Excerpt: "Theirs ￾ & <b>", SourceFeed: "https://b.test/feed.xml", Source: "B", Author: "Bee", AddedAt: at},
+			{Identity: "https://h.test/~a/", ID: ownID, Link: "https://h.test/~a/f/" + ownID + "/", Excerpt: "Mine", Own: true, AddedAt: at.Add(-time.Hour)},
+		})
+	d := xml.NewDecoder(bytes.NewReader(body))
+	for {
+		if _, err := d.Token(); err == io.EOF {
+			break
+		} else if err != nil {
+			t.Fatalf("not well-formed XML: %v\n%s", err, body)
+		}
+	}
+	s := string(body)
+	if strings.Contains(s, "blyg:") || strings.Contains(s, Namespace) || strings.Count(s, "<source ") != 1 || strings.Count(s, "<guid ") != 2 {
+		t.Errorf("feed:\n%s", s)
+	}
+	if HopperGUID("p", "o", "i") == HopperGUID("p", "o", "j") || HopperGUID("p", "o", "i") != HopperGUID("p", "o", "i") {
+		t.Error("a guid is derived from the hopper, origin and id, and stable")
 	}
 }

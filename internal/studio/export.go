@@ -72,6 +72,7 @@ func (s *Studio) Export(ctx context.Context, originID int64, w io.Writer) error 
 		}
 		static := *o
 		static.AcceptMentions = false
+		static.static = true
 		if err := s.renderAllTo(ctx, tx, files, &static); err != nil {
 			return err
 		}

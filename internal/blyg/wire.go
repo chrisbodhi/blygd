@@ -137,8 +137,24 @@ type Manifest struct {
 	Items        string          `json:"items"`
 	Blogroll     string          `json:"blogroll,omitempty"`
 	Webmention   string          `json:"webmention,omitempty"`
-	Updated      string          `json:"updated"`
+	// Hoppers lists the public hoppers, only when there is one (§6.1,
+	// decision #86).
+	Hoppers []ManifestHopper `json:"hoppers,omitempty"`
+	Updated string           `json:"updated"`
 }
+
+// ManifestHopper is one entry of the manifest's hoppers list (§6.1): a
+// public hopper's title, its page and its hopper feed, origin-relative.
+type ManifestHopper struct {
+	Title string `json:"title"`
+	Page  string `json:"page"`
+	Feed  string `json:"feed,omitempty"`
+}
+
+// HopperPage and HopperFeedPath are where a public hopper and its feed live,
+// origin-relative: h/{slug}/, the reference client's convention (§6.1).
+func HopperPage(slug string) string     { return "h/" + slug + "/" }
+func HopperFeedPath(slug string) string { return HopperPage(slug) + "feed.xml" }
 
 // IndexEntry is one row of items/index.json (§6.2).
 type IndexEntry struct {

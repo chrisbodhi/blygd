@@ -37,12 +37,18 @@ func (s *Store) SetPublic(ctx context.Context, userID, id int64, public bool) (*
 // PublicEntry is one shown member.
 type PublicEntry struct {
 	Excerpt string // plain text
-	URL     string // the item's page at its origin
+	URL     string // the item's page at its origin, else its item document (§5.8, §6.1); an L0 entry's own link
 	Origin  string // where the attribution links
 	Source  string // the origin's title, as we hold it
 	Author  string // the item's own author.name, passed through (§5.5)
 	Note    string // e.g. "withdrawn; pinned v2", "plain RSS"
 	AddedAt time.Time
+
+	// What a hopper feed needs besides (§13.5 rule (d)).
+	Own        bool   // one of the owner's own items
+	Identity   string // the member's identity origin; an L0 entry's feed URL
+	ItemID     string // the member's id; an L0 entry's synthetic one
+	SourceFeed string // the member origin's feed, for <source>; "" when Own
 }
 
 // PublicView is a public hopper as its page shows it.
@@ -72,8 +78,8 @@ func (s *Store) Public(ctx context.Context, ownerID int64, slug string) (*Public
 		return nil, err
 	}
 	rows, err := s.Pool.Query(ctx, `SELECT m.added_at,
-			o.base_url, o.title, v.author, i.page, v.content_html,
-			r.identity_url, coalesce(r.site_url, r.identity_url), r.title, ii.kind, ii.state, ii.page_url, ii.doc, p.version, p.doc
+			i.id, o.base_url, o.title, v.author, i.page, v.content_html,
+			r.identity_url, coalesce(r.site_url, r.identity_url), r.title, r.manifest, ii.item_id, ii.kind, ii.state, ii.page_url, ii.doc, p.version, p.doc
 		FROM hopper_members m
 		LEFT JOIN items i ON i.id = m.own_item_id AND i.version > 0 AND NOT i.withdrawn
 		LEFT JOIN origins o ON o.id = i.origin_id
@@ -91,22 +97,40 @@ func (s *Store) Public(ctx context.Context, ownerID int64, slug string) (*Public
 	defer rows.Close()
 	for rows.Next() {
 		var (
-			e                                   PublicEntry
-			ownBase, ownTitle, ownPage, ownHTML *string
-			ownByline                           []byte
-			rOrigin, rSite, rTitle              *string
-			iKind, iState, iPage                *string
-			doc, pinDoc                         []byte
-			pinVersion                          *int
+			e                                          PublicEntry
+			ownID, ownBase, ownTitle, ownPage, ownHTML *string
+			ownByline, manifest                        []byte
+			rOrigin, rSite, rTitle, iID                *string
+			iKind, iState, iPage                       *string
+			doc, pinDoc                                []byte
+			pinVersion                                 *int
 		)
-		if err := rows.Scan(&e.AddedAt, &ownBase, &ownTitle, &ownByline, &ownPage, &ownHTML,
-			&rOrigin, &rSite, &rTitle, &iKind, &iState, &iPage, &doc, &pinVersion, &pinDoc); err != nil {
+		if err := rows.Scan(&e.AddedAt, &ownID, &ownBase, &ownTitle, &ownByline, &ownPage, &ownHTML,
+			&rOrigin, &rSite, &rTitle, &manifest, &iID, &iKind, &iState, &iPage, &doc, &pinVersion, &pinDoc); err != nil {
 			return nil, err
+		}
+		if rOrigin != nil {
+			e.Identity, e.ItemID = *rOrigin, deref(iID)
+			if *iKind == "l0" {
+				e.SourceFeed = *rOrigin // an L0 subscription's identity is its feed (§13.6)
+			} else {
+				e.SourceFeed = blyg.SurfaceOf(*rOrigin, manifest).FeedURL()
+			}
+		}
+		// An imported member with no page is linked by its item document,
+		// where its origin's manifest puts it; a permalink is never guessed
+		// (§5.8, §13.5 rule (d), decision #102).
+		page := func() string {
+			if iPage != nil {
+				return *iPage
+			}
+			return blyg.SurfaceOf(*rOrigin, manifest).ItemURL(*iID)
 		}
 		switch {
 		case ownBase != nil:
 			e.Origin, e.URL, e.Source = *ownBase, *ownBase+*ownPage, deref(ownTitle)
 			e.Excerpt, e.Author = blyg.Excerpt(*ownHTML, excerptLen), authorName(ownByline)
+			e.Own, e.Identity, e.ItemID = true, *ownBase, *ownID
 		case rOrigin != nil && *iKind == "l0":
 			// §13.6: a wrapper around a legacy feed's summary, marked as one.
 			var d struct {
@@ -120,10 +144,10 @@ func (s *Store) Public(ctx context.Context, ownerID int64, slug string) (*Public
 				e.Excerpt = clip(d.SummaryText, excerptLen)
 			}
 		case rOrigin != nil && *iState == "current":
-			e.Origin, e.Source, e.URL = *rOrigin, deref(rTitle), deref(iPage)
+			e.Origin, e.Source, e.URL = *rOrigin, deref(rTitle), page()
 			e.Excerpt, e.Author = docExcerpt(doc)
 		case rOrigin != nil && pinVersion != nil:
-			e.Origin, e.Source, e.URL = *rOrigin, deref(rTitle), deref(iPage)
+			e.Origin, e.Source, e.URL = *rOrigin, deref(rTitle), page()
 			e.Excerpt, e.Author = docExcerpt(pinDoc)
 			e.Note = "withdrawn by its author; pinned v" + strconv.Itoa(*pinVersion)
 		default:
