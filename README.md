@@ -7,13 +7,13 @@ headless — clients talk to it over a scoped-token API — and
 multi-tenant, with each user owning one path-mounted origin.
 
 Status: Phases 1–3 and 5 of [docs/PLAN.md](docs/PLAN.md), and most of
-Phase 4. It speaks protocol 0.4. Fragments, pins, withdrawal, the full
+Phase 4. It speaks protocol 0.4, to its sixteenth revision (2026-11-13). Fragments, pins, withdrawal, the full
 static surface, Webmentions in both directions, hoppers, the reader
 (subscriptions, OPML and blogroll imports, the import mirror, a merged
 reading feed, the blogroll), threads (transclusion across origins, partial
 quotes, labelled `[[id]]` links, stubs, generation provenance, fork
 flattening, draft preview), media, pinned version pages, shown responses,
-public hoppers and static export work. Custom domains, OAuth-style token
+public hoppers with their feeds, and static export work. Custom domains, OAuth-style token
 approval and an MCP transport (the rest of Phase 4) are next.
 
 ## Run it

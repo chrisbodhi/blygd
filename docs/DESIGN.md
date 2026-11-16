@@ -6,7 +6,9 @@ reader, hoppers and Webmentions together. It is headless — every client
 multi-tenant, with each user owning one origin.
 
 Spec references (§) are to `blygger-spec` `docs/protocol-v0.4.md`, read at
-commit `24b9770` (2026-10-20, its sixth revision) for Phase 5. Phases 1–3
+commit `9fa1d7e` (2026-11-13, its sixteenth revision). Phase 5 was built
+at `24b9770` (2026-10-20, the sixth), and the seventh to the sixteenth
+were taken in on 2026-11-16 (TODO.md, "Spec revisions 7–16"). Phases 1–3
 were built against `docs/protocol-v0.3.md` at `c2da39f` and `d008e21`
 (2026-10-07). Section numbers carry over, with §10.3a new in 0.4. blygd
 emits `"blyg": "0.4"` (§3.1), and reads any `0.x`.
@@ -88,7 +90,9 @@ has a test.
 | An approval does not survive a changed response | §15.5 | verifier clears `approved_at` unless relation, class, origin, page and author match |
 | A notice is never shown among responses | §15.5 | CHECK `approved_at IS NULL OR class = 'response'`; a link is always a notice; class is set exactly with relation |
 | A public hopper's slug never changes | §13.5 (reference `slug_frozen`) | CHECK `NOT public OR slug_frozen` + trigger `hoppers_guard` |
-| Public hoppers are never protocol surface | §13.5 | served live, never in `surface_files`; structural test in `internal/hopper` |
+| A public hopper is protocol surface only as a manifest entry and a hopper feed | §13.5, §6.1 | pages and feeds served live, never in `surface_files`; the manifest reads plane 1's `public_hoppers` copy; structural test in `internal/hopper` |
+| The manifest never names a hopper that is not public | §6.1 | `internal/web` unlists before a hopper goes private or is deleted; `TestHopperFeeds` |
+| A published item's kind never changes | §5.3 (decision #100) | trigger `items_guard` keeps `authored_kind` |
 | Pinned version pages stay 200 forever | §8.4 rule 1 | `surface_files.permanent` (re-renderable, not write-once) |
 | Imported items are never re-emitted | §13.5 | renderer reads plane 1 only; structural test |
 | The import watermark never regresses | §13.3 | trigger `imported_items_guard` |
@@ -123,8 +127,12 @@ and a planes test in each package):
   `https://host/h/alice/h/reading/` reads `h` two ways. Origins made before
   the namespace keep `https://host/{handle}/`, because an
   origin's URL is its identity (§12.2); longest-prefix routing serves both.
-- **One spelling.** An origin is compared byte for byte (§12.2, #103), and
-  a WHATWG parser keeps `%7E` as it finds it, so `/%7Ealice/` is not
+- **One spelling.** An origin is compared byte for byte (§12.2, #103). Its
+  one spelling is ASCII: `blyg.NormalizeOrigin` lowercases scheme and
+  host, writes an internationalized host as its A-label (`xn--`), drops a
+  default port, writes every path escape in uppercase hex and decodes
+  none, and ends in `/`. URLs taken from the network go through it before
+  they are compared. A WHATWG parser keeps `%7E` as it finds it, so `/%7Ealice/` is not
   `/~alice/` to a reader. The surface answers a `GET` or `HEAD` that spells
   `~` as `%7E` with a 301 to `~`, and since identity is taken after
   redirects, a reader that subscribes by the encoded spelling ends with the
@@ -330,6 +338,17 @@ interval (§12.3). A poll failure never changes item state.
   Except after an endcap: content at the endcap's version is a replay,
   not adopted, because the watermark survives withdrawal (§13.4).
 - A `content_hash` that does not match `content_md`: recorded, adopted.
+- A `content_md` that is not text (§5.1, #103) — a C0 control other than
+  tab, LF and CR, or an escaped surrogate that is not half of a pair,
+  which `encoding/json` would quietly read as U+FFFD — is malformed input
+  (§13.2): the document is skipped like one that does not parse, and
+  nothing stored changes. Nothing imported is ever normalized: the reader
+  holds only bytes the hash covers.
+- A fragment fetched as a thread, or a thread as a fragment, is a change
+  of kind (§13.3, #100): adopted, recorded as a discrepancy, and kept in
+  `imported_items.kind_changed` (migration 008), so that quoting the item
+  warns. To or from `withdrawn` is not one. The kind an item had before
+  its withdrawal is not kept, so a return in the other kind is missed.
 - An endcap rolls the item to null: `doc` is cleared, `page_url` kept.
 - Pins the changelog names are fetched once into `imported_pins` and
   kept through withdrawal (§13.4). A pin that 404s is a discrepancy.
@@ -410,7 +429,9 @@ and it runs inside the publish transaction:
    records the first match with 32 characters of context either side.
 3. The prose between directives is rendered with `[[id]]` links swapped
    for sentinels, generated spans are wrapped in `blyg-tk-gen`, and the
-   links are spliced back as absolute anchors. A link inside another
+   links are spliced back as absolute anchors. A relative URL the author
+   wrote resolves against the item's identity origin, never its page
+   (§5.2, #102). A link inside another
    link's text becomes its label, and one inside a URL or a tag goes back
    to the author's literal.
 4. Each resolved link is disclosed in `links[]`, one entry per link in
@@ -428,7 +449,14 @@ sees it: not `transclusions[]`, not the target. Fork flattening uses it
 as the attribution's anchor text, with the host and version beside it.
 
 Code spans and code blocks are found with goldmark's own parser, so the
-grammar is inert in exactly the places the renderer shows code (§10.1).
+grammar is inert in exactly the places the renderer shows code (§10.1),
+which is where CommonMark's block structure says code is (#102): a
+tab-indented directive at the start of a document is code, and the same
+line under a paragraph line is a directive. A label is plain text in both
+forms, escaped wherever it is baked. The reserved `![[id@vN]]` is the line
+form only, labelled or not; inline or in code it is inert and publishes.
+A directive or reserved line is never a lazy continuation line, so it
+ends a partial selection (§10.1, revision of 2026-11-03).
 `SelectionText` follows the reference client's normalizer rule for rule,
 because any reader may re-run the partial check.
 
@@ -441,8 +469,10 @@ error. After that it looks at imports fetched before the transaction.
 L0 rows, items withdrawn with nothing retained, and ids imported from
 two origins are publish errors. A withdrawn import with a retained pin
 bakes the latest pin. Every problem is reported at once, as `422` with a
-`problems` list. A remote entry carries a `cited` frozen at publish, and
-the response warns when a remote quote is unpinned (§10.2 SHOULD).
+`problems` list. A directive in a fragment is one of them: a directive
+belongs to a thread (§10.1, #102). A remote entry carries a `cited` frozen at publish, and
+the response warns when a remote quote is unpinned (§10.2 SHOULD), and
+when the importer saw its item change kind (§13.3 SHOULD, #100).
 Republishing a thread whose text is unchanged is allowed when its bake
 changed, because quotes re-resolve.
 
@@ -462,7 +492,12 @@ exactly as a directive does, so it may be another origin's item (rule
 origin and a frozen `cited` reach plane 1, never its words. A remote
 source carries its origin and `cited`, and sends a `source` mention,
 which is a response (rule 9). The model and time come from `PATCH /api/items/{id}
-{generation: [{model, at}]}`, by scope position.
+{generation: [{model, at}]}`, by scope position. In a thread, generated
+output may carry a directive on a line of its own, which transcludes like
+any other: the `blyg-tk-gen` wrapper closes before the bake and reopens
+after it, and the scope keeps its one `generated[]` entry (§5.7, #102).
+Fork flattening then sees two runs; it carries a model over only where
+wrappers and entries pair, or every entry names one model.
 `[TK]impyrt <model>=text[/TK]` is text generated elsewhere (rule 7). A
 publish with `note_generated: true` marks the changelog note as
 client-written (§5.2).
@@ -565,8 +600,10 @@ anyone else. So the defaults assume a response may be hostile.
 ## Public hoppers (Phase 4)
 
 §13.5 lets a reader display imported content publicly as curation: a
-shown list with attribution and links, and no protocol surface. A public
-hopper is that, at `{origin}h/{slug}/`.
+shown list with attribution and links, and, from 0.4's eighth revision
+(#86), no protocol surface beyond the manifest's `hoppers` list and a
+hopper feed. A public hopper is that, at `{origin}h/{slug}/`, with its
+feed at `{origin}h/{slug}/feed.xml`.
 
 - **Served live, never stored.** The web layer renders it per request
   from `hopper.Store.Public`, with an ETag and `no-cache`. Nothing reaches
@@ -585,6 +622,31 @@ hopper is that, at `{origin}h/{slug}/`.
   {public}` needs `origin:write` as well, as the blogroll does. The first
   time a hopper goes public, its slug freezes for good, through renames
   and going private again.
+- **Named in the manifest** (§6.1): `hoppers: [{title, page, feed}]`,
+  present only when there is one. The studio never reads the overlay, so
+  going public copies the slug and name into plane 1's `public_hoppers`
+  (migration 009), as the blogroll copies an outline, and the renderer
+  reads the copy. `internal/web` orders the two writes so that a failure
+  can only under-list: it unlists before a hopper goes private or is
+  deleted, and lists after it goes public or is renamed. A rename of a
+  public hopper renames its entry with `hoppers:write` alone, as it
+  already renamed the live page. A static export names none: it holds no
+  hopper pages.
+- **The hopper feed** (§13.5 rules (a)–(d)) is served live, like the page,
+  and only for a listed hopper; otherwise 404. RSS 2.0 with no `blyg:`
+  namespace anywhere, own items included; every member the page shows,
+  newest-joined first; a `guid` per membership, a hash of the hopper's
+  page and the member's origin and id; `<link>` the member's page, else
+  its item document through its origin's `item` template, else an L0
+  entry's own link; `<source>` naming the member origin's feed for every
+  member not the owner's; `dc:creator`; and a plain-text excerpt with a
+  link as the description, never the held snapshot. The page links it
+  with `rel="alternate"`.
+- **Not built: hopper subscriptions** (§12.1 step 7, §12.2, §13.6). blygd's
+  reader resolves a hopper's URL to the whole blyg, as a reader without
+  step 7 does, which the spec allows. Building it means a subscription
+  identity of (origin, feed) beside the origin's own, where today the
+  subscription id is the mirror's origin id.
 
 ## Static export (Phase 4)
 
@@ -820,6 +882,20 @@ another directory of files, without touching a handler.
   tenant and the API, so `blyg.PageHTML` sanitizes every `content_html`
   shown on a page (bluemonday's UGC policy, plus the protocol's own
   classes and `data-blyg-*`). The wire keeps the bytes.
+- **Mathematics** (§14, #105) is a second vocabulary with its own parsing
+  rules, so `PageHTML` never passes a `math` element through. An HTML5
+  tree parser (`x/net/html`, which reads MathML's foreign content as a
+  browser does) finds each one, and it is replaced by its
+  `application/x-tex` annotation as text in `<code>` (`<pre>` for
+  `display="block"`), or dropped when it has none: the spec's third and
+  fourth treatments. The replacement is built from one escaped string.
+  The policy skips any `math` the tree pass did not see, contents and
+  all. blygd's own renderer emits no MathML: `$…$` publishes as written.
+- **Text that reorders text** (§14, #103): a baked quote on a page gets
+  `dir="auto"`, and a response's author and a hopper entry's author,
+  source and excerpt are isolated (`<bdi>`, `dir="auto"`), so bidi
+  controls in a stranger's words cannot rearrange ours. A publish warns
+  when its own `content_md` leaves one unpaired.
 - **Second wall:** every public HTML page is served with a CSP that runs
   no script (`default-src 'none'`) and sandboxes the page into an opaque
   origin, so even a sanitizer bypass could not read the studio's token
@@ -840,15 +916,11 @@ another directory of files, without touching a handler.
   are `f/{id}/` and `t/{id}/`, which never need to.
 - A publish with no content change is refused (409). It would cost every
   reader a new feed entry and guid for nothing.
-- A fragment containing a live `![[id]]` is refused. Only threads
-  transclude (§10), and printing the directive literally would surprise
-  the author.
 - Every `[TK]` scope is disclosed. The reference wraps only scopes its own
   generate endpoint produced; blygd has none, so a scope is the client's
-  declaration. A directive inside generated output is refused (§5.7
-  rule 3 keeps quotes and generated prose apart), and an inline span that
-  crosses a paragraph is closed and reopened, so the HTML stays well
-  nested.
+  declaration. An inline span that crosses a paragraph is closed and
+  reopened, so the HTML stays well nested, as the wrapper divides around
+  a quote (§5.7, #102).
 - Pinned version pages (§8.4) show the pinned `content_html` sanitized,
   not verbatim as rule 2 says. A pinned thread carries other origins'
   bytes, and a page we must serve forever is the worst place for their
@@ -879,19 +951,24 @@ another directory of files, without touching a handler.
   offered yet. The discrepancy is surfaced and the watermark holds.
 - Adding a subscription to the blogroll needs `origin:write` as well as
   `reader:write`, because it publishes a reading choice (§11).
-- Another origin's surface is located through `{origin}blyg.json`, the
-  one fixed name (§4), everywhere outside the reader. An origin whose
-  manifest is only where a `rel="blyg"` link names it (§12.1 step 4,
-  §12.2's `/wp-json/…` case) can be subscribed to and read, but not
-  forked: both the copy and the publish-time pin check refuse, naming the
-  missing file. Mentions to it fall back to the default layout and
-  W3C discovery, so they usually find no endpoint. The reader records
-  where it found the manifest, but plane 1 knows only the identity, and
-  passing the location through `studio.Imports` would widen the one door
-  between the planes. The reference reuses its subscription's stored
-  surface. The spec half-supports the case: §15.3 verification fetches
-  `{origin}blyg.json` too, so such an origin's own mentions fail anywhere
-  that its documents are off the default path (blygger-spec#21).
+- Another origin's surface is located through `{origin}blyg.json`
+  everywhere outside the reader. Since the seventh revision (#87, on
+  blygger-spec#21) that is the spec's rule, not a departure: every
+  identity origin MUST serve its manifest at the fixed name (§4, §12.1
+  step 4). An origin whose manifest is only where a `rel="blyg"` link
+  names it is non-conformant; blygd still subscribes to and reads it, and
+  refuses to fork it, naming the missing file.
+- `content_md` is published as the author wrote it, NFC or not. §5.1
+  says a publisher SHOULD publish NFC; blygd warns instead of
+  normalizing, because normalizing the selection of a partial quote can
+  stop it matching a source that is not NFC itself.
+- U+FFFE and U+FFFF, which §5.1 says a publisher SHOULD NOT publish, are a
+  publish error here, like the C0 controls that MUST NOT be. A reader
+  accepts them: they are no MUST.
+- A draft created without a `kind` is a fragment, as before. §5.3 says a
+  client creating items on an author's behalf SHOULD create threads; that
+  is the client's choice to make, so `openapi.json` and `llms.txt` say so
+  to clients instead of the API choosing for them.
 - The manifest claims `level: 2` (§3). With threads it is honest: every
   L1 and L2 publisher construct is implemented. The claim stays
   informative (§3.2).

@@ -932,6 +932,7 @@
           "hoppers"
         ],
         "summary": "Rename a hopper, or make it public or private.",
+        "description": "A public hopper is shown at {origin}h/{slug}/ and named in the manifest's hoppers list with its live RSS feed, {origin}h/{slug}/feed.xml (§6.1, §13.5). Making one public or private also needs origin:write; renaming a public one renames its manifest entry.",
         "security": [
           {
             "bearer": [
