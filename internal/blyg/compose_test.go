@@ -490,3 +490,85 @@ func TestPreviewMarksUnbakedDirectives(t *testing.T) {
 		}
 	}
 }
+
+func TestADirectiveLineEndsASelection(t *testing.T) {
+	// §10.1 (revision of 2026-11-03, studio#106): a directive line is read
+	// before markdown sees it, so it is never a lazy continuation line.
+	md := "![[" + ownID + "]]\n> looks like from inside.\n![[" + headedID + "]]\n\nAfter."
+	out := compose(t, md, true)
+	clean(t, out)
+	if len(out.Transclusions) != 2 || out.Transclusions[0].Selector == nil || out.Transclusions[0].Selector.Exact != "looks like from inside." {
+		t.Fatalf("the second directive must end the first selection and bake: %+v", out.Transclusions)
+	}
+	if out.Transclusions[1].ID != headedID || out.Transclusions[1].Selector != nil {
+		t.Fatalf("the second directive must bake whole: %+v", out.Transclusions[1])
+	}
+	// The reserved form, labelled or not, ends it too, and is refused.
+	for _, reserved := range []string{"![[" + headedID + "@v2]]", "![[" + headedID + "@v2 | a label]]"} {
+		out = compose(t, "![["+ownID+"]]\n> looks like from inside.\n"+reserved, true)
+		if len(out.Problems) != 1 || !strings.Contains(out.Problems[0].Reason, "reserved") {
+			t.Fatalf("%s: want the reserved line refused on its own: %+v", reserved, out.Problems)
+		}
+	}
+	// HasOwnWords reads the same extent: nothing here is the author's.
+	out = compose(t, "![["+ownID+"]]\n> looks like from inside.\n![["+headedID+"]]", true)
+	clean(t, out)
+	if HasOwnWords(out.ContentMD, out.ContentHTML) {
+		t.Error("two directives and a selection are no words of the author's own")
+	}
+}
+
+func TestReservedFormIsInertInline(t *testing.T) {
+	// §10.1 (decision #102): the reservation is of the directive line; the
+	// sequence inline or in code is inert text and publishes.
+	for _, md := range []string{
+		"Write ![[" + ownID + "@v2]] to name a version, one day.",
+		"`![[" + ownID + "@v2]]`",
+		"```\n![[" + ownID + "@v2]]\n```",
+	} {
+		for _, thread := range []bool{false, true} {
+			out := compose(t, md, thread)
+			clean(t, out)
+			if len(out.Transclusions) != 0 || !strings.Contains(out.ContentHTML, "@v2]]") {
+				t.Errorf("%q (thread %v): %+v %s", md, thread, out.Transclusions, out.ContentHTML)
+			}
+		}
+	}
+}
+
+func TestCodeIsCommonMarksToSay(t *testing.T) {
+	// §10.1 (decision #102): a tab-indented directive at the start of a
+	// document is an indented code block, so it is code; directly under a
+	// paragraph line CommonMark makes no code block, so it is a directive.
+	out := compose(t, "\t![["+ownID+"]]\n\nAfter.", true)
+	clean(t, out)
+	if len(out.Transclusions) != 0 || !strings.Contains(out.ContentHTML, "<pre><code>![["+ownID+"]]") {
+		t.Fatalf("a tab-indented directive at the start is code: %+v %s", out.Transclusions, out.ContentHTML)
+	}
+	out = compose(t, "Above.\n\t![["+ownID+"]]\n\nAfter.", true)
+	clean(t, out)
+	if len(out.Transclusions) != 1 {
+		t.Fatalf("under a paragraph line the same line is a directive: %s", out.ContentHTML)
+	}
+	// Outside code, whitespace of any amount around a directive is ignored.
+	out = compose(t, "Above.\n        ![["+ownID+"]]   \n\nAfter.", true)
+	clean(t, out)
+	if len(out.Transclusions) != 1 {
+		t.Fatalf("an indented directive under a paragraph: %s", out.ContentHTML)
+	}
+}
+
+func TestLabelsArePlainText(t *testing.T) {
+	// §10.1 (decision #102): no markdown and no HTML in a label is read, in
+	// either form, and it is escaped wherever it is baked.
+	out := compose(t, "See [["+ownID+" | *not* `code` <b>x</b>]].", false)
+	clean(t, out)
+	if !strings.Contains(out.ContentHTML, `">*not* `+"`code`"+` &lt;b&gt;x&lt;/b&gt;</a>`) {
+		t.Errorf("link label interpreted: %s", out.ContentHTML)
+	}
+	out = compose(t, "![["+ownID+" | *not* <b>x</b> & y]]", true)
+	clean(t, out)
+	if !strings.Contains(out.ContentHTML, `data-blyg-label="*not* &lt;b&gt;x&lt;/b&gt; &amp; y"`) {
+		t.Errorf("directive label not escaped as text: %s", out.ContentHTML)
+	}
+}

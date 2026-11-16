@@ -19,7 +19,9 @@ import (
 const idClass = `[0-9a-hjkmnp-tv-z]{26}`
 
 var (
-	reservedLine = regexp.MustCompile(`^[ \t]*!\[\[` + idClass + `@v\d+\]\][ \t]*\r?$`)
+	// The reservation is of the directive, a line of its own, labelled or
+	// not (§10.1, decision #102); inline the sequence is inert text.
+	reservedLine = regexp.MustCompile(`^[ \t]*!\[\[` + idClass + `@v\d+(?:[ \t]*\|(?:[^\]]|\][^\]])*)?\]\][ \t]*\r?$`)
 	quoteLine    = regexp.MustCompile(`^[ \t]*>`)
 	quoteMark    = regexp.MustCompile(`^[ \t]*> ?`)
 )
@@ -153,7 +155,10 @@ func lineOffsets(lines []string) []int {
 //
 // The blockquote's extent is CommonMark's, lazy continuation included
 // (§10.1, decision #76): a line without its own `>` belongs to the quote
-// when the renderer's parser reads it as part of the same blockquote.
+// when the renderer's parser reads it as part of the same blockquote. A
+// line that is itself a directive, or the reserved ![[id@vN]] form, is
+// never a continuation line: the grammar reads it before markdown does, so
+// it ends the selection (§10.1, revision of 2026-11-03, studio#106).
 func attachedQuote(lines []string, i int) (quote string, next int, ok bool) {
 	j := i + 1
 	var raw, run []string
@@ -161,6 +166,8 @@ func attachedQuote(lines []string, i int) (quote string, next int, ok bool) {
 		l := lines[j]
 		switch {
 		case quoteLine.MatchString(l):
+		case isDirectiveLine(l):
+			return strings.Join(run, "\n"), j, len(run) > 0
 		case len(run) > 0 && strings.TrimSpace(l) != "" && oneBlockquote(append(raw, l)):
 		default:
 			return strings.Join(run, "\n"), j, len(run) > 0
@@ -170,6 +177,13 @@ func attachedQuote(lines []string, i int) (quote string, next int, ok bool) {
 		j++
 	}
 	return strings.Join(run, "\n"), j, len(run) > 0
+}
+
+// isDirectiveLine reports whether a line has a directive's shape, live or
+// reserved, labels included. Whether it is in code is the caller's question.
+func isDirectiveLine(l string) bool {
+	_, _, ok := labelledDirective(l)
+	return ok || reservedLine.MatchString(l)
 }
 
 // oneBlockquote reports whether lines parse as a single blockquote, which
