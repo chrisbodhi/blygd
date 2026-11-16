@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -39,6 +40,12 @@ type API struct {
 	Limits   *Limits // request budgets; nil means none
 
 	streams streamCount
+	// hopperPublicity serializes the hopper changes that list or unlist a
+	// hopper in the manifest (patchHopper, deleteHopper). Each orders its
+	// two writes so that a failure can only under-list, but two at once
+	// could interleave and list a private hopper (§6.1 MUST NOT; review of
+	// PR #5). In-process, like the request budgets: blygd runs one.
+	hopperPublicity sync.Mutex
 }
 
 type principalKey struct{}
@@ -701,6 +708,8 @@ func (a *API) patchHopper(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	a.hopperPublicity.Lock()
+	defer a.hopperPublicity.Unlock()
 	// The manifest names public hoppers (§6.1), and MUST NOT name one that
 	// is not public: unlist before going private, list after going public,
 	// so a failure between the two can only leave a public hopper unlisted.
@@ -739,6 +748,8 @@ func (a *API) deleteHopper(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	uid := principal(r.Context()).UserID
+	a.hopperPublicity.Lock()
+	defer a.hopperPublicity.Unlock()
 	h, _, err := a.Hoppers.Get(r.Context(), uid, id)
 	if err != nil {
 		return err

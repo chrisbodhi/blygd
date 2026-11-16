@@ -76,6 +76,12 @@ func TestNormalizeOrigin(t *testing.T) {
 		"https://example.com/caf%c3%a9/": "https://example.com/caf%C3%A9/",
 		"https://example.com/%7ealice/":  "https://example.com/%7Ealice/",
 		"https://example.com/~alice/":    "https://example.com/~alice/",
+		// With or without the final slash, one spelling (review of PR #5).
+		"https://x.org/%7Euser": "https://x.org/%7Euser/",
+		"https://x.org/%7euser": "https://x.org/%7Euser/",
+		"https://x.org/a%2fb":   "https://x.org/a%2Fb/",
+		"https://x.org/a%2Fb/":  "https://x.org/a%2Fb/",
+		"https://x.org/café":    "https://x.org/caf%C3%A9/",
 	}
 	for in, want := range cases {
 		got, err := NormalizeOrigin(in)

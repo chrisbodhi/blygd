@@ -496,6 +496,9 @@ which is a response (rule 9). The model and time come from `PATCH /api/items/{id
 output may carry a directive on a line of its own, which transcludes like
 any other: the `blyg-tk-gen` wrapper closes before the bake and reopens
 after it, and the scope keeps its one `generated[]` entry (§5.7, #102).
+A directive whose attached selection is generated output is refused: the
+wire would read a partial quote while the bake quoted the item whole, and
+a selection is the source's words (§5.7 rule 3).
 Fork flattening then sees two runs; it carries a model over only where
 wrappers and entries pair, or every entry names one model.
 `[TK]impyrt <model>=text[/TK]` is text generated elsewhere (rule 7). A
@@ -628,7 +631,10 @@ feed at `{origin}h/{slug}/feed.xml`.
   (migration 009), as the blogroll copies an outline, and the renderer
   reads the copy. `internal/web` orders the two writes so that a failure
   can only under-list: it unlists before a hopper goes private or is
-  deleted, and lists after it goes public or is renamed. A rename of a
+  deleted, and lists after it goes public or is renamed. Two such changes
+  at once could interleave and list a private hopper, so they take an
+  in-process lock, which holds because blygd runs one process (as its
+  request budgets assume). A rename of a
   public hopper renames its entry with `hoppers:write` alone, as it
   already renamed the live page. A static export names none: it holds no
   hopper pages.
@@ -883,14 +889,18 @@ another directory of files, without touching a handler.
   shown on a page (bluemonday's UGC policy, plus the protocol's own
   classes and `data-blyg-*`). The wire keeps the bytes.
 - **Mathematics** (§14, #105) is a second vocabulary with its own parsing
-  rules, so `PageHTML` never passes a `math` element through. An HTML5
-  tree parser (`x/net/html`, which reads MathML's foreign content as a
-  browser does) finds each one, and it is replaced by its
-  `application/x-tex` annotation as text in `<code>` (`<pre>` for
-  `display="block"`), or dropped when it has none: the spec's third and
-  fourth treatments. The replacement is built from one escaped string.
-  The policy skips any `math` the tree pass did not see, contents and
-  all. blygd's own renderer emits no MathML: `$…$` publishes as written.
+  rules, so `PageHTML` never passes a `math` element through. Each one is
+  replaced by its `application/x-tex` annotation as text in `<code>`
+  (`<pre>` for `display="block"`), or dropped when it has none: the spec's
+  third and fourth treatments. The replacement is built from one escaped
+  string. The extent is read with the tokenizer, not a tree parser, so the
+  damage stays inside the stranger's bytes: an unclosed `<math>` ends at
+  its `</math>` or at the end tag of any element open outside it (the
+  bake's own `</p>` or `</blockquote>`), never in the quoter's words after
+  the bake. Where the tokenizer and a browser disagree about foreign
+  content, more is dropped, never less, and bluemonday still sanitizes
+  what is kept. blygd's own renderer emits no MathML: `$…$` publishes as
+  written.
 - **Text that reorders text** (§14, #103): a baked quote on a page gets
   `dir="auto"`, and a response's author and a hopper entry's author,
   source and excerpt are isolated (`<bdi>`, `dir="auto"`), so bidi

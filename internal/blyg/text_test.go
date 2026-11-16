@@ -168,3 +168,19 @@ func TestHopperFeedIsWellFormedAndPlain(t *testing.T) {
 		t.Error("a guid is derived from the hopper, origin and id, and stable")
 	}
 }
+
+func TestAnUnclosedMathCannotEatTheQuotersWords(t *testing.T) {
+	// Review of PR #5: a stranger's unclosed <math> runs at most to the end
+	// of the element it was opened in, never into the quoter's own words.
+	in := `<blockquote class="blyg-transclusion" data-blyg-id="x"><p>q <math><mi>x</p></blockquote><p>My words</p>`
+	got := string(PageHTML(in))
+	if !strings.Contains(got, "<p>My words</p>") || !strings.Contains(got, "<p>q </p></blockquote>") {
+		t.Errorf("got %s", got)
+	}
+	in = `<p>Mine.</p><blockquote class="blyg-transclusion" data-blyg-id="x"><math><annotation encoding="application/x-tex">a+b</annotation>` +
+		`<mi>a</mi></blockquote><p>A rebuttal.</p>`
+	got = string(PageHTML(in))
+	if !strings.Contains(got, "<code>a+b</code></blockquote>") || !strings.Contains(got, "<p>A rebuttal.</p>") || !strings.Contains(got, "<p>Mine.</p>") {
+		t.Errorf("got %s", got)
+	}
+}

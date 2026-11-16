@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -242,5 +243,30 @@ func TestHopperFeeds(t *testing.T) {
 	expect(t, r, 200)
 	if m := untar(t, r.body)["blyg.json"]; m == nil || strings.Contains(string(m), "hoppers") {
 		t.Errorf("an export's manifest names live hopper pages it does not hold: %s", m)
+	}
+}
+
+// Review of PR #5: a rename racing a hopper going private must not leave a
+// private hopper in the manifest (§6.1 MUST NOT).
+func TestConcurrentHopperChangesNeverListAPrivateHopper(t *testing.T) {
+	e := newEnv(t, mention.DefaultRateLimits)
+	alice := e.user("alice")
+	r := alice.api("POST", "/hoppers", map[string]any{"name": "Racing"})
+	expect(t, r, 201)
+	hid := itoa(int(r.json(t)["id"].(float64)))
+	for i := 0; i < 25; i++ {
+		expect(t, alice.api("PATCH", "/hoppers/"+hid, map[string]any{"public": true}), 200)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			alice.api("PATCH", "/hoppers/"+hid, map[string]any{"name": fmt.Sprintf("Racing %d", i)})
+		}()
+		go func() { defer wg.Done(); alice.api("PATCH", "/hoppers/"+hid, map[string]any{"public": false}) }()
+		wg.Wait()
+		public := alice.api("GET", "/hoppers/"+hid, nil).json(t)["public"] == true
+		if _, listed := alice.get("blyg.json").json(t)["hoppers"]; listed != public {
+			t.Fatalf("round %d: public %v, listed %v", i, public, listed)
+		}
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -291,8 +292,16 @@ func checkText(body []byte, md *string) error {
 	var raw struct {
 		ContentMD json.RawMessage `json:"content_md"`
 	}
-	if json.Unmarshal(body, &raw) == nil && blyg.LoneSurrogate(raw.ContentMD) {
-		return fmt.Errorf("%w: an unpaired surrogate", errMalformedText)
+	// Checked on the bytes served: encoding/json reads invalid UTF-8, a
+	// surrogate written as raw bytes (ED A0 80) and a lone \uD800 alike as
+	// U+FFFD, which TextFault accepts (review of PR #5).
+	if json.Unmarshal(body, &raw) == nil {
+		if !utf8.Valid(raw.ContentMD) {
+			return fmt.Errorf("%w: invalid UTF-8, or a surrogate written as bytes", errMalformedText)
+		}
+		if blyg.LoneSurrogate(raw.ContentMD) {
+			return fmt.Errorf("%w: an unpaired surrogate", errMalformedText)
+		}
 	}
 	if fault := blyg.TextFault(*md); fault != "" {
 		return fmt.Errorf("%w: %s", errMalformedText, fault)

@@ -29,10 +29,17 @@ func NormalizeOrigin(raw string) (string, error) {
 		return "", err
 	}
 	u.RawQuery, u.Fragment, u.RawFragment = "", "", ""
-	if u.Path == "" || !strings.HasSuffix(u.Path, "/") {
-		u.Path += "/"
-		u.RawPath = ""
+	// The final "/" goes onto the escaped path, so an escape survives it:
+	// rebuilding from the decoded path would turn %7E into ~ and %2F into
+	// a separator (review of PR #5).
+	p := upperEscapes(u.EscapedPath())
+	if !strings.HasSuffix(p, "/") {
+		p += "/"
 	}
+	if u.Path, err = url.PathUnescape(p); err != nil {
+		return "", err
+	}
+	u.RawPath = p
 	return u.String(), nil
 }
 

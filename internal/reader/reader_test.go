@@ -837,4 +837,16 @@ func TestTextThatIsNotTextIsMalformed(t *testing.T) {
 	if !errors.Is(err, errMalformedText) {
 		t.Fatalf("want errMalformedText, got %v", err)
 	}
+	// Bytes that encoding/json would quietly read as U+FFFD: a surrogate
+	// written as raw bytes, and an invalid byte (review of PR #5).
+	for _, bad := range []string{"\xed\xa0\x80", "\xff"} {
+		doc := strings.Replace(mustGet(t, g.b, path), "\\ud800", bad, 1)
+		_, err := g.r.ApplyDocument(context.Background(), g.sid, blyg.Surface{Origin: g.b.Origin()}, idA, []byte(doc), g.b.Origin()+"items/"+idA+".json")
+		if !errors.Is(err, errMalformedText) {
+			t.Errorf("%q: want errMalformedText, got %v", bad, err)
+		}
+	}
+	if ra := g.row(idA); ra.version != 1 || g.docField(idA, "content_md") != "fine" {
+		t.Fatalf("stored state changed: %+v", ra)
+	}
 }

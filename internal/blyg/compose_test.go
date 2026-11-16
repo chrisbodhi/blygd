@@ -610,3 +610,28 @@ func TestABakeDividesTheGeneratedWrapper(t *testing.T) {
 		t.Fatalf("fragment: %+v", out.Problems)
 	}
 }
+
+func TestADirectiveInCodeInGeneratedOutputIsInert(t *testing.T) {
+	// Review of PR #5: in a fragment, code inside a [TK] scope is code
+	// (§10.1), as the refusal's own advice says.
+	md := "[TK]impyrt=a\n```\n![[" + ownID + "]]\n```\nb[/TK]"
+	for _, thread := range []bool{false, true} {
+		out := compose(t, md, thread)
+		clean(t, out)
+		if len(out.Transclusions) != 0 || !strings.Contains(out.ContentHTML, "<pre><code>![["+ownID+"]]") {
+			t.Errorf("thread %v: %+v %s", thread, out.Transclusions, out.ContentHTML)
+		}
+	}
+}
+
+func TestASelectionIsNeverGenerated(t *testing.T) {
+	// Review of PR #5: content_md would read a partial quote, content_html
+	// a whole bake and a literal ">". Refused instead.
+	out := compose(t, "![["+ownID+"]]\n[TK]impyrt=> looks like from inside.[/TK]\n\nAfter.", true)
+	if len(out.Problems) != 1 || !strings.Contains(out.Problems[0].Reason, "generated text") {
+		t.Fatalf("problems: %+v", out.Problems)
+	}
+	// Detached by a blank line, the scope is the author's own prose.
+	out = compose(t, "![["+ownID+"]]\n\n[TK]impyrt=Said after.[/TK]", true)
+	clean(t, out)
+}

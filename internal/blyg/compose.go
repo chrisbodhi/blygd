@@ -151,11 +151,19 @@ func Compose(in ComposeInput) (*Composed, error) {
 		// that no quoted word is marked as generated, and the scope keeps
 		// its one generated[] entry (§5.7, decision #102).
 		spans = splitAroundDirectives(stripped, spans)
-	} else {
-		for _, sp := range spans {
-			for _, l := range strings.Split(stripped[sp.start:sp.end], "\n") {
-				if isDirectiveLine(l) {
+		c.refuseGeneratedSelections(stripped, spans)
+	} else if len(spans) > 0 {
+		// In a fragment a directive is a publish error wherever it stands,
+		// generated output included, and inert in code as anywhere (§10.1).
+		code := codeSpans(stripped)
+		lines := strings.Split(stripped, "\n")
+		starts := lineOffsets(lines)
+		for i, l := range lines {
+			ls, le := starts[i], starts[i]+len(l)
+			for _, sp := range spans {
+				if ls >= sp.start && le <= sp.end && isDirectiveLine(l) && !inSpans(code, ls+strings.IndexByte(l, '!')) {
 					c.problem(strings.TrimSpace(l), "a directive belongs to a thread (§10.1): publish this as a thread, or write the directive in code")
+					break
 				}
 			}
 		}
@@ -224,6 +232,38 @@ func splitAroundDirectives(md string, spans []genSpan) []genSpan {
 		add(cur, sp.end, sp.scope)
 	}
 	return out
+}
+
+// refuseGeneratedSelections refuses a directive whose attached selection is
+// generated output. The wire content_md reads it as a partial quote (§10.1),
+// while the bake would read the scope's sentinel first and quote the item
+// whole, so the two would disagree; and a selection is the source's words,
+// which are never generated (§5.7 rule 3). Review of PR #5.
+func (c *composer) refuseGeneratedSelections(md string, spans []genSpan) {
+	if len(spans) == 0 {
+		return
+	}
+	lines := strings.Split(md, "\n")
+	starts := lineOffsets(lines)
+	code := codeSpans(md)
+	for i := 0; i < len(lines); i++ {
+		id, _, at := directiveAt(lines[i])
+		if id == "" || inSpans(code, starts[i]+at) {
+			continue
+		}
+		_, next, ok := attachedQuote(lines, i)
+		if !ok {
+			continue
+		}
+		from, to := starts[i+1], starts[next-1]+len(lines[next-1])
+		for _, sp := range spans {
+			if sp.start < to && sp.end > from {
+				c.problem(strings.TrimSpace(lines[i]), "the passage quoted under this directive is generated text; a quote's words are its source's (§5.7 rule 3): put a blank line between the directive and the [TK] scope, or quote the passage yourself")
+				break
+			}
+		}
+		i = next - 1
+	}
 }
 
 // linksInOrder is links[]: one entry per resolved link, in document order
