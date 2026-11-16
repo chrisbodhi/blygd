@@ -25,7 +25,7 @@ certificate requests fail and count against Let's Encrypt's limits. If the
 domain has a `CAA` record, it must allow `letsencrypt.org`.
 
 Choose the host name with care. `BLYGD_PUBLIC_URL` is where origins mount
-(`https://host/{handle}/`), published items stay permanent (DESIGN.md
+(`https://host/~{handle}/`), published items stay permanent (DESIGN.md
 "Invariants"), and the URL is the origin's identity. To try things first, use
 a throwaway name such as `<ip-with-dashes>.sslip.io`, then drop and recreate
 the database before real use.
@@ -148,7 +148,8 @@ That prints an owner token once; keep it in a password manager. The env file
 is `root:blygd 0640`, so source it inside the `blygd` user's shell (an
 `$(grep …)` outside `sudo` runs as you and cannot read it). Use the same
 pattern for `blygd token mint`, `rebuild` and `export`. Then open
-`https://<host>/studio/` and paste the token. A handle cannot contain a dot.
+`https://<host>/studio/` and paste the token. A handle is 1–63 lowercase letters, digits or
+hyphens, and the blyg is at `https://<host>/~<handle>/`.
 
 Expect scanners within minutes (new certificates appear in public
 Certificate Transparency logs). They get 404s; blygd serves only what is in
@@ -201,6 +202,118 @@ compromised VM cannot delete or read what it has already sent.
 
 For restores, make a separate read-only key
 (`listBuckets,listFiles,readFiles`) and keep it off the server.
+
+## 8. Operating for other people
+
+Once anyone else publishes here, a failure is no longer only yours to
+notice, and you hold powers over their blygs that they should know about.
+
+### Alerts
+
+- **Uptime.** Point an external monitor at `https://<host>/healthz`, which
+  answers 200 only while blygd can reach Postgres. Any provider that
+  checks a URL every few minutes will do; it learns only the URL.
+- **Backups.** Make a dead-man's-switch check (healthchecks.io and the
+  like) expecting one ping a day, with a few hours' grace past 03:15 UTC,
+  and put its URL in `/etc/blygd/backup.env`:
+  ```
+  BLYGD_BACKUP_PING_URL=https://<the check's ping URL>
+  ```
+  `backup.sh` fetches it last, only after the dump was written, listed,
+  sent offsite and pruned. A night with no ping is the alert. A failed
+  ping does not fail the backup. `scripts/deploy.sh` installs each
+  release's `backup.sh` as `blygd-backup`, so the ping arrives with the
+  first deploy that carries it; on a host set up by hand, install it as in
+  step 5. Check it once: `sudo systemctl start blygd-backup`, then
+  `sudo journalctl -u blygd-backup -n 5 --no-pager` should end with
+  `pinged the monitor`.
+- **Queues.** Once a minute blygd logs one `queues` line: mentions to
+  verify and send, origins polled, imports waiting, and how many of each
+  are more than 15 minutes late. Late means a worker is behind or stopped,
+  and the line is then a warning:
+  ```sh
+  sudo journalctl -u blygd -p warning --since today --no-pager
+  ```
+  `send_abandoned_24h` counts mentions that gave up after their retries in
+  the last day; a rise means a receiver, or the network, is refusing them.
+  A user's imports are late only when nothing in their list has been
+  claimed or finished for 15 minutes, so a big OPML import that the worker
+  is working through, one entry a batch, does not warn.
+
+### People
+
+Run these as the `blygd` user, as in step 6:
+
+```sh
+sudo -u blygd sh -c 'set -a; . /etc/blygd/blygd.env; blygd <command>'
+```
+
+| To | Command |
+|---|---|
+| Add someone | `user add <handle> "Title"`. The handle is in their URL for good. Send the owner token through a one-time secret link, never plain chat. They paste it into `/studio/` once and keep it in a password manager. |
+| Replace a lost owner token | `token mint <handle> owner '*'`. Revoke the old one from the new token if it may have leaked (`DELETE /api/tokens/{id}`). |
+| Suspend someone | `user suspend <handle>`. Every token they hold is revoked, their open event streams end within 25 s, and every mention their blyg had yet to send is abandoned, so their queued stubs and quotes stop reaching anyone. A send already in flight may still arrive, once, but is never retried. A publish that authenticated just before the revoke can still queue sends after it, so run the command again a minute later to catch them. What they published stays published; their subscriptions are still polled. Minting them a token lifts it; abandoned sends stay abandoned. |
+| Revoke every token, nothing else | `token revoke-all <handle>`, after a leak, say. |
+| Take an item down | Suspend them if needed, then `token mint <handle> takedown --expires 1d items:withdraw` and `POST /api/items/{id}/withdraw` with it. The item becomes an endcap (§9) and its unpinned versions stop being served. **Pinned versions are served forever** (§8, enforced in the schema), and nothing here removes one. |
+
+Tell testers, before their first publish:
+
+- Publishing is permanent: versions are never deleted, a withdrawal leaves
+  an endcap, and a pin cannot be undone. Drafts and preview are the place
+  to experiment.
+- The operator can act as any user (the commands above), and can read
+  everything in the database, drafts included.
+- After an upgrade that widens the studio's token, sign out of the studio
+  and back in once.
+- What other testers can and cannot see of their reading: the section below,
+  in words they can take as they are.
+
+### What testers can see of each other
+
+Tell testers this as it stands; it is accurate and complete.
+
+**Private to you.** No other tester can list, open or change your
+subscriptions, what you call them, what you have read, your imports, your
+private hoppers, your drafts, your tokens, or how you moderate the mentions
+you receive. Every route of the API is tested for exactly that: another
+user's ids answer as if they did not exist.
+
+**Public because you chose it.** Your published items, your blogroll if you
+add subscriptions to it, and any hopper you make public. A public hopper
+lists items from blygs you follow, so it shows that you follow them.
+
+**What another tester can work out.** blygd keeps one shared copy of each
+blyg it reads, fetched once for everyone who follows it, so that a blyg's
+author is not polled once per reader. Because of that, when you subscribe
+to a blyg you can tell whether someone here already follows it, or once
+did: it arrives with its history already in place, its last poll is older
+than your subscription, and a "poll now" can be refused because someone
+else polled it in the last minute. You learn *that someone here reads it*,
+never who, how many, or what they have read. It is the same thing you could
+learn by asking the room "does anyone here read X?", and the room is small.
+
+**What the operator can see.** Everything in the database, drafts and
+subscriptions included, and they can act as any user (the commands above).
+That is true of every hosted service; here it is said out loud.
+
+DESIGN.md ("What one user can infer of another's reading") has the reasons,
+and what closing it would cost.
+
+### A room on one address
+
+At a hackathon or a meetup everyone reaches blygd from the venue's one
+public address, so every per-address budget is shared by the room:
+origin pages, hopper pages and the studio's files (600 a minute, bursts of
+300), and failed authentication (30, then 10 a minute). Preflights and
+requests with no token cost nothing, so only a client sending a wrong or
+revoked token spends the room's authentication budget; the studio signs
+out on a refused token instead of retrying. With `BLYGD_TRUST_PROXY=true`
+behind Caddy the address is the venue's, as it should be. The budgets are
+constants in `internal/web/limits.go` (`BLYGD_RATE_LIMITS` only turns them
+all on or off), so a bigger allowance for an event is a change and a
+deploy: decide before the day, from `journalctl -u blygd | grep status=429`
+during the testers' week. Never turn proxy trust off to spread the load: the
+budgets would then be charged to Caddy, one address for everyone.
 
 ## Upgrading
 

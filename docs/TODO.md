@@ -1,0 +1,376 @@
+# Opening blygd to testers
+
+The weekend of 2026-11-14. Goal: up to 10 people testing from Monday
+2026-11-16, and a demo at the Protocol Institute hackathon launch on Friday
+2026-11-20.
+
+blygd is already multi-tenant underneath. Each user owns one origin, items
+are scoped by `origin_id`, and hoppers, subscriptions and tokens by
+`user_id`. Request budgets are per token and per user. What remains is
+proving the isolation, fixing what testers will hit first, letting people
+in, and running the instance for people other than its operator.
+
+Status: `[ ]` open, `[~]` in progress on a branch, `[x]` done.
+Each track names the branch it is on.
+
+## Decisions open
+
+- [ ] **Host and domain.** Origins are identities and published items are
+  permanent (§4, §8), so whatever host testers publish on, they publish on
+  for good. Choose it before the first tester's origin exists. A sandbox
+  that is wiped later breaks the promise to anyone who subscribed or
+  quoted, the reference studio included.
+- [x] **How users are mounted: `https://host/~{handle}/`** (decided
+  2026-11-14), as home directories were on a shared Unix host. Nothing
+  host-rooted can begin with `~`, so no handle shadows a route. The
+  operator's existing origin keeps `https://host/{handle}/`; routing by the
+  longest `base_url` serves both. Done in Track C.
+- [x] **Reserved handles.** Settled by the mount: the list no longer keeps
+  routes apart, and stays as it is so that `~api` or `~studio` cannot pass
+  for the service. Nothing added.
+- [ ] **Invites or the CLI.** Invites if people at the launch should get an
+  account on the spot; otherwise `blygd user add` and a one-time secret
+  link to send the owner token.
+
+## Track A — isolation, proved (Saturday)
+
+`[x]` on `claude/adoring-cray-iexclk-a-isolation`, 2026-11-14.
+
+`TestTenantsAreIsolated` in `internal/web/tenancy_e2e_test.go`. Four
+users on one instance; Alice has one of everything, Carol and Dave give
+her a subscription, a received mention and an import. Every user holds a
+`*` owner token, so no scope check can answer before the ownership check
+does.
+
+- [x] **Alice's fixture, one of everything:** a draft, a published item
+  pinned at v1, a thread whose `[[id]]` link sends Carol a mention, a
+  hopper with an own and an imported member, media, a subscription with a
+  private display title and a read mark, a verified mention from Carol's
+  stub, a block, a second token, and an OPML import worked off.
+- [x] **Path ids, all 26 operations.** As Bob, with Alice's ids, each
+  answers 404, and everything Alice can read of her own things (15 API
+  reads, and the ETags of 5 surface files) is the same afterwards.
+- [x] **The list comes from `openapi.json`.** The test fails on an
+  operation with a path id and no case, and on a case whose path does not
+  match the operation it is filed under. (That second check caught three
+  of the test's own paths.)
+- [x] **Media is per origin.** Bob uploading Alice's bytes gets the same
+  path; deleting his copy leaves hers.
+- [x] **Ids in request bodies:** Bob's hopper refuses Alice's draft, her
+  published item, and an import named through her subscription.
+  `stub_of`, `![[id]]`, `[[id]]` and `forked_from` naming her draft never
+  resolve, whether or not Bob subscribes to her. Her published item
+  resolves for Bob only once he subscribes (§10.2). `POST
+  /api/reader/read` with her subscription is a 404. Bob's
+  `DELETE /api/subscriptions/imports` deletes only his own.
+- [x] **Events:** Bob's stream, open from the start, hears nothing, while
+  Alice's hears `item`, `mention`, `outbound`, `import` and `subscribe`.
+- [x] **Listings:** none of Bob's 12 listings names Alice's items, media,
+  or the origins she follows.
+- [x] **Nothing Bob is answered carries Alice's private words:** her
+  draft, hopper name, token name, block, or display title.
+- [x] **Tried:** each of these breakages fails the test, and was put back:
+  - `DeleteMedia`'s `DELETE` without `origin_id`;
+  - `AddOwn` without `o.owner_id`;
+  - hopper `Delete` without `user_id`;
+  - the studio's item read without `origin_id`;
+  - `Revoke` without `user_id`;
+  - the event filter without its origin or user check, for `item`,
+    `mention` and `subscribe` hints;
+  - reverting the fix below.
+- [x] **Found and fixed:** `DELETE /api/reader/items/{sid}/{iid}/read`
+  answered 204 for an item the caller does not hold. It changed nothing
+  (the delete was already scoped to the caller), but every other operation
+  answers 404, as `PUT` on the same path does. `Reader.MarkRead` now
+  answers 404 when the caller holds no such item, and still 204 for an
+  item already unread. `openapi.json` says so.
+- [x] **Noted, not changed:** a subscription's `id` in the API is the
+  remote origin's row id, which every subscriber to that origin shares.
+  It is not a key to anything (every query also checks the caller's
+  `user_id`), but ids are sequential and the mirror is shared, so
+  subscribing to an origin tells a user whether someone on the instance
+  already follows it, as the instant backfill already does. That comes
+  with the shared mirror (DESIGN.md "Three planes"), and is fine for
+  testers. Revisit if the instance ever hosts people who must not learn
+  that about each other.
+- [x] `go test ./...` green against Postgres 16 (this container cannot
+  install 18; nothing in the migrations needs it). Run `make test-all` on
+  18 before deploying.
+- [x] Merged into `claude/adoring-cray-iexclk`; the merge is green.
+
+## Track B — studio fixes (Saturday)
+
+`[x]` on `claude/adoring-cray-iexclk-b-studio`, 2026-11-14.
+
+No API change: everything the studio now does is an operation
+`openapi.json` already describes.
+
+- [x] **Approving a response always failed.** `STUDIO_SCOPES` lacked
+  `origin:write`, which approval needs beside `mentions:write` (§15.5),
+  so every studio-minted token got 403.
+  - Added, with the comment above it rewritten. DESIGN.md "The studio"
+    says what the token holds and why.
+  - A sign-in from before the change lacks the scope. The mentions view
+    then says to sign in again, rather than show a button that is refused.
+  - `TestStudioHoldsWhatItCalls` reads `STUDIO_SCOPES` and every `api()`
+    call out of `app.js`. It fails when a call needs a scope the list
+    lacks, counting approval's extra `origin:write`. Calls made with the
+    pasted token (`call()`, to mint) are exempt. Without the scope it
+    names approval and `PATCH /api/origin`.
+  - `TestStudioTokenShowsResponsesAndEditsSettings`: a token minted with
+    exactly those scopes approves a verified response, which then shows
+    on the page, and retitles the origin. Without the scope it gets 403.
+- [x] **Found on the way, fixed:**
+  - Show, Hide, Delete (a draft) and Unsubscribe never refreshed the view on
+    success. `attempt()` returned the response body, and a 204 has none,
+    so the caller read success as failure. It now returns `true` for an
+    empty success.
+  - `GET /api/mentions` lists notices too, and the studio offered "Show"
+    on them, which always answers 409 (§15.5). Notices now carry a
+    badge and no Show button, and the view says what they are. The
+    verbs gain `source` ("drew on") and `link` ("linked to").
+  - `operationFor`, the studio tests' path matcher, now prefers a literal
+    segment to a parameter, as the router does. `/api/tokens/self` matched
+    `/api/tokens/{tid}` at random before.
+- [x] **Settings tab** (`#settings`): the permanent origin URL; title;
+  description; name and link as the origin's `author` (§6.1), with
+  "Sign your items with this name" setting the same object as the
+  `byline` (§5.5); accepting mentions; and sign out. It sends only what
+  changed, keeps any other members of `author`, says saving rebuilds
+  every page, and disables Save while it runs.
+- [x] **Tried in a browser** (headless Chromium, a local instance on
+  Postgres 16): signing in with an owner token gives a studio token with
+  `origin:write`. Show re-renders with the "shown" badge and the response
+  is on the public page, and Hide brings Show back. Save with nothing
+  changed says so; a real save reaches `blyg.json`. No page errors. All
+  five tabs fit at 360 px.
+- [x] `go test ./...` green against Postgres 16. Run `make test-all` on
+  18 before deploying.
+- [x] Merged into `claude/adoring-cray-iexclk`; the merge is green.
+  Anyone already signed in to the studio must sign out and in once.
+
+## Track C — users under `~` (Saturday)
+
+`[x]` on `claude/adoring-cray-iexclk-c-tilde`, 2026-11-14.
+
+- [x] `account.UserMount = "~"`: `CreateUser` makes
+  `publicURL + "~" + handle + "/"`. No migration: `base_url` already holds
+  the whole URL, and its CHECK allows `~`.
+- [x] **One spelling.** The spec now says an origin has one spelling and
+  is compared byte for byte (§12.2, revision of 2026-11-12, #103), and a
+  WHATWG parser keeps `%7E` as given. So a `GET` or `HEAD` that spells `~`
+  as `%7E` is redirected (301) to `~`. Identity is taken after redirects,
+  so a reader subscribing by `/%7Ealice/` gets `/~alice/`. Without the
+  redirect it was a 404.
+- [x] `TestUsersMountUnderTilde`: the origin's URL and manifest `site`;
+  `/alice/` is a 404; `%7E` and `%7e` redirect, query kept; subscribing
+  by `%7E` yields the `~` identity; an origin moved to the old
+  `https://host/{handle}/` is served beside the new ones, and `/me` names
+  it. Removing the redirect, or going back to the old mount, fails it.
+  Every other e2e test now runs on `~` origins, and all pass.
+- [x] `scripts/interop/run.sh` reads the origin from `blygd user add`
+  rather than assuming `/alice/`. Not run here (it needs the reference
+  client); rerun it before the demo.
+- [x] DESIGN.md "Origins and routing" (why `~`, why not `h/`, old origins,
+  one spelling), README, DEPLOY.md, PLAN.md, `config.go`, `llms.txt` and
+  `openapi.json` say `~{handle}`.
+- [x] `go test ./...` green against Postgres 16.
+- [x] Merged into `claude/adoring-cray-iexclk`; the merge is green.
+
+**The spec has moved.** blygd implements `protocol-v0.4.md` at its sixth
+revision (2026-10-20). `blygger-spec` `d248bc4` (2026-11-12) has nine more,
+the seventh to the fifteenth, including #103's one-spelling rule above.
+Nothing in them was implemented here beyond the redirect. Read them and
+rerun parity and interop before Friday, and decide what ships before the
+demo and what waits.
+
+## Track D — invites (Sunday)
+
+- [ ] Migration 008: `invites` in `internal/account`, holding the SHA-256
+  of the code (never the code), `expires_at`, `redeemed_at`,
+  `redeemed_by`, `note`. Recorded in `migrations.sum`.
+- [ ] `blygd invite [--expires 7d] [--count N] [--note …]` prints codes
+  once.
+- [ ] `POST /api/invites/redeem {code, handle, title}`, no token. Charged
+  to the `fetch` cost class and to the failed-authentication budget per
+  address. The invite is redeemed in the transaction that creates the
+  user, through a `CreateUser` that takes the caller's transaction.
+  Returns the owner token once. Described in `openapi.json`.
+- [ ] Studio: "Have an invite?" shows the permanent URL before submitting,
+  shows the owner token once with a prompt to save it, then trades it for
+  a studio token as today.
+- [ ] Tests: a second redemption fails; an expired invite is refused; a
+  taken or reserved handle leaves the invite unused; a wrong code costs
+  the address's budget.
+
+## Track E — CORS on `/api/` (Sunday)
+
+`[x]` on `claude/adoring-cray-iexclk-e-cors`, 2026-11-14.
+
+So that a client on another origin (a hackathon team's web app) can call
+the API, as the studio does from this one. Safe because the API
+authenticates only by a bearer token in a header, never by cookie: a page
+on another origin cannot act as a user without being handed their token.
+
+- [x] `internal/web/cors.go` wraps `/api/` in the router. Every response,
+  errors and 429s included, carries `Access-Control-Allow-Origin: *` and
+  exposes `Retry-After` and `WWW-Authenticate`. Never
+  `Allow-Credentials`. `serveOpenAPI` no longer sets its own header.
+- [x] `OPTIONS` on any `/api/` path is a 204 preflight, answered before
+  routing, authentication and the token budgets: `GET, POST, PUT, PATCH,
+  DELETE`; `Authorization, Content-Type`; `Max-Age` 86400. It is charged
+  to the address's public budget, and over it is a readable 429.
+- [x] The studio's CSP is unchanged and it sends no CORS header; the
+  origin surface keeps its own `GET`/`HEAD` CORS.
+- [x] Tests: `TestCrossOriginClients` (preflights without a token; 200,
+  201, the description, 401 with `WWW-Authenticate`, 403, 404 and the
+  event stream all readable; the studio untouched) and
+  `TestCrossOriginBudgets` (preflights spend the public budget, a token
+  request does not; a token's 429 is readable with `Retry-After`).
+  Removing the wrapper, skipping the budget, narrowing what is exposed, or
+  reflecting the origin with credentials each fails them.
+- [x] Tried in headless Chromium from a page on `127.0.0.1:8091` against
+  `localhost:8080`: `/me`, create, `PATCH` (preflighted), `DELETE`, a 401
+  with its `WWW-Authenticate` readable, and the event stream all work. A
+  `credentials: "include"` request is refused by the browser itself.
+- [x] DESIGN.md "Cross-origin clients" under "Write API and scopes", with
+  why it is safe; preflights in "Request budgets"; `openapi.json`'s
+  description says so.
+- [x] `go test ./...` green against Postgres 16.
+- [x] Merged into `claude/adoring-cray-iexclk`; the merge is green.
+
+## Track F — running it for others (Sunday)
+
+`[~]` on `claude/adoring-cray-iexclk-f-ops`, 2026-11-14: the code and the
+runbook are done; the two monitors are yours to make.
+
+- [ ] **Uptime check** on `/healthz` (it pings the database) from an
+  external monitor. Yours: DEPLOY.md step 8 says what to point it at.
+- [x] **Backup ping.** `backup.sh` fetches `BLYGD_BACKUP_PING_URL` (from
+  `backup.env`) last, after the dump was written, listed, sent offsite and
+  pruned. A failed ping is logged and does not fail the backup. Run here
+  against a local database with a ping that answers and one that cannot
+  connect: both exit 0, and the second says so on stderr.
+  - [ ] Yours: make the dead-man's-switch check, and put its URL in
+    `/etc/blygd/backup.env` on the server.
+- [x] **Queue line.** `App.Run` logs `queues` once a minute: `verify`,
+  `send`, `send_abandoned`, `polled`, `poll_failing`, `import`, and a
+  `_late` count for each queue, meaning more than 15 minutes past due
+  (longer than any lease) and not leased. Any late row makes the line a
+  warning. `mention.Workers.Queues` and `reader.Reader.Queues` count their
+  own tables, so `internal/web` still holds no SQL. `TestQueueLine` walks a
+  mention from queued to late to sent, then a poll falling behind. Seen
+  live on a local instance.
+- [x] **Suspension:** `blygd token revoke-all <handle>` (not `user suspend`:
+  it is exactly that, and minting a token lifts it), via
+  `Accounts.RevokeAll`. `TestRevokeAllSuspends`: every token of the user
+  stops authenticating, their published items are still served, nobody
+  else is touched, and a new token works.
+- [x] **DEPLOY.md step 8, "Operating for other people":** the monitors, the
+  queue line and how to read warnings, and a table for adding someone, a
+  lost owner token, suspending, and taking an item down. It says plainly
+  that pinned versions cannot be taken down (§8, schema-enforced), and
+  lists what to tell testers: publishing is permanent, the operator can
+  act as any user, and sign in to the studio again after this deploy.
+- [ ] **Media cap per user**, if invites are for the launch (decision
+  above): total upload bytes, checked in the upload transaction.
+- [x] `go test ./...` green against Postgres 16.
+- [x] Merged into `claude/adoring-cray-iexclk`; the merge is green.
+
+## Review of PR #2 (2026-11-15)
+
+An adversarial review, mostly on security and on what breaks with a room
+of people. Each fix has a test that fails without it.
+
+- [x] **2. Suspension stopped logins but not work in motion.**
+  `blygd user suspend` (`App.Suspend`) revokes every token, abandons the
+  origin's unsent mentions (`mention.Store.AbandonSends`), and the event
+  stream re-checks its token every heartbeat, so an open one ends within
+  25 s. `TestSuspendStopsWorkInMotion`. `token revoke-all` stays, for a leak.
+- [x] **3. A room on one address.** Preflights are no longer budgeted, a
+  request with no `Authorization` no longer counts as a failed
+  authentication, and `Max-Age` is 2 h (Chromium's cap). DEPLOY.md "A room
+  on one address". `TestCrossOriginBudgets`, `TestFailedAuthenticationBudget`.
+- [x] **4. The studio's stream retried a refused token forever**, spending
+  the address's authentication budget. It now signs out on 401, as `api()`
+  does. Tried in Chromium: suspended mid-session, signed out 26 s later,
+  one 401, no retries.
+- [x] **5. Settings checked "Sign your items" when `byline` was null**, so
+  any save started signing items. Checked only when the byline is the
+  author, or both are unset. Tried in Chromium: a title-only save sends
+  only the title.
+- [x] **6. `import_late` warned during every big OPML import**: lateness is
+  now the head of each user's line only. **6b.** `send_abandoned` became
+  `send_abandoned_24h`. `TestQueueLine`.
+- [x] **7. The new `backup.sh` never reached the host.** `deploy.sh` ships it
+  and `upgrade.sh` installs it after a healthy start. DEPLOY.md says how to
+  check the ping.
+- [x] **8. A Webmention target spelling `~` as `%7E` was a 400.** The
+  receiver folds `%7E` in targets only (§15.3 is membership; RFC 3986
+  §6.2.2.2), never in an identity. Plus a test that the `%7E` redirect never
+  leaves the host (`//evil.example/%7E…` and kin). `TestUsersMountUnderTilde`.
+- [x] **Re-review of `ba43908`:**
+  - A send in flight when `user suspend` ran wrote its retryable result
+    over the abandonment and went back in the queue. The worker's result
+    write now lands only on a row still pending.
+    `TestSuspendWinsOverASendInFlight` holds a target's endpoint mid-POST,
+    suspends, then releases a 503; without the guard the row is back to
+    `pending`. A publish that authenticated just before the revoke can
+    still queue sends; DEPLOY.md says to run the command again.
+  - `import_late` still warned while the worker steadily worked a long
+    list, since its next unclaimed entry has been due since the import was
+    made. A user's imports are now late only when nothing in their list has
+    been claimed or finished within the window. `TestQueueLine` models a
+    list made 20 minutes ago with ten entries done in the last minute.
+  - `openapi.json` says the event stream ends within a heartbeat once its
+    token is revoked or expires, and that a reconnect then answers 401.
+- [x] **1. No takedown for a pinned version.** Decided 2026-11-16: no
+  change. The hackathon group is high-trust and the chance of griefers is
+  low, so there's no takedown denylist and the studio keeps its Pin button.
+  DEPLOY.md already tells testers a pin is permanent.
+- [x] **What one user can learn of another's subscriptions.** Decided
+  2026-11-16: accepted and documented, not closed. DESIGN.md, "What one
+  user can infer of another's reading", lists the four signals, what they
+  never reveal, and what closing them would cost. DEPLOY.md, "What testers
+  can see of each other", says what is private, what is public by choice,
+  what can be worked out, and what the operator sees.
+
+  Per-user ids close only the first. Closing all four means hiding shared
+  mirror state per user. Accepting it means a paragraph in DESIGN.md.
+
+## The week
+
+- [x] **GO-2026-6859** (an HTTP/1 server crash in `net/http`, reachable
+  from blygd's own handlers) is in go1.26.10, which the live binary was
+  built with. `go.mod` now names `toolchain go1.26.11`, which fixes it. The
+  full suite passes on go1.26.11. `make vuln` on go1.26.11 reports nothing
+  that affects the code (the owner's run; `vuln.go.dev` is blocked from this
+  container). The DEPLOYS.md row for this release names the toolchain and
+  the GO id, as the 2026-10-28 row does.
+- [x] `make interop` at `ed7d4ce`: all seven scenarios pass, the `~` mount
+  included, against blygger-studio 0.49.1 (`2582d73`). The reference is now
+  at 0.61.0, so rerun it against a current checkout before Friday.
+- [ ] Deploy what is merged here (A, B, C, E, F). None of it migrates, so the
+  old binary is a full rollback. `make test-all` on Postgres 18 and
+  `make vuln` first; then `scripts/deploy.sh --check`, `scripts/deploy.sh`,
+  and the DEPLOYS.md row. Then set `BLYGD_BACKUP_PING_URL` and the uptime
+  check (Track F).
+- [ ] D (invites) and C (handles or a mount) wait on the decisions at the
+  top; D brings migration 008 and its own preflight.
+- [ ] Monday: three testers. Tuesday: the rest, if nothing broke.
+- [ ] An OPML of every tester's origin, imported by each
+  (`POST /api/subscriptions/imports`), so everyone follows everyone.
+- [ ] A one-page tester guide: what is permanent, pinning, the draft and
+  preview loop, quoting and forking each other, where to report bugs.
+- [ ] Wednesday midnight: freeze.
+- [ ] Thursday: rehearse on the live host (publish, quoted by another
+  tester, mention verifies, approve, shown, fork, withdraw and endcap);
+  a timed restore drill; `free -m` against DEPLOY.md's 400 MB; check
+  whether `blygger-spec` has moved past `24b9770`.
+- [ ] Friday: demo.
+
+## Not this week
+
+Custom domains, OAuth-style approval and MCP, account deletion (the schema
+forbids it), rate limits across processes, hoppers in the studio, and the
+§10.2 open question.

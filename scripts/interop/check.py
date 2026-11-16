@@ -3,7 +3,7 @@
 
 Run by run.sh, which starts both studios and sets:
   BLYGD_URL      blygd host root, e.g. http://127.0.0.1:18090
-  BLYGD_ORIGIN   the test user's origin, e.g. http://127.0.0.1:18090/alice/
+  BLYGD_ORIGIN   the test user's origin, e.g. http://127.0.0.1:18090/~alice/
   BLYGD_TOKEN    that user's owner token
   REF_URL        the reference's origin, e.g. http://127.0.0.1:18787/
   REF_CONTROL    the reference's cron control, e.g. http://127.0.0.1:18788/

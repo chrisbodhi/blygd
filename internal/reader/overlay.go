@@ -472,8 +472,23 @@ func (r *Reader) MarkRead(ctx context.Context, userID, remoteID int64, itemID st
 			WHERE rd.imported_item_id = ii.id AND rd.user_id = $1 AND s.user_id = $1
 			  AND s.remote_origin_id = ii.remote_origin_id AND ii.remote_origin_id = $2 AND ii.item_id = $3`,
 			userID, remoteID, itemID)
+		if err == nil && tag.RowsAffected() == 0 {
+			// Unmarking something already unread is not an error, but
+			// unmarking something the user does not hold is a 404, as
+			// marking it is: the same answer whether or not anyone else
+			// holds it.
+			var held bool
+			err = r.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM subscriptions s
+				JOIN imported_items ii ON ii.remote_origin_id = s.remote_origin_id
+				WHERE s.user_id = $1 AND s.remote_origin_id = $2 AND ii.item_id = $3)`,
+				userID, remoteID, itemID).Scan(&held)
+			if err == nil && !held {
+				return ErrNotFound
+			}
+			return err
+		}
 		if err == nil {
-			return nil // unmarking something already unread is not an error
+			return nil
 		}
 	}
 	if err == nil && tag.RowsAffected() == 0 {

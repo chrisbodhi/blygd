@@ -1,11 +1,14 @@
 package web
 
 import (
+	"encoding/json"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -119,69 +122,160 @@ func TestLLMSTxt(t *testing.T) {
 
 func discardLog() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
-// The studio is one client of the API, with no back door: every request
-// it makes is an operation openapi.json describes, so another client can
-// do anything it does (DESIGN.md, The studio).
-func TestStudioCallsOnlyTheDescribedAPI(t *testing.T) {
-	paths, _ := loadOpenAPI(t)
-	described := func(method, path string) bool {
-		segs := strings.Split(path, "/")
-	next:
-		for tmpl, ops := range paths {
-			if _, ok := ops[strings.ToLower(method)]; !ok {
-				continue
-			}
-			want := strings.Split(tmpl, "/")
-			if len(want) != len(segs) {
-				continue
-			}
-			for i, w := range want {
-				param := strings.HasPrefix(w, "{")
-				if segs[i] == "{}" && !param || segs[i] != "{}" && segs[i] != w && !param {
-					continue next
-				}
-			}
-			return true
-		}
-		return false
-	}
+// studioCall is one API request the studio's source makes. Path
+// parameters are "{}". fn is the helper that makes it: api, with the
+// studio's own token, or call, with a token pasted at sign-in.
+type studioCall struct{ file, fn, method, path string }
 
-	// api("GET", "/items/" + id), call("POST", "/tokens", …) and
-	// api("POST", `/items/${id}/publish`): an interpolation, or a value
-	// appended after a slash, is a path parameter; the rest is a query.
-	call := regexp.MustCompile("\\b(?:api|call)\\(\"([A-Z]+)\",\\s*(?:\"([^\"]*)\"(\\s*\\+\\s*[A-Za-z_$])?|`([^`]*)`)")
+// studioCalls reads every API request out of the studio's source:
+// api("GET", "/items/" + id), call("POST", "/tokens", …) and
+// api("POST", `/items/${id}/publish`). An interpolation, or a value
+// appended after a slash, is a path parameter; the rest is a query, and
+// dropped. It also returns every fetch() target as is.
+func studioCalls(t *testing.T, files ...string) (calls []studioCall, fetches []studioCall) {
+	t.Helper()
+	call := regexp.MustCompile("\\b(api|call)\\(\"([A-Z]+)\",\\s*(?:\"([^\"]*)\"(\\s*\\+\\s*[A-Za-z_$])?|`([^`]*)`)")
 	interp := regexp.MustCompile(`\$\{[^}]*\}`)
 	fetch := regexp.MustCompile("\\bfetch\\(\\s*([\"'`])([^\"'`]*)")
-	calls := 0
-	for _, file := range []string{"studio/app.js", "studio/api/docs.js"} {
+	for _, file := range files {
 		f, err := studioFiles.Open(file)
 		if err != nil {
 			t.Fatal(err)
 		}
 		src, _ := io.ReadAll(f)
 		for _, m := range call.FindAllStringSubmatch(string(src), -1) {
-			path := m[2]
-			if m[4] != "" {
-				path = interp.ReplaceAllString(m[4], "{}")
-			} else if m[3] != "" && strings.HasSuffix(path, "/") {
+			path := m[3]
+			if m[5] != "" {
+				path = interp.ReplaceAllString(m[5], "{}")
+			} else if m[4] != "" && strings.HasSuffix(path, "/") {
 				path += "{}"
 			}
 			path, _, _ = strings.Cut(path, "?")
-			calls++
-			if !described(m[1], "/api"+path) {
-				t.Errorf("%s calls %s /api%s, which openapi.json does not describe", file, m[1], path)
-			}
+			calls = append(calls, studioCall{file, m[1], m[2], "/api" + path})
 		}
 		for _, m := range fetch.FindAllStringSubmatch(string(src), -1) {
-			if !strings.HasPrefix(m[2], "/api") {
-				t.Errorf("%s fetches %q: the studio reaches the server only through /api/", file, m[2])
-			} else if m[2] != "/api" && !described("GET", m[2]) {
-				t.Errorf("%s fetches %s, which openapi.json does not describe", file, m[2])
-			}
+			fetches = append(fetches, studioCall{file, "fetch", "GET", m[2]})
 		}
 	}
-	// A regexp that stops matching would pass everything above.
-	if calls < 20 {
-		t.Fatalf("found %d API calls in the studio; has the call syntax changed?", calls)
+	// A regexp that stops matching would pass every check on the result.
+	if len(calls) < 10 {
+		t.Fatalf("found %d API calls in %v; has the call syntax changed?", len(calls), files)
+	}
+	return calls, fetches
+}
+
+// operationFor names the documented operation a studio call reaches, as
+// its openapi.json path template, or "" when none does. A literal segment
+// beats a parameter, as in the router: /api/tokens/self is not
+// /api/tokens/{tid}.
+func operationFor(paths map[string]map[string]json.RawMessage, method, path string) string {
+	segs := strings.Split(path, "/")
+	best, bestParams := "", 0
+next:
+	for tmpl, ops := range paths {
+		if _, ok := ops[strings.ToLower(method)]; !ok {
+			continue
+		}
+		want := strings.Split(tmpl, "/")
+		if len(want) != len(segs) {
+			continue
+		}
+		for i, w := range want {
+			param := strings.HasPrefix(w, "{")
+			if segs[i] == "{}" && !param || segs[i] != "{}" && segs[i] != w && !param {
+				continue next
+			}
+		}
+		if n := strings.Count(tmpl, "{"); best == "" || n < bestParams {
+			best, bestParams = tmpl, n
+		}
+	}
+	return best
+}
+
+// The studio is one client of the API, with no back door: every request
+// it makes is an operation openapi.json describes, so another client can
+// do anything it does (DESIGN.md, The studio).
+func TestStudioCallsOnlyTheDescribedAPI(t *testing.T) {
+	paths, _ := loadOpenAPI(t)
+	calls, fetches := studioCalls(t, "studio/app.js", "studio/api/docs.js")
+	if len(calls) < 20 {
+		t.Fatalf("found %d API calls in the studio; has the call syntax changed?", len(calls))
+	}
+	for _, c := range calls {
+		if operationFor(paths, c.method, c.path) == "" {
+			t.Errorf("%s calls %s %s, which openapi.json does not describe", c.file, c.method, c.path)
+		}
+	}
+	for _, f := range fetches {
+		if !strings.HasPrefix(f.path, "/api") {
+			t.Errorf("%s fetches %q: the studio reaches the server only through /api/", f.file, f.path)
+		} else if f.path != "/api" && operationFor(paths, "GET", f.path) == "" {
+			t.Errorf("%s fetches %s, which openapi.json does not describe", f.file, f.path)
+		}
+	}
+}
+
+// studioScopes reads STUDIO_SCOPES, the scopes of the token the studio
+// mints for itself, out of app.js.
+func studioScopes(t *testing.T) []string {
+	t.Helper()
+	src, err := fs.ReadFile(studioFiles, "studio/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`(?s)const STUDIO_SCOPES = \[(.*?)\];`).FindSubmatch(src)
+	if m == nil {
+		t.Fatal("app.js has no STUDIO_SCOPES")
+	}
+	var scopes []string
+	for _, q := range regexp.MustCompile(`"([a-z:*]+)"`).FindAllSubmatch(m[1], -1) {
+		scopes = append(scopes, string(q[1]))
+	}
+	if len(scopes) < 5 {
+		t.Fatalf("read %d studio scopes: has the declaration changed?", len(scopes))
+	}
+	return scopes
+}
+
+// alsoNeeds lists what an operation checks beyond the one scope its
+// security requirement names, because it can make something public.
+var alsoNeeds = map[string]string{
+	"PUT /api/mentions/{mid}/approval": "origin:write", // showing a response publishes (§15.5)
+}
+
+// The studio's own token holds every scope its calls need, so no button it
+// shows answers 403. A studio that calls a new operation without widening
+// STUDIO_SCOPES fails here.
+func TestStudioHoldsWhatItCalls(t *testing.T) {
+	paths, _ := loadOpenAPI(t)
+	held := studioScopes(t)
+	calls, _ := studioCalls(t, "studio/app.js")
+	for _, c := range calls {
+		if c.fn == "call" {
+			continue // made with the pasted token, to mint the studio's own
+		}
+		tmpl := operationFor(paths, c.method, c.path)
+		if tmpl == "" {
+			continue // TestStudioCallsOnlyTheDescribedAPI reports it
+		}
+		var op struct {
+			Security []map[string][]string `json:"security"`
+		}
+		if err := json.Unmarshal(paths[tmpl][strings.ToLower(c.method)], &op); err != nil {
+			t.Fatal(err)
+		}
+		need := []string{}
+		for _, req := range op.Security {
+			need = append(need, req["bearer"]...)
+		}
+		if extra, ok := alsoNeeds[c.method+" "+tmpl]; ok {
+			need = append(need, extra)
+		}
+		for _, s := range need {
+			if !slices.Contains(held, s) {
+				t.Errorf("app.js calls %s %s, which needs %s; STUDIO_SCOPES lacks it", c.method, tmpl, s)
+			}
+		}
 	}
 }

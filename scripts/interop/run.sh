@@ -51,7 +51,9 @@ export BLYGD_LISTEN="127.0.0.1:$BLYGD_PORT"
 export BLYGD_ALLOW_PRIVATE_FETCH=true   # both studios are on localhost
 export BLYGD_MANUAL_POLL_FLOOR=2        # development only: keep the run short
 export BLYGD_RATE_LIMITS=false          # the checks run faster than any budget allows
-TOKEN="$("$WORK/blygd" user add alice "Alice on blygd" | sed -n 's/^owner token (shown once): //p')"
+ADDED="$("$WORK/blygd" user add alice "Alice on blygd")"
+TOKEN="$(printf '%s\n' "$ADDED" | sed -n 's/^owner token (shown once): //p')"
+ORIGIN="$(printf '%s\n' "$ADDED" | sed -n 's/^origin: //p')"
 "$WORK/blygd" serve >"$WORK/blygd.log" 2>&1 &
 pids+=($!)
 
@@ -60,11 +62,11 @@ cp "$HERE/reference-server.mts" "$REF_DIR/.blygd-interop/server.mts"
 (cd "$REF_DIR" && exec node --import tsx .blygd-interop/server.mts) >"$WORK/reference.log" 2>&1 &
 pids+=($!)
 
-wait_for "http://127.0.0.1:$BLYGD_PORT/alice/blyg.json"
+wait_for "${ORIGIN}blyg.json"
 wait_for "http://127.0.0.1:$REF_PORT/blyg.json"
 
 status=0
-BLYGD_URL="http://127.0.0.1:$BLYGD_PORT" BLYGD_ORIGIN="http://127.0.0.1:$BLYGD_PORT/alice/" BLYGD_TOKEN="$TOKEN" \
+BLYGD_URL="http://127.0.0.1:$BLYGD_PORT" BLYGD_ORIGIN="$ORIGIN" BLYGD_TOKEN="$TOKEN" \
 REF_URL="http://127.0.0.1:$REF_PORT/" REF_CONTROL="http://127.0.0.1:$REF_CONTROL_PORT/" \
   python3 "$HERE/check.py" || status=$?
 if [ "$status" -ne 0 ]; then

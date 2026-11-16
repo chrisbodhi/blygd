@@ -145,7 +145,13 @@ func (a *API) guard(rt route) http.Handler {
 		}
 		p, err := a.Accounts.Authenticate(r.Context(), r.Header.Get("Authorization"))
 		if errors.Is(err, account.ErrUnauthorized) {
-			a.Limits.authFailed(addr)
+			// Only a presented secret can be a guess. A request with no
+			// Authorization at all (a client asking before its user pasted
+			// a token) is not charged, or one such client would lock
+			// everyone behind its address out (a venue's shared NAT).
+			if r.Header.Get("Authorization") != "" {
+				a.Limits.authFailed(addr)
+			}
 			w.Header().Set("WWW-Authenticate", `Bearer realm="blygd"`)
 			writeError(w, http.StatusUnauthorized, "unauthorized", err.Error())
 			return

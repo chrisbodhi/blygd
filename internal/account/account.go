@@ -54,8 +54,9 @@ var AllScopes = []string{
 	ScopeReaderRead, ScopeReaderWrite,
 }
 
-// ReservedHandles cannot be users: they are, or may become, host-rooted
-// routes beside path-mounted origins.
+// ReservedHandles cannot be users. Origins mount under "~" (UserMount),
+// so no handle can collide with a host-rooted route any more; these are
+// kept because "~api" or "~studio" would pass for the service itself.
 var ReservedHandles = []string{"api", "admin", "healthz", "static", "studio", "www", "webmention", "media", "items", "feed", "h"}
 
 // Principal is an authenticated token.
@@ -112,9 +113,18 @@ func hashSecret(secret string) []byte {
 	return sum[:]
 }
 
-// CreateUser creates a user and their path-mounted origin at
-// publicURL + handle + "/", rendered, and mints an all-scopes owner
-// token, all in one transaction. The secret is returned once and never
+// UserMount namespaces users' origins on the host, as the home directories
+// of a shared Unix host were: https://host/~{handle}/. Nothing host-rooted
+// (/api/, /studio/, /healthz, /llms.txt) can start with it, so a handle
+// never shadows a route and a route added later never shadows a handle.
+// An origin made before it, at https://host/{handle}/, keeps that URL for
+// good (its base_url is its identity, §12.2), and routing by the longest
+// base_url serves both.
+const UserMount = "~"
+
+// CreateUser creates a user and their origin at
+// publicURL + UserMount + handle + "/", rendered, and mints an all-scopes
+// owner token, all in one transaction. The secret is returned once and never
 // stored.
 func (a *Accounts) CreateUser(ctx context.Context, handle, publicURL, title string) (userID, originID int64, secret string, err error) {
 	handle = strings.ToLower(strings.TrimSpace(handle))
@@ -125,7 +135,7 @@ func (a *Accounts) CreateUser(ctx context.Context, handle, publicURL, title stri
 	if err != nil {
 		return 0, 0, "", fmt.Errorf("public URL: %w", err)
 	}
-	origin := base + handle + "/"
+	origin := base + UserMount + handle + "/"
 	err = tx.Run(ctx, a.Pool, pgx.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx, `INSERT INTO users (handle) VALUES ($1) RETURNING id`, handle).Scan(&userID); err != nil {
 			return err
@@ -241,4 +251,23 @@ func (a *Accounts) ListTokens(ctx context.Context, userID int64) ([]Token, error
 func (a *Accounts) Revoke(ctx context.Context, userID, tokenID int64) (bool, error) {
 	tag, err := a.Pool.Exec(ctx, `UPDATE tokens SET revoked_at = now() WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL`, tokenID, userID)
 	return tag.RowsAffected() == 1, err
+}
+
+// RevokeAll revokes every token a user holds, owner token included, and
+// says how many. It is how an operator suspends someone: nothing they hold
+// authenticates any more, while what they published stays published (§4,
+// §9). Minting them a new token (`blygd token mint`) lifts it.
+func (a *Accounts) RevokeAll(ctx context.Context, userID int64) (int64, error) {
+	tag, err := a.Pool.Exec(ctx, `UPDATE tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL`, userID)
+	return tag.RowsAffected(), err
+}
+
+// TokenLive says whether a token still authenticates: not revoked, not
+// expired. A long-lived request, the event stream, asks it again as it
+// runs, so a revoked token's stream ends.
+func (a *Accounts) TokenLive(ctx context.Context, tokenID int64) (bool, error) {
+	var live bool
+	err := a.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM tokens WHERE id = $1 AND revoked_at IS NULL
+		AND (expires_at IS NULL OR expires_at > now()))`, tokenID).Scan(&live)
+	return live, err
 }

@@ -49,8 +49,9 @@ echo "deploy: built ${commit:0:7} for linux/$arch with $gover, sha256 $sum"
 
 scp -q "$out" "$host:/tmp/blygd-$sum"
 scp -q "$work/src/deploy/upgrade.sh" "$host:/tmp/blygd-upgrade-$sum.sh"
+scp -q "$work/src/deploy/backup.sh" "$host:/tmp/blygd-backup-$sum.sh"
 log=$work/upgrade.log
-ssh -t "$host" "sudo bash /tmp/blygd-upgrade-$sum.sh ${check[*]} /tmp/blygd-$sum $sum; s=\$?; rm -f /tmp/blygd-upgrade-$sum.sh /tmp/blygd-$sum; exit \$s" |
+ssh -t "$host" "sudo bash /tmp/blygd-upgrade-$sum.sh ${check[*]} /tmp/blygd-$sum $sum /tmp/blygd-backup-$sum.sh; s=\$?; rm -f /tmp/blygd-upgrade-$sum.sh /tmp/blygd-$sum /tmp/blygd-backup-$sum.sh; exit \$s" |
 	tee "$log"
 
 ((${#check[@]} == 0)) || exit 0

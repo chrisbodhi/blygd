@@ -112,14 +112,34 @@ and a planes test in each package):
 ## Origins and routing
 
 - An origin is a **full base URL** (`origins.base_url`), normalized. Today
-  every origin is path-mounted under `BLYGD_PUBLIC_URL`:
-  `https://host/{handle}/`. Custom domains later need no schema change.
+  every origin is path-mounted under `BLYGD_PUBLIC_URL`, in the users'
+  namespace: `https://host/~{handle}/` (`account.UserMount`), as home
+  directories were on a shared Unix host. Custom domains later need no
+  schema change.
+- **Why `~`.** Nothing host-rooted (`/api/`, `/studio/`, `/healthz`,
+  `/llms.txt`) can begin with it, so a handle never shadows a route, and a
+  route added later never shadows a handle. `h/` was considered and set
+  aside: it is already the public hopper prefix inside an origin, and
+  `https://host/h/alice/h/reading/` reads `h` two ways. Origins made before
+  the namespace keep `https://host/{handle}/`, because an
+  origin's URL is its identity (§12.2); longest-prefix routing serves both.
+- **One spelling.** An origin is compared byte for byte (§12.2, #103), and
+  a WHATWG parser keeps `%7E` as it finds it, so `/%7Ealice/` is not
+  `/~alice/` to a reader. The surface answers a `GET` or `HEAD` that spells
+  `~` as `%7E` with a 301 to `~`, and since identity is taken after
+  redirects, a reader that subscribes by the encoded spelling ends with the
+  one the origin writes. A `POST` is not redirected; instead the
+  Webmention receiver reads a target's `%7E` as `~`, because §15.3 asks
+  only whether the target is an address this blyg serves for an item, and
+  to a server the two are one address (RFC 3986 §6.2.2.2). Only targets are
+  folded, never an identity.
 - Request routing finds the origin whose `base_url` is the longest prefix
   of the request URL, then serves `surface_files` at the remainder. The one
   dynamic path is `{origin}webmention` (§15.1).
 - The API is **host-rooted** at `/api/`, never inside an origin: a studio
-  and its API are client internals, not protocol (§15.1, §16.6). Handles
-  that would collide with host-rooted routes are reserved.
+  and its API are client internals, not protocol (§15.1, §16.6). The
+  reserved handles no longer keep routes apart (the namespace does); they
+  stay so that `~api` or `~studio` cannot pass for the service itself.
 - `/llms.txt` (llmstxt.org) is host-rooted too: a static, embedded
   description of the service and where to read more (the spec, the
   reference client, `/api/openapi.json`, `/studio/`). It names no origin
@@ -219,6 +239,39 @@ origin backs off after failures (polling never tightens on failure),
 within a minute of its last poll (the mirror is shared, so one tenant
 cannot hammer an origin for everyone), and while another poll of it
 runs. `poll_lease_until` marks a poll in flight.
+
+**What one user can infer of another's reading.** Subscriptions are
+private overlay (plane 3): no request lets one user list, read or change
+another's subscriptions, display titles, read marks, imports or private
+hoppers, and `TestTenantsAreIsolated` holds every route to that. The mirror
+under them (plane 2) is shared on purpose, so that ten readers of one blyg
+cost it one poll (§12.3). So a user who subscribes to an origin can tell
+whether the instance already had it in the mirror. They can tell from four
+things:
+
+- **The subscription id**, which is the shared `remote_origins` id. Ids are
+  assigned in order, so a low one means the origin was mirrored earlier.
+- **History at once.** A newly mirrored origin's items arrive over its first
+  polls; an origin already mirrored comes with its items and counts in place.
+- **`last_polled_at`** earlier than the subscription's own `created_at`.
+- **Poll-now refused** (`TooSoon`) within a minute of another user's poll of
+  the same origin, because the floor protects the publisher, not the user.
+
+What this tells them is that someone on this instance follows that origin,
+or once did, since mirror rows are never collected (Phase 2, left for
+later). It never tells them who, how many, or what anyone read, and none of
+it is visible outside the instance. A user's public blogroll (§11) and
+public hoppers (§13.5) do name what they follow, and only because they chose
+to publish them.
+
+**Why it stays.** Hiding it would mean a separate view of the mirror per user:
+ids of their own, no history until their own subscription has polled,
+per-user poll times and a per-user poll-now floor. That gives up most of what
+sharing the mirror buys, the publisher's single poll included, to close an
+inference that, among a few people who know each other, is a question they
+could ask out loud. Revisit it if an instance hosts people who must not
+learn even that much about each other. Per-user subscription ids alone would
+close only the first signal.
 
 **The poller** leases due remote origins with the mention workers'
 pattern, and only origins someone subscribes to. Every URL it fetches
@@ -605,6 +658,34 @@ and the description is readable without a token. The reference links
 OAuth endpoints (`authorization_endpoint`, `oauth-metadata`) instead;
 blygd will add those when it has an approval flow.
 
+**Cross-origin clients.** Every `/api/` response carries
+`Access-Control-Allow-Origin: *`, errors and 429s included, and exposes
+`Retry-After` and `WWW-Authenticate`. Preflights are answered for any
+`/api/` path, allowing the methods the API uses and the `Authorization`
+and `Content-Type` headers, cached for two hours (Chromium's cap). So a client can live on its
+own origin (a web app, a hackathon prototype) and still be one more
+client of the API, as the studio is from this one.
+
+- **Why it is safe.** The API authenticates only by the bearer token in
+  `Authorization`, never by a cookie, by where a request comes from, or by
+  anything else a browser attaches on its own. A page on another origin
+  can act as a user only with a token that user gave it. So every origin
+  gets the same answer, `*`, and none gets
+  `Access-Control-Allow-Credentials`: a cookie added later would not be
+  sent cross-origin.
+- **Preflights are free.** A preflight carries no token, so it is answered
+  before authentication, and it is a constant answer that touches nothing,
+  cheaper than a limiter lookup, so like `/healthz` it is not budgeted.
+  Charged to the address, it would compete with every page view behind a
+  shared NAT (a hackathon room), and a refused preflight hides
+  `Retry-After` from the script, which sees only a network error.
+- **Only `/api/`.** The origin surface keeps its own `GET`/`HEAD` CORS
+  (§4). The studio sends none, and its CSP still connects to this host
+  only.
+- **The token is the user's to give.** A cross-origin client asks the user
+  to paste a scoped, expiring token, as the studio does, until an
+  OAuth-style approval flow exists (Phase 4).
+
 ## Request budgets
 
 In-memory token buckets (`internal/limit`), so budgets are per process;
@@ -623,10 +704,14 @@ blygd runs one. `BLYGD_RATE_LIMITS=false` turns them off for harnesses.
   tokens cannot multiply a user. Over budget is 429 with `Retry-After`.
 - **Failed authentication, per address.** 30 at once, then 10 a minute.
   Past that the address is refused before its token is looked up, good
-  token or not.
+  token or not. Only a presented secret counts: a request with no
+  `Authorization` at all is a client asking before its user pasted a
+  token, not a guess, and charging it would let one such client lock out
+  everyone behind its address.
 - **Everything public, per address.** Origin files, hopper pages, the
   studio and llms.txt share 600 a minute in bursts of 300; webmention posts
-  have 30 a minute on top of §15.3's per-source caps. `/healthz` is free.
+  have 30 a minute on top of §15.3's per-source caps. `/healthz` and `/api/`
+  preflights are free.
 - **Addresses.** The peer, or with `BLYGD_TRUST_PROXY` the last
   `X-Forwarded-For` entry, which is the one the proxy saw. Public IPv6 is
   charged per /64; loopback and private addresses are kept whole, since a
@@ -666,7 +751,9 @@ reconnect, re-fetch.
   `reader:read`; their own items with `items:read`; their origin's
   mentions and sends with `mentions:read`). The server's write deadline
   is lifted for the stream, there is a heartbeat every 25 s, and at most
-  8 streams per user. Requests share the process context, so a shutdown
+  8 streams per user. Each heartbeat re-checks the token, so a stream
+  opened before its token was revoked or expired ends within one; the
+  studio then signs out rather than retry a refused token. Requests share the process context, so a shutdown
   ends streams at once.
 - Browsers read it with `fetch()`, because `EventSource` cannot send the
   `Authorization` header.
@@ -688,11 +775,20 @@ there for every client. The studio could be deleted, or replaced by
 another directory of files, without touching a handler.
 
 - **Its own token.** A pasted token that may mint is traded at once for a
-  studio token: only the scopes the studio calls (items, reader,
-  mentions; no `tokens:write`, origin or hopper settings), 30 days, named
-  for the device. Only that one is kept, in `localStorage`. A stolen
-  studio token cannot mint, and it ends on its own. A pasted token that
-  cannot mint is used as it is. Sign out revokes the token.
+  studio token: only the scopes the studio calls, 30 days, named for the
+  device. That is items, reader and mentions, and `origin:write`, for the
+  origin's settings and for showing a response on a page, which publishes
+  (§15.5). It holds no `tokens:write` and no hopper scopes. Only that one
+  is kept, in `localStorage`. A stolen studio token cannot mint, and it
+  ends on its own. A pasted token that cannot mint is used as it is. Sign
+  out revokes the token.
+  - `TestStudioHoldsWhatItCalls` reads the scope list from `app.js` and
+    fails when the studio calls an operation its own token cannot,
+    counting the extra scope an operation checks for itself (approval's
+    `origin:write`).
+  - A token keeps the scopes it was minted with. A studio token from
+    before a scope was added lacks it, so the studio says to sign in again
+    where it would otherwise offer a button that is refused.
 
 - Its CSP allows scripts and styles from itself only, connections to
   this host only, and no framing.
@@ -701,8 +797,9 @@ another directory of files, without touching a handler.
   kin.
 - The token shares an origin with the public pages. Those pages sanitize
   every `content_html` they show and run no script under a sandboxing CSP
-  (HTML safety). A real client should still live on its own origin
-  (Phase 4's OAuth-style approval).
+  (HTML safety). A real client should still live on its own origin, which
+  the API allows (Cross-origin clients), and get its token from Phase 4's
+  OAuth-style approval once there is one.
 
 ## HTML safety
 

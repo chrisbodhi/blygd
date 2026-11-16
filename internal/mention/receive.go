@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -63,6 +64,8 @@ func (rc *Receiver) ServeOrigin(w http.ResponseWriter, r *http.Request, o *studi
 	io.WriteString(w, msg+"\n") //nolint:errcheck
 }
 
+var encodedTilde = regexp.MustCompile(`%7[Ee]`)
+
 // accept runs §15.3 steps 1–3 and returns the status to answer with.
 func (rc *Receiver) accept(ctx context.Context, o *studio.Origin, rawSource, rawTarget string) (int, string) {
 	// Step 1: syntactic checks → 400.
@@ -74,6 +77,13 @@ func (rc *Receiver) accept(ctx context.Context, o *studio.Origin, rawSource, raw
 	if err != nil {
 		return 400, "target must be an absolute http(s) URL"
 	}
+	// §15.3 asks whether the target is an address this blyg serves for one
+	// of its items, and "%7E" is "~" to a server (RFC 3986 §6.2.2.2): some
+	// senders encode it, and every user mount has one. The surface
+	// redirects such reads to "~"; here the claim is read the same way.
+	// Only the target is folded, never an identity, which keeps one
+	// spelling (§12.2).
+	target = encodedTilde.ReplaceAllString(target, "~")
 	if source == target {
 		return 400, "source and target must differ"
 	}

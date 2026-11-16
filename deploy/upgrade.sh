@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The server half of scripts/deploy.sh, run as root:
 #
-#   upgrade.sh [--check] <staged binary> <sha256>
+#   upgrade.sh [--check] <staged binary> <sha256> [<staged backup.sh>]
 #
 # Takes a fresh backup, restores it into a scratch database, and runs the
 # new binary's migrations and a rebuild of every origin there, so a release
@@ -9,7 +9,9 @@
 # there. Otherwise it stops blygd, migrates, installs the binary (keeping
 # the old one as blygd.prev), starts it, checks /healthz and the running
 # binary's checksum, and rebuilds every origin. When it fails before any
-# migration ran, the old binary is put back.
+# migration ran, the old binary is put back. Given the release's backup.sh,
+# it installs that as blygd-backup last, so the nightly backup never lags
+# the binary it backs up.
 set -euo pipefail
 
 check=false
@@ -17,8 +19,8 @@ if [[ ${1:-} == --check ]]; then
 	check=true
 	shift
 fi
-[[ $# == 2 ]] || { echo "usage: upgrade.sh [--check] <binary> <sha256>" >&2; exit 2; }
-staged=$1 want=$2
+[[ $# == 2 || $# == 3 ]] || { echo "usage: upgrade.sh [--check] <binary> <sha256> [<backup.sh>]" >&2; exit 2; }
+staged=$1 want=$2 backup_script=${3:-}
 [[ $EUID == 0 ]] || { echo "run as root" >&2; exit 2; }
 cd / # runuser keeps the working directory, which blygd and postgres may not read
 
@@ -135,4 +137,8 @@ for h in $(handles); do
 	blygd_env "$BIN" rebuild "$h"
 done
 say "rebuilt every origin"
+if [[ -n $backup_script ]]; then
+	install -m755 "$backup_script" /usr/local/bin/blygd-backup
+	say "installed this release's backup.sh as blygd-backup"
+fi
 printf 'migrations %03d\n' "$latest"
