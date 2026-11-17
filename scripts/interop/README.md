@@ -17,6 +17,17 @@ line (`scripts/check-node.sh`).
 npm 11 blocks dependency install scripts by default. The reference needs
 two of them, esbuild and workerd (the Workers runtime), which download
 native binaries: `npm install-scripts approve esbuild workerd && npm rebuild esbuild workerd`.
+`approve` records them in the reference's `package.json`, which leaves the
+checkout dirty. On 0.62.0 both binaries also arrive as optional platform
+packages, and the run needed no approval; try without it first.
+
+The live check drives the reference through its owner API, which is
+private to it and changes between releases: 0.49.12 moved it to camelCase,
+revision checks on every change and cursor pages (#6). `run.sh` also
+borrows its test tooling (`@cloudflare/vitest-plugin`, Miniflare). When a
+run fails before scenario 1 passes, or on a 400 from the reference, look
+there first: the reference's `openapi.json` and `scripts/e2e-server.ts`
+show its current shape.
 
 ## Differential: `make parity REFERENCE=…`
 
