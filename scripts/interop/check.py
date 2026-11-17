@@ -121,10 +121,17 @@ def get(url):
     return code, j
 
 
+def ref_change(method, iid, action, body=None):
+    """A change to one of the reference's items, which it accepts only
+    against the item's current revision."""
+    _, it = ref("GET", f"/api/items/{iid}")
+    return ref(method, f"/api/items/{iid}/{action}", {"expectedRevision": it["revision"], **(body or {})})
+
+
 def ref_tick():
     """The reference's quarter-hour cron: its poll and outbound drain."""
     urllib.request.urlopen(CONTROL + "?cron=" + urllib.parse.quote("*/15 * * * *"), timeout=60).read()
-    ref("POST", "/api/subscriptions/poll", {})
+    ref("POST", "/api/subscriptions/poll")
 
 
 def blygd_poll(sid):
@@ -155,9 +162,16 @@ def wait(what, fn, nudge=None, evidence=None, deadline=DEADLINE):
         time.sleep(1)
 
 
-def items(j):
-    """The reference's list endpoints page under "items"."""
-    return j["items"] if isinstance(j, dict) and "items" in j else j
+def ref_mentions():
+    """Every mention the reference has received, through its cursor pages."""
+    out, cursor = [], None
+    while True:
+        q = "direction=inbound&limit=100" + (f"&cursor={urllib.parse.quote(cursor)}" if cursor else "")
+        _, j = ref("GET", f"/api/mentions?{q}")
+        out += j["items"]
+        cursor = j["page"]["nextCursor"]
+        if not cursor:
+            return out
 
 
 # ── Sol: a static blyg with a relocated surface ──────────────────────────
@@ -266,12 +280,12 @@ class Sol:
 
 def main():
     ref_login()
-    ref("PATCH", "/api/settings", {"site_title": "Rae on the reference", "site_url": REF, "author_name": "Rae"})
+    ref("PATCH", "/api/settings", {"siteTitle": "Rae on the reference", "siteUrl": REF, "authorName": "Rae"})
 
     def ref_publish(md, kind="fragment", **extra):
-        code, j = ref("POST", "/api/items", {"content_md": md, "kind": kind, **extra})
+        code, j = ref("POST", "/api/items", {"contentMd": md, "kind": kind, **extra})
         assert code == 201, (code, j)
-        code, p = ref("POST", f"/api/items/{j['id']}/publish", {})
+        code, p = ref("POST", f"/api/items/{j['id']}/publish", {"expectedRevision": j["revision"]})
         assert code in (200, 201), (code, p)
         return j["id"]
 
@@ -285,7 +299,7 @@ def main():
     # 1 ─ the reference publishes; blygd subscribes and imports.
     section("1. blygd imports the reference")
     r1 = ref_publish("Stigmergy is what a protocol looks like from inside.\n\nSecond *paragraph* & more.")
-    ref("PUT", f"/api/items/{r1}/versions/1/pin", {})
+    ref_change("PUT", r1, "versions/1/pin")
     r2 = ref_publish("An unpinned thought, with a [link](https://example.com/).")
     rt = ref_publish(f"Ref thread.\n\n![[{r1}]]\n> a protocol looks like from inside.\n\nMy own words after.", "thread")
     code, sub = blygd("POST", "/subscriptions", {"url": REF})
@@ -315,7 +329,7 @@ def main():
     check("each remote entry has a frozen cited from the manifest title",
           all((t.get("cited") or {}).get("source") == "Rae on the reference" for t in doc["transclusions"]), doc["transclusions"])
     def alice_quotes():
-        ms = [m for m in items(ref("GET", "/api/mentions")[1])
+        ms = [m for m in ref_mentions()
               if m["source"].startswith(ALICE) and m["status"] == "verified" and m["relation"] == "transclusion"]
         return ms if len(ms) >= 3 else None
     got = wait("the reference verifies blygd's three quotes", alice_quotes)
@@ -331,7 +345,7 @@ def main():
     wait("the reference imports alice's items",
          lambda: all(ref("GET", f"/api/imports/{ref_sub}/{i}")[0] == 200 for i in (a1, at)) or None, ref_tick)
     rq = ref_publish(f"Rae answers [[{a1}]].\n\n![[{a1}]]\n> stigmergy beats planning.\n\n![[{at}]]\n\nCycle closed.", "thread")
-    rs = ref_publish(f"![[{a1}]]\n\nI disagree.", "thread", stub_of={"origin": ALICE, "id": a1, "version": 1})
+    rs = ref_publish(f"![[{a1}]]\n\nI disagree.", "thread", stubOf={"origin": ALICE, "id": a1, "version": 1})
     _, rdoc = get(f"{REF}items/{rq}.json")
     check("the reference's partial check passes over blygd's HTML",
           (rdoc["transclusions"][0].get("selector") or {}).get("exact") == "stigmergy beats planning.", rdoc["transclusions"])
@@ -346,22 +360,22 @@ def main():
 
     # 4 ─ forks of the same pinned thread, made by each side.
     section("4. forks")
-    ref("PUT", f"/api/items/{rt}/versions/1/pin", {})
+    ref_change("PUT", rt, "versions/1/pin")
     blygd("POST", f"/items/{at}/versions/1/pin")
     forks = {}
     for name, origin, iid in (("rt", REF, rt), ("at", ALICE, at)):
         src = {"origin": origin, "id": iid, "version": 1}
         cb, b = blygd("POST", "/items", {"forked_from": src})
         cr, r = ref("POST", "/api/items", {"mode": "fork", "source": src})
-        rmd = r.get("content_md") or r.get("draft_md") or r.get("working_md")
+        rmd = r.get("contentMd")
         check(f"both fork the pinned {name} (201/201)", cb == 201 and cr == 201, (cb, b, cr, r))
         check(f"the flattened forks of {name} are byte-identical", b.get("draft_md") == rmd,
               f"\nblygd:\n{b.get('draft_md')}\nreference:\n{rmd}")
         forks[name] = (b["id"], r["id"])
     blygd("POST", f"/items/{forks['rt'][0]}/publish")
-    ref("POST", f"/api/items/{forks['at'][1]}/publish", {})
+    ref_change("POST", forks["at"][1], "publish")
     wait("the reference verifies blygd's fork",
-         lambda: any(m["relation"] == "fork" and m["status"] == "verified" for m in items(ref("GET", "/api/mentions")[1])) or None)
+         lambda: any(m["relation"] == "fork" and m["status"] == "verified" for m in ref_mentions()) or None)
     wait("blygd verifies the reference's fork",
          lambda: any(m["relation"] == "fork" and m["status"] == "verified"
                      for m in blygd("GET", "/mentions")[1]["mentions"]) or None, ref_tick)
@@ -371,8 +385,8 @@ def main():
 
     # 5 ─ withdrawal across the boundary.
     section("5. withdrawal")
-    ref("POST", f"/api/items/{rs}/withdraw", {})
-    ref("POST", f"/api/items/{r2}/withdraw", {})
+    ref_change("POST", rs, "withdraw")
+    ref_change("POST", r2, "withdraw")
     blygd("POST", f"/items/{at}/withdraw")
     wait("blygd marks the withdrawn stub's mention gone",
          lambda: any(m["relation"] == "stub" and m["status"] == "gone" for m in blygd("GET", "/mentions")[1]["mentions"]) or None,
@@ -386,10 +400,10 @@ def main():
     # refuses them for its 60 s pair cooldown (429, Retry-After); blygd
     # comes back when told, at least a minute later.
     wait("the reference marks blygd's withdrawn quotes gone", deadline=150, fn=
-         lambda: all(m["status"] == "gone" for m in items(ref("GET", "/api/mentions")[1])
+         lambda: all(m["status"] == "gone" for m in ref_mentions()
                      if at in m["source"] and m["relation"] == "transclusion") or None, nudge=ref_tick,
          evidence=lambda: {"blygd outbound": [(o["source_item_id"], o["relation"], o["status"], o["last_result"]) for o in blygd("GET", "/outbound")[1]["outbound"]],
-                  "reference mentions": [(m["source"], m["relation"], m["status"], m.get("error")) for m in items(ref("GET", "/api/mentions")[1])]})
+                  "reference mentions": [(m["source"], m["relation"], m["status"], m.get("error")) for m in ref_mentions()]})
     wait("the reference rolls blygd's withdrawn thread to null",
          lambda: ref("GET", f"/api/imports/{ref_sub}/{at}")[1].get("state") == "tombstone" or None, ref_tick)
     _, rdoc = get(f"{REF}items/{rq}.json")
@@ -421,12 +435,12 @@ def main():
     src = {"origin": sol.origin, "id": sol.id, "version": 1}
     cb, b = blygd("POST", "/items", {"forked_from": src})
     cr, r = ref("POST", "/api/items", {"mode": "fork", "source": src})
-    rmd = r.get("content_md") or r.get("draft_md") or r.get("working_md")
+    rmd = r.get("contentMd")
     check("both fork Sol's pin (201/201)", cb == 201 and cr == 201, (cb, b, cr, r))
     check("the flattened forks of Sol are byte-identical", b.get("draft_md") == rmd,
           f"\nblygd:\n{b.get('draft_md')}\nreference:\n{rmd}")
     blygd("POST", f"/items/{b['id']}/publish")
-    ref("POST", f"/api/items/{r['id']}/publish", {})
+    ref_change("POST", r["id"], "publish")
     for who, prefix, quote, fork in (("blygd", ALICE, sq, b["id"]), ("the reference", REF, rsq, r["id"])):
         for what, iid in (("quote", quote), ("fork", fork)):
             wait(f"{who}'s {what} reaches Sol's endpoint, naming its item document (#85)",
@@ -451,7 +465,7 @@ def main():
     check("blygd refuses to fork Luna, naming the missing blyg.json",
           cb == 422 and f"{luna.origin}blyg.json" in b.get("message", ""), (cb, b))
     cr, r = ref("POST", "/api/items", {"mode": "fork", "source": src})
-    gap("the reference forks Luna from its stored surface", cr == 201, (cr, r))
+    check("the reference forks Luna from its stored surface", cr == 201, (cr, r))
 
     # 7 ─ the 0.4 directive forms: labels, links[] and remote sources.
     section("7. labels, links and remote generation sources")
@@ -472,7 +486,7 @@ def main():
           len(srcs) == 1 and srcs[0].get("origin") == REF and srcs[0].get("id") == r4 and (srcs[0].get("cited") or {}).get("source") == "Rae on the reference", srcs)
 
     def ref_mention(target):
-        ms = [m for m in items(ref("GET", "/api/mentions")[1]) if al in m["source"] and m["target_item_id"] == target]
+        ms = [m for m in ref_mentions() if al in m["source"] and m["targetItemId"] == target]
         return ms[0] if ms and ms[0]["status"] != "pending" else None
     got = wait("the reference verifies blygd's source mention (§15.4)",
                lambda: (lambda m: m if m and m["status"] == "verified" and m["relation"] == "source" else None)(ref_mention(r4)),
@@ -501,11 +515,32 @@ def main():
     check("the reference renders a link label as the anchor text", ">Alice on planning</a>" in rdoc["content_html"], rdoc["content_html"])
     gap("the reference discloses its link in links[] (§10.3a)", rdoc.get("links") == [{"origin": ALICE, "id": a1}],
         f"links: {rdoc.get('links')}")
-    gap("the reference bakes its directive label (§10.2, #81)", "data-blyg-label=" in rdoc["content_html"],
-        "no data-blyg-label in its content_html")
+    check("the reference bakes its directive label (§10.2, #81)", "data-blyg-label=" in rdoc["content_html"],
+          rdoc["content_html"])
     wait("blygd verifies the reference's labelled quote",
          lambda: any(m["relation"] == "transclusion" and m["status"] == "verified" and rl in m["source_url"]
                      for m in blygd("GET", "/mentions")[1]["mentions"]) or None, ref_tick)
+
+    # 8 ─ mathematics: the reference publishes MathML, blygd bakes it as
+    # sent, and blygd's own page shows the author's TeX in its place.
+    section("8. mathematics (§5.2, §14, #105)")
+    rm = ref_publish("Euler: $e^{i\\pi} + 1 = 0$, and $a < b$.\n\n$$\\frac{a}{b}$$")
+    _, rmdoc = get(f"{REF}items/{rm}.json")
+    check("the reference publishes MathML, its TeX as an annotation (§5.2)",
+          '<annotation encoding="application/x-tex">e^{i\\pi} + 1 = 0</annotation>' in rmdoc["content_html"]
+          and '<math display="block"' in rmdoc["content_html"], rmdoc["content_html"])
+    wait("blygd imports the reference's formulas",
+         lambda: blygd("GET", f"/reader/items/{sid}/{rm}")[0] == 200 or None, lambda: blygd_poll(sid))
+    am, _ = blygd_publish(f"Alice quotes the formulas whole.\n\n![[{rm}]]\n\nAnd moves on.", "thread")
+    _, adoc = get(f"{ALICE}items/{am}.json")
+    check("blygd bakes the reference's MathML as sent (§10.2)",
+          rmdoc["content_html"].strip() in adoc["content_html"], adoc["content_html"])
+    code, page = get(urllib.parse.urljoin(ALICE, adoc["page"]))
+    check("blygd's page passes no math element through (§14)",
+          code == 200 and "<math" not in page.lower(), (code, page))
+    check("blygd's page shows the author's TeX as text in their place (§14)",
+          "<code>e^{i\\pi} + 1 = 0</code>" in page and "<code>a &lt; b</code>" in page
+          and "<pre><code>\\frac{a}{b}</code></pre>" in page, page)
 
     if gaps:
         print(f"\n{len(gaps)} gap(s), not failures: " + "; ".join(gaps))
