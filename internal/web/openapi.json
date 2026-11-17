@@ -932,6 +932,7 @@
           "hoppers"
         ],
         "summary": "Rename a hopper, or make it public or private.",
+        "description": "A public hopper is shown at {origin}h/{slug}/ and named in the manifest's hoppers list with its live RSS feed, {origin}h/{slug}/feed.xml (§6.1, §13.5). Making one public or private also needs origin:write; renaming a public one renames its manifest entry.",
         "security": [
           {
             "bearer": [
@@ -3191,7 +3192,7 @@
               "fragment",
               "thread"
             ],
-            "description": "Authored kind."
+            "description": "Authored kind, fixed at the first publish (§5.3)."
           },
           "draft_md": {
             "type": "string",
@@ -3309,7 +3310,7 @@
               "fragment",
               "thread"
             ],
-            "description": "Default fragment; thread with stub_of; the source's kind for a fork without content."
+            "description": "Fixed at the first publish (§5.3): a fragment never becomes a thread, nor a thread a fragment. Default fragment; thread with stub_of; the source's kind for a fork without content. A client creating items on an author's behalf should send thread, since only the author can say that an item is a leaf (§5.3, decision #100)."
           },
           "content_md": {
             "type": "string"

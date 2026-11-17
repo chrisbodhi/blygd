@@ -70,6 +70,18 @@ func TestNormalizeOrigin(t *testing.T) {
 		"http://example.com:80/a/b/?q=1#f": "http://example.com/a/b/",
 		"https://example.com:8443/Chris/":  "https://example.com:8443/Chris/",
 		"http://[::1]:8080/x/":             "http://[::1]:8080/x/",
+		// §12.2 (decision #103): ASCII, an A-label, uppercase escapes, never
+		// decoded, path case kept.
+		"https://Bücher.example/café/":   "https://xn--bcher-kva.example/caf%C3%A9/",
+		"https://example.com/caf%c3%a9/": "https://example.com/caf%C3%A9/",
+		"https://example.com/%7ealice/":  "https://example.com/%7Ealice/",
+		"https://example.com/~alice/":    "https://example.com/~alice/",
+		// With or without the final slash, one spelling (review of PR #5).
+		"https://x.org/%7Euser": "https://x.org/%7Euser/",
+		"https://x.org/%7euser": "https://x.org/%7Euser/",
+		"https://x.org/a%2fb":   "https://x.org/a%2Fb/",
+		"https://x.org/a%2Fb/":  "https://x.org/a%2Fb/",
+		"https://x.org/café":    "https://x.org/caf%C3%A9/",
 	}
 	for in, want := range cases {
 		got, err := NormalizeOrigin(in)
@@ -170,5 +182,26 @@ func TestMarshalKeepsHTML(t *testing.T) {
 	}
 	if !strings.Contains(string(b), `"<p>a & b</p>"`) {
 		t.Errorf("HTML was escaped: %s", b)
+	}
+}
+
+func TestRelativeURLsResolveAgainstTheOrigin(t *testing.T) {
+	// §5.2 (decision #102): against the item's identity origin, by RFC 3986,
+	// never its page.
+	origin := "https://example.com/~me/"
+	got, err := RenderMarkdownIn("[a](notes/) [b](../x/) [c](/root) [d](#top) ![m](media/a.png)", origin+"t/abc/", origin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`href="https://example.com/~me/notes/"`,
+		`href="https://example.com/x/"`,
+		`href="https://example.com/root"`,
+		`href="https://example.com/~me/#top"`,
+		`src="https://example.com/~me/media/a.png"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %s in %s", want, got)
+		}
 	}
 }

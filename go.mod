@@ -11,6 +11,7 @@ require (
 	github.com/rivo/uniseg v0.4.7
 	github.com/yuin/goldmark v1.7.17
 	golang.org/x/net v0.62.0
+	golang.org/x/text v0.43.0
 )
 
 require (
@@ -31,5 +32,4 @@ require (
 	github.com/spf13/cast v1.10.0 // indirect
 	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
-	golang.org/x/text v0.43.0 // indirect
 )

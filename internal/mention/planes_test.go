@@ -19,11 +19,11 @@ import (
 func TestMentionKeepsThePlanesApart(t *testing.T) {
 	archtest.Check(t, ".",
 		archtest.Rule{
-			Banned: regexp.MustCompile(`(?i)\b(INTO|UPDATE|DELETE\s+FROM)\s+(surface_files|items|item_versions|version_media|media|origins|blogroll_entries)\b`),
+			Banned: regexp.MustCompile(`(?i)\b(INTO|UPDATE|DELETE\s+FROM)\s+(surface_files|items|item_versions|version_media|media|origins|blogroll_entries|public_hoppers)\b`),
 			Why:    "this writes plane 1: only the studio does, inside its render transaction",
 		},
 		archtest.Rule{
-			Banned: regexp.MustCompile(`(?i)\b(FROM|JOIN)\s+(surface_files|items|item_versions|version_media|media|blogroll_entries)\b`),
+			Banned: regexp.MustCompile(`(?i)\b(FROM|JOIN)\s+(surface_files|items|item_versions|version_media|media|blogroll_entries|public_hoppers)\b`),
 			Why:    "this reads the studio's tables: ask the studio (studio.TargetItem, studio.Pinned) instead",
 		},
 		archtest.Rule{

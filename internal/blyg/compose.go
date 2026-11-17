@@ -81,7 +81,7 @@ type Problem struct {
 type ComposeInput struct {
 	ContentMD  string // the draft, TK grammar included
 	Thread     bool
-	PageURL    string // the item's absolute page: links resolve against it
+	PageURL    string // the item's absolute page; links resolve against it only when Origin is ""
 	Origin     string // the publishing origin: media/… resolves against it (§5.4)
 	Resolve    Resolver
 	Generation []GenMeta
@@ -101,6 +101,7 @@ type Composed struct {
 	Generated     []Generated // §5.7, scope order
 	Links         []Link      // §10.3a, document order
 	Problems      []Problem   // non-empty means do not publish
+	Warnings      []string    // publishable, but the author should know
 }
 
 // Compose turns a draft into a version. It never touches the network or a
@@ -133,11 +134,37 @@ func Compose(in ComposeInput) (*Composed, error) {
 	}
 	stripped, spans := stripScopes(in.ContentMD, scopes)
 	c.out.ContentMD = stripped
-	for _, sp := range spans {
-		for _, l := range strings.Split(stripped[sp.start:sp.end], "\n") {
-			if id, _, _ := directiveAt(l); id != "" || reservedLine.MatchString(l) {
-				// §5.7 rule 3: generated prose and quotation are disjoint.
-				c.problem(strings.TrimSpace(l), "a directive inside generated text: move it outside the [TK] scope")
+	// §5.1 (decision #103): content_md is text.
+	if fault := PublishFault(stripped); fault != "" {
+		c.problem("content_md", "content_md holds "+fault+", which cannot be published as text (§5.1)")
+		return c.out, nil
+	}
+	if !IsNFC(stripped) {
+		c.out.Warnings = append(c.out.Warnings, "content_md is not in Unicode Normalization Form C: a quote or a search of it may not match what the eye sees (§5.1 SHOULD)")
+	}
+	if UnpairedBidi(stripped) {
+		c.out.Warnings = append(c.out.Warnings, "content_md opens or closes a bidirectional control it does not pair within its line, which reorders the text beside it wherever it is shown (§14)")
+	}
+	if in.Thread {
+		// Generated output may carry a directive on a line of its own, which
+		// transcludes like any other; the wrapper divides around the bake so
+		// that no quoted word is marked as generated, and the scope keeps
+		// its one generated[] entry (§5.7, decision #102).
+		spans = splitAroundDirectives(stripped, spans)
+		c.refuseGeneratedSelections(stripped, spans)
+	} else if len(spans) > 0 {
+		// In a fragment a directive is a publish error wherever it stands,
+		// generated output included, and inert in code as anywhere (§10.1).
+		code := codeSpans(stripped)
+		lines := strings.Split(stripped, "\n")
+		starts := lineOffsets(lines)
+		for i, l := range lines {
+			ls, le := starts[i], starts[i]+len(l)
+			for _, sp := range spans {
+				if ls >= sp.start && le <= sp.end && isDirectiveLine(l) && !inSpans(code, ls+strings.IndexByte(l, '!')) {
+					c.problem(strings.TrimSpace(l), "a directive belongs to a thread (§10.1): publish this as a thread, or write the directive in code")
+					break
+				}
 			}
 		}
 	}
@@ -157,6 +184,86 @@ func Compose(in ComposeInput) (*Composed, error) {
 	c.out.ContentHTML = body
 	c.out.Links = c.linksInOrder(stripped)
 	return c.out, nil
+}
+
+// splitAroundDirectives divides each generated span around the directive
+// lines inside it, and the selection attached to each, so that a bake is
+// never inside a blyg-tk-gen wrapper (§5.7, decision #102). The pieces keep
+// their scope, and leading and trailing whitespace stays outside them.
+func splitAroundDirectives(md string, spans []genSpan) []genSpan {
+	lines := strings.Split(md, "\n")
+	starts := lineOffsets(lines)
+	var code []span
+	var out []genSpan
+	add := func(a, b, scope int) {
+		for a < b && strings.ContainsRune(" \t\r\n", rune(md[a])) {
+			a++
+		}
+		for b > a && strings.ContainsRune(" \t\r\n", rune(md[b-1])) {
+			b--
+		}
+		if a < b {
+			out = append(out, genSpan{a, b, scope})
+		}
+	}
+	for _, sp := range spans {
+		cur := sp.start
+		for i := 0; i < len(lines); i++ {
+			ls, le := starts[i], starts[i]+len(lines[i])
+			if ls < cur || le > sp.end || !isDirectiveLine(lines[i]) {
+				continue
+			}
+			if code == nil {
+				code = append(codeSpans(md), span{-1, -1})
+			}
+			if inSpans(code, ls+strings.IndexByte(lines[i], '!')) {
+				continue
+			}
+			end := le
+			if _, _, ok := labelledDirective(lines[i]); ok {
+				if _, next, ok := attachedQuote(lines, i); ok {
+					end = starts[next-1] + len(lines[next-1])
+					i = next - 1
+				}
+			}
+			add(cur, ls, sp.scope)
+			cur = min(end, sp.end)
+		}
+		add(cur, sp.end, sp.scope)
+	}
+	return out
+}
+
+// refuseGeneratedSelections refuses a directive whose attached selection is
+// generated output. The wire content_md reads it as a partial quote (§10.1),
+// while the bake would read the scope's sentinel first and quote the item
+// whole, so the two would disagree; and a selection is the source's words,
+// which are never generated (§5.7 rule 3). Review of PR #5.
+func (c *composer) refuseGeneratedSelections(md string, spans []genSpan) {
+	if len(spans) == 0 {
+		return
+	}
+	lines := strings.Split(md, "\n")
+	starts := lineOffsets(lines)
+	code := codeSpans(md)
+	for i := 0; i < len(lines); i++ {
+		id, _, at := directiveAt(lines[i])
+		if id == "" || inSpans(code, starts[i]+at) {
+			continue
+		}
+		_, next, ok := attachedQuote(lines, i)
+		if !ok {
+			continue
+		}
+		from, to := starts[i+1], starts[next-1]+len(lines[next-1])
+		for _, sp := range spans {
+			if sp.start < to && sp.end > from {
+				c.problem(strings.TrimSpace(lines[i]), "the passage quoted under this directive is generated text; a quote's words are its source's (§5.7 rule 3): put a blank line between the directive and the [TK] scope, or quote the passage yourself")
+				break
+			}
+		}
+		i = next - 1
+	}
 }
 
 // linksInOrder is links[]: one entry per resolved link, in document order
@@ -278,7 +385,7 @@ func (c *composer) refuseDirectives(md string) {
 	starts := lineOffsets(lines)
 	for i, l := range lines {
 		if id, _, at := directiveAt(l); id != "" && !inSpans(code, starts[i]+at) {
-			c.problem(strings.TrimSpace(l), "only threads transclude (§10): publish this as a thread, or use [["+id+"]] to link")
+			c.problem(strings.TrimSpace(l), "a directive belongs to a thread (§10.1, §5.3): publish this as a thread, use [["+id+"]] to link, or write the directive in code")
 		} else if reservedLine.MatchString(l) && !inSpans(code, starts[i]+strings.IndexByte(l, '!')) {
 			c.problem(strings.TrimSpace(l), "explicit versions (![[id@vN]]) are reserved (§10.1)")
 		}
@@ -670,9 +777,8 @@ func AbsolutizeHTML(h, base string) string {
 }
 
 func clip(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
+	if cut, ok := Truncate(s, n); ok {
+		return cut + "…"
 	}
-	return string(r[:n]) + "…"
+	return s
 }

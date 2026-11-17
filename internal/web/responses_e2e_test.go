@@ -58,7 +58,7 @@ func TestResponsesAreCurated(t *testing.T) {
 	expect(t, e.do("PUT", e.srv.URL+"/api/mentions/"+mid+"/approval", mod, nil), 403) // showing publishes
 	expect(t, alice.api("PUT", "/mentions/"+mid+"/approval", nil), 204)
 	p := page(target)
-	if !strings.Contains(p, "Bob, at <a href=\""+bob.origin+"t/"+stub+"/\" rel=\"nofollow ugc\">127.0.0.1</a>, responded") ||
+	if !strings.Contains(p, "<bdi>Bob</bdi>, at <a href=\""+bob.origin+"t/"+stub+"/\" rel=\"nofollow ugc\">127.0.0.1</a>, responded") || // §14: isolated
 		strings.Contains(p, "reasonable reply") {
 		t.Fatalf("shown response (verb, author, host, link; no words):\n%s", p)
 	}

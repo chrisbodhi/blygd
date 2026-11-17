@@ -178,7 +178,7 @@ func TestPublishLifecycle(t *testing.T) {
 		t.Errorf("empty index: %s", idx.body)
 	}
 
-	id := alice.draft(t, map[string]any{"content_md": "Hello *world* <b>x</b> [link](../)"})
+	id := alice.draft(t, map[string]any{"content_md": "Hello *world* <b>x</b> [link](notes/)"})
 	expect(t, alice.get("items/"+id+".json"), 404) // drafts 404 (§4)
 
 	r := alice.api("POST", "/items/"+id+"/publish", map[string]any{"note": "first"})
@@ -189,8 +189,13 @@ func TestPublishLifecycle(t *testing.T) {
 		*d.Changelog[0].Note != "first" || d.Media == nil {
 		t.Fatalf("v1 doc: %+v", d)
 	}
-	if !strings.Contains(d.ContentHTML, "&lt;b&gt;") || !strings.Contains(d.ContentHTML, `href="`+alice.origin+`f/"`) {
+	if !strings.Contains(d.ContentHTML, "&lt;b&gt;") || !strings.Contains(d.ContentHTML, `href="`+alice.origin+`notes/"`) {
 		t.Errorf("content_html not escaped/absolute: %s", d.ContentHTML)
+	}
+	// §5.3 (decision #100): a kind is fixed at the first publication, and
+	// the schema holds it whatever the Go does.
+	if _, err := e.pool.Exec(context.Background(), `UPDATE items SET authored_kind = 'thread' WHERE id = $1`, id); err == nil {
+		t.Error("the schema let a published fragment become a thread")
 	}
 
 	// No-op republish is refused; an edit is v2.

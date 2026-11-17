@@ -184,7 +184,7 @@ func TestReservedAndUnknown(t *testing.T) {
 
 func TestFragmentsDoNotTransclude(t *testing.T) {
 	out := compose(t, "![["+ownID+"]]", false)
-	if len(out.Problems) != 1 || !strings.Contains(out.Problems[0].Reason, "only threads transclude") {
+	if len(out.Problems) != 1 || !strings.Contains(out.Problems[0].Reason, "belongs to a thread") {
 		t.Fatalf("problems: %+v", out.Problems)
 	}
 }
@@ -281,7 +281,6 @@ func TestTKProblems(t *testing.T) {
 		"x [TK]never closed":                        "never closed",
 		"[TK]a [TK]b[/TK]":                          "cannot nest",
 		"[TK]write something[/TK]":                  "no output",
-		"[TK]impyrt=a\n![[" + ownID + "]]\nb[/TK]":  "inside generated text",
 		"[TK]from ![[" + draftID + "]][=]text[/TK]": "unknown item",
 	}
 	for md, want := range cases {
@@ -385,7 +384,7 @@ func TestPageHTML(t *testing.T) {
 			t.Errorf("page HTML kept %q: %s", bad, got)
 		}
 	}
-	if !strings.Contains(got, `<blockquote class="blyg-transclusion blyg-partial" data-blyg-id="`+remoteID+`" data-blyg-version="1" data-blyg-origin="https://pi.test/">`) {
+	if !strings.Contains(got, `<blockquote dir="auto" class="blyg-transclusion blyg-partial" data-blyg-id="`+remoteID+`" data-blyg-version="1" data-blyg-origin="https://pi.test/">`) {
 		t.Errorf("the bake's wire attributes must survive: %s", got)
 	}
 	// Our own renderer's output passes through unchanged.
@@ -489,4 +488,150 @@ func TestPreviewMarksUnbakedDirectives(t *testing.T) {
 			t.Errorf("preview, want two marks in place before the bake:\n%s", out.ContentHTML)
 		}
 	}
+}
+
+func TestADirectiveLineEndsASelection(t *testing.T) {
+	// §10.1 (revision of 2026-11-03, studio#106): a directive line is read
+	// before markdown sees it, so it is never a lazy continuation line.
+	md := "![[" + ownID + "]]\n> looks like from inside.\n![[" + headedID + "]]\n\nAfter."
+	out := compose(t, md, true)
+	clean(t, out)
+	if len(out.Transclusions) != 2 || out.Transclusions[0].Selector == nil || out.Transclusions[0].Selector.Exact != "looks like from inside." {
+		t.Fatalf("the second directive must end the first selection and bake: %+v", out.Transclusions)
+	}
+	if out.Transclusions[1].ID != headedID || out.Transclusions[1].Selector != nil {
+		t.Fatalf("the second directive must bake whole: %+v", out.Transclusions[1])
+	}
+	// The reserved form, labelled or not, ends it too, and is refused.
+	for _, reserved := range []string{"![[" + headedID + "@v2]]", "![[" + headedID + "@v2 | a label]]"} {
+		out = compose(t, "![["+ownID+"]]\n> looks like from inside.\n"+reserved, true)
+		if len(out.Problems) != 1 || !strings.Contains(out.Problems[0].Reason, "reserved") {
+			t.Fatalf("%s: want the reserved line refused on its own: %+v", reserved, out.Problems)
+		}
+	}
+	// HasOwnWords reads the same extent: nothing here is the author's.
+	out = compose(t, "![["+ownID+"]]\n> looks like from inside.\n![["+headedID+"]]", true)
+	clean(t, out)
+	if HasOwnWords(out.ContentMD, out.ContentHTML) {
+		t.Error("two directives and a selection are no words of the author's own")
+	}
+}
+
+func TestReservedFormIsInertInline(t *testing.T) {
+	// §10.1 (decision #102): the reservation is of the directive line; the
+	// sequence inline or in code is inert text and publishes.
+	for _, md := range []string{
+		"Write ![[" + ownID + "@v2]] to name a version, one day.",
+		"`![[" + ownID + "@v2]]`",
+		"```\n![[" + ownID + "@v2]]\n```",
+	} {
+		for _, thread := range []bool{false, true} {
+			out := compose(t, md, thread)
+			clean(t, out)
+			if len(out.Transclusions) != 0 || !strings.Contains(out.ContentHTML, "@v2]]") {
+				t.Errorf("%q (thread %v): %+v %s", md, thread, out.Transclusions, out.ContentHTML)
+			}
+		}
+	}
+}
+
+func TestCodeIsCommonMarksToSay(t *testing.T) {
+	// §10.1 (decision #102): a tab-indented directive at the start of a
+	// document is an indented code block, so it is code; directly under a
+	// paragraph line CommonMark makes no code block, so it is a directive.
+	out := compose(t, "\t![["+ownID+"]]\n\nAfter.", true)
+	clean(t, out)
+	if len(out.Transclusions) != 0 || !strings.Contains(out.ContentHTML, "<pre><code>![["+ownID+"]]") {
+		t.Fatalf("a tab-indented directive at the start is code: %+v %s", out.Transclusions, out.ContentHTML)
+	}
+	out = compose(t, "Above.\n\t![["+ownID+"]]\n\nAfter.", true)
+	clean(t, out)
+	if len(out.Transclusions) != 1 {
+		t.Fatalf("under a paragraph line the same line is a directive: %s", out.ContentHTML)
+	}
+	// Outside code, whitespace of any amount around a directive is ignored.
+	out = compose(t, "Above.\n        ![["+ownID+"]]   \n\nAfter.", true)
+	clean(t, out)
+	if len(out.Transclusions) != 1 {
+		t.Fatalf("an indented directive under a paragraph: %s", out.ContentHTML)
+	}
+}
+
+func TestLabelsArePlainText(t *testing.T) {
+	// §10.1 (decision #102): no markdown and no HTML in a label is read, in
+	// either form, and it is escaped wherever it is baked.
+	out := compose(t, "See [["+ownID+" | *not* `code` <b>x</b>]].", false)
+	clean(t, out)
+	if !strings.Contains(out.ContentHTML, `">*not* `+"`code`"+` &lt;b&gt;x&lt;/b&gt;</a>`) {
+		t.Errorf("link label interpreted: %s", out.ContentHTML)
+	}
+	out = compose(t, "![["+ownID+" | *not* <b>x</b> & y]]", true)
+	clean(t, out)
+	if !strings.Contains(out.ContentHTML, `data-blyg-label="*not* &lt;b&gt;x&lt;/b&gt; &amp; y"`) {
+		t.Errorf("directive label not escaped as text: %s", out.ContentHTML)
+	}
+}
+
+func TestABakeDividesTheGeneratedWrapper(t *testing.T) {
+	// §5.7 (decision #102): a directive in generated output transcludes, the
+	// wrapper closes before the bake and reopens after, and the scope keeps
+	// one generated[] entry.
+	md := "Mine.\n\n[TK]impyrt m-2=Para A.\n\n![[" + ownID + "]]\n> looks like from inside.\n\nPara B.[/TK]\n\nTail."
+	out := compose(t, md, true)
+	clean(t, out)
+	want := "<p>Mine.</p>\n" +
+		`<div class="blyg-tk-gen"><p>Para A.</p>` + "\n</div>\n\n" +
+		`<blockquote class="blyg-transclusion blyg-partial" data-blyg-id="` + ownID + `" data-blyg-version="3">` + "\n<p>looks like from inside.</p>\n</blockquote>\n" +
+		`<div class="blyg-tk-gen"><p>Para B.</p>` + "\n</div>\n" +
+		"<p>Tail.</p>\n"
+	if out.ContentHTML != want {
+		t.Fatalf("got\n%s\nwant\n%s", out.ContentHTML, want)
+	}
+	if len(out.Generated) != 1 || len(out.Transclusions) != 1 {
+		t.Fatalf("one scope, one quote: %+v %+v", out.Generated, out.Transclusions)
+	}
+	if out.ContentMD != "Mine.\n\nPara A.\n\n![["+ownID+"]]\n> looks like from inside.\n\nPara B.\n\nTail." {
+		t.Fatalf("wire content_md: %q", out.ContentMD)
+	}
+	// Inline, the span closes and reopens the same way.
+	out = compose(t, "Intro [TK]impyrt=said\n![["+ownID+"]]\nand more[/TK] tail.", true)
+	clean(t, out)
+	want = `<p>Intro <span class="blyg-tk-gen">said</span></p>` + "\n\n" +
+		`<blockquote class="blyg-transclusion" data-blyg-id="` + ownID + `" data-blyg-version="3">`
+	if !strings.HasPrefix(out.ContentHTML, want) || !strings.Contains(out.ContentHTML, `<p><span class="blyg-tk-gen">and more</span> tail.</p>`) {
+		t.Fatalf("inline span around a bake:\n%s", out.ContentHTML)
+	}
+	if strings.Count(out.ContentHTML, "blyg-tk-gen") != 2 {
+		t.Fatalf("a quoted word is marked generated: %s", out.ContentHTML)
+	}
+	// In a fragment a directive is a publish error wherever it stands.
+	out = compose(t, "[TK]impyrt=a\n![["+ownID+"]]\nb[/TK]", false)
+	if len(out.Problems) != 1 || !strings.Contains(out.Problems[0].Reason, "belongs to a thread") {
+		t.Fatalf("fragment: %+v", out.Problems)
+	}
+}
+
+func TestADirectiveInCodeInGeneratedOutputIsInert(t *testing.T) {
+	// Review of PR #5: in a fragment, code inside a [TK] scope is code
+	// (§10.1), as the refusal's own advice says.
+	md := "[TK]impyrt=a\n```\n![[" + ownID + "]]\n```\nb[/TK]"
+	for _, thread := range []bool{false, true} {
+		out := compose(t, md, thread)
+		clean(t, out)
+		if len(out.Transclusions) != 0 || !strings.Contains(out.ContentHTML, "<pre><code>![["+ownID+"]]") {
+			t.Errorf("thread %v: %+v %s", thread, out.Transclusions, out.ContentHTML)
+		}
+	}
+}
+
+func TestASelectionIsNeverGenerated(t *testing.T) {
+	// Review of PR #5: content_md would read a partial quote, content_html
+	// a whole bake and a literal ">". Refused instead.
+	out := compose(t, "![["+ownID+"]]\n[TK]impyrt=> looks like from inside.[/TK]\n\nAfter.", true)
+	if len(out.Problems) != 1 || !strings.Contains(out.Problems[0].Reason, "generated text") {
+		t.Fatalf("problems: %+v", out.Problems)
+	}
+	// Detached by a blank line, the scope is the author's own prose.
+	out = compose(t, "![["+ownID+"]]\n\n[TK]impyrt=Said after.[/TK]", true)
+	clean(t, out)
 }

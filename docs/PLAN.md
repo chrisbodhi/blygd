@@ -340,6 +340,12 @@ its own, and the version string moves last.
      the reference's fork of it is reported as a gap check, and blygd's
      refusal is a check.)*
 
+7. **Take in revisions 7–16** (2026-11-01 to 2026-11-13), read at
+   `blygger-spec` `9fa1d7e`.
+
+   *(Done, 2026-11-16, except hopper subscriptions on the reader side and
+   the parity and interop reruns: TODO.md, "Spec revisions 7–16".)*
+
 **Open question:** §10.2 step 2 (#82) resolves against any snapshot the
 publisher holds, not only a subscribed origin's. `reader.Snapshots` joins
 through `subscriptions`, which is also what keeps one tenant from quoting
@@ -349,9 +355,14 @@ the plane-separation door before any code.
 
 Left for later, all optional in the spec:
 
-- Queueing maintenance republishes low, by hash or by a small edit
-  (§13.2, #77 and #83), and folding items published together (§13.7,
-  #78).
+- Queueing maintenance republishes low, by hash, by a small edit or for a
+  version with no words of its own (§13.2, #77, #83 and the ninth
+  revision), and folding items published together (§13.7, #78).
+- Hopper subscriptions (§12.1 step 7, §12.2, §13.6, #86): the reader side
+  of hopper feeds. blygd publishes hopper feeds.
+- Showing a `math` element by redrawing it from its TeX (§14, #105), and
+  rendering `$…$` to MathML on publish (§5.2 SHOULD for a client that
+  renders mathematics; blygd does not).
 - Re-sending a version's mentions when it is pinned (§15.2, #73).
 - §16.9 `pinned_at` and `cid`, and §16.10 image sizes: ruled shapes, not
   yet normative.

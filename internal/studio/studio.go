@@ -103,6 +103,9 @@ type Origin struct {
 	AcceptMentions bool
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+	// static marks a render for a static export, where nothing live is
+	// served: no hopper pages, so no hoppers key (§6.1).
+	static bool
 }
 
 const originCols = `id, owner_id, base_url, title, description, author, byline, accept_mentions, created_at, updated_at`

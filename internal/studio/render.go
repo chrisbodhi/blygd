@@ -413,6 +413,11 @@ func (s *Studio) renderAggregatesTo(ctx context.Context, tx pgx.Tx, out surfaceO
 	if len(roll) > 0 {
 		m.Blogroll = "blogroll.opml"
 	}
+	if !o.static {
+		if m.Hoppers, err = publicHoppers(ctx, tx, o.ID); err != nil {
+			return err
+		}
+	}
 	mb, err := blyg.Marshal(m)
 	if err != nil {
 		return err

@@ -29,6 +29,9 @@ var hopperTmpl = template.Must(template.New("hopper").Funcs(template.FuncMap{"ti
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.View.Name}} · {{.Title}}</title>
 <link rel="blyg" href="{{.Origin}}">
+{{- if .Feed}}
+<link rel="alternate" type="application/rss+xml" title="{{.View.Name}}" href="{{.Feed}}">
+{{- end}}
 <style>body{max-width:40rem;margin:2rem auto;padding:0 1rem;font:1rem/1.5 system-ui,sans-serif}
 .meta{color:#666;font-size:.875rem}li{margin:0 0 1.25rem}</style>
 </head>
@@ -38,8 +41,8 @@ var hopperTmpl = template.Must(template.New("hopper").Funcs(template.FuncMap{"ti
 {{- if .View.Entries}}
 <ol>
 {{- range .View.Entries}}
-<li><p>{{.Excerpt}}</p>
-<p class="meta">{{if .Author}}{{.Author}} · {{end}}{{if .Origin}}<a href="{{.Origin}}">{{if .Source}}{{.Source}}{{else}}{{.Origin}}{{end}}</a>{{end}}
+<li><p dir="auto">{{.Excerpt}}</p>
+<p class="meta">{{if .Author}}<bdi>{{.Author}}</bdi> · {{end}}{{if .Origin}}<a href="{{.Origin}}">{{if .Source}}<bdi>{{.Source}}</bdi>{{else}}{{.Origin}}{{end}}</a>{{end}}
 {{- if .URL}} · <a href="{{.URL}}">read it there</a>{{end}}{{if .Note}} · {{.Note}}{{end}} · added {{time .AddedAt}}</p></li>
 {{- end}}
 </ol>
@@ -50,11 +53,20 @@ var hopperTmpl = template.Must(template.New("hopper").Funcs(template.FuncMap{"ti
 </html>
 `))
 
-// serveHopper serves a public hopper, or 404.
+// serveHopper serves a public hopper, or its feed, or 404.
 func (h *Surface) serveHopper(w http.ResponseWriter, r *http.Request, o *studio.Origin, rel string) {
+	if slug, ok := strings.CutSuffix(strings.TrimPrefix(rel, "h/"), "/feed.xml"); ok {
+		h.serveHopperFeed(w, r, o, slug)
+		return
+	}
 	slug, ok := strings.CutSuffix(strings.TrimPrefix(rel, "h/"), "/")
 	if !hopperSlug.MatchString(slug) || h.Hoppers == nil {
 		http.NotFound(w, r)
+		return
+	}
+	listed, err := h.Studio.HopperListed(r.Context(), o.ID, slug)
+	if err != nil {
+		h.fail(w, r, err)
 		return
 	}
 	v, err := h.Hoppers.Public(r.Context(), o.OwnerID, slug)
@@ -75,7 +87,11 @@ func (h *Surface) serveHopper(w http.ResponseWriter, r *http.Request, o *studio.
 		title = o.BaseURL
 	}
 	var buf bytes.Buffer
-	if err := hopperTmpl.Execute(&buf, map[string]any{"View": v, "Origin": o.BaseURL, "Title": title}); err != nil {
+	feed := ""
+	if listed {
+		feed = o.BaseURL + blyg.HopperFeedPath(slug)
+	}
+	if err := hopperTmpl.Execute(&buf, map[string]any{"View": v, "Origin": o.BaseURL, "Title": title, "Feed": feed}); err != nil {
 		h.fail(w, r, err)
 		return
 	}
@@ -96,4 +112,66 @@ func (h *Surface) serveHopper(w http.ResponseWriter, r *http.Request, o *studio.
 		return
 	}
 	w.Write(buf.Bytes()) //nolint:errcheck
+}
+
+// serveHopperFeed serves a public hopper's feed (§13.5, decision #86),
+// live like its page: only while the hopper is public and the manifest
+// names it (rule (a)), and 404 otherwise, as for a hopper taken private.
+// Every current member is in it, newest-joined first (rule (c)).
+func (h *Surface) serveHopperFeed(w http.ResponseWriter, r *http.Request, o *studio.Origin, slug string) {
+	if !hopperSlug.MatchString(slug) || h.Hoppers == nil {
+		http.NotFound(w, r)
+		return
+	}
+	listed, err := h.Studio.HopperListed(r.Context(), o.ID, slug)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	if !listed {
+		http.NotFound(w, r)
+		return
+	}
+	v, err := h.Hoppers.Public(r.Context(), o.OwnerID, slug)
+	if errors.Is(err, hopper.ErrNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	title := o.Title
+	if title == "" {
+		title = o.BaseURL
+	}
+	built := o.UpdatedAt
+	entries := make([]blyg.HopperFeedEntry, 0, len(v.Entries))
+	for _, e := range v.Entries {
+		if e.AddedAt.After(built) {
+			built = e.AddedAt
+		}
+		entries = append(entries, blyg.HopperFeedEntry{Identity: e.Identity, ID: e.ItemID, Link: e.URL, Excerpt: e.Excerpt,
+			Own: e.Own, SourceFeed: e.SourceFeed, Source: e.Source, Author: e.Author, Note: e.Note, AddedAt: e.AddedAt})
+	}
+	body := blyg.RenderHopperFeed(blyg.HopperFeed{Title: v.Name, Page: o.BaseURL + blyg.HopperPage(slug),
+		Origin: o.BaseURL, Site: title, BuiltAt: built}, entries)
+	sum := sha256.Sum256(body)
+	etag := `"` + hex.EncodeToString(sum[:16]) + `"`
+	hd := w.Header()
+	hd.Set("Content-Type", "application/rss+xml; charset=utf-8")
+	hd.Set("ETag", etag)
+	hd.Set("Cache-Control", "no-cache") // live, like the page
+	hd.Set("X-Content-Type-Options", "nosniff")
+	// §4: public XML SHOULD carry permissive CORS, as feed.xml does.
+	hd.Set("Access-Control-Allow-Origin", "*")
+	hd.Set("Access-Control-Expose-Headers", "ETag")
+	if etagMatch(r.Header.Get("If-None-Match"), etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	if r.Method == http.MethodHead {
+		return
+	}
+	w.Write(body) //nolint:errcheck
 }

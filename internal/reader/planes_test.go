@@ -12,7 +12,7 @@ import (
 // origins only (PLAN.md, Phase 2 item 8). And it never writes the surface.
 func TestReaderNeverTouchesPlaneOne(t *testing.T) {
 	archtest.Check(t, ".", archtest.Rule{
-		Banned: regexp.MustCompile(`(?i)\b(FROM|JOIN|INTO|UPDATE)\s+(items|item_versions|media|surface_files)\b`),
+		Banned: regexp.MustCompile(`(?i)\b(FROM|JOIN|INTO|UPDATE)\s+(items|item_versions|media|surface_files|public_hoppers)\b`),
 		Why:    "this queries plane 1 directly: read a local origin through its surface, as fetch.Client does",
 	})
 }

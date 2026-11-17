@@ -2,6 +2,7 @@ package reader
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -760,5 +761,92 @@ func TestMarkAllRead(t *testing.T) {
 	}
 	if n, err := g.r.MarkAllRead(ctx, g.uid, g.sid, now.AsOf); err != nil || n != 0 {
 		t.Fatalf("marking again marked %d, %v", n, err)
+	}
+}
+
+func TestAChangeOfKindIsRecorded(t *testing.T) {
+	// §13.3 (decision #100): a fragment fetched as a thread is a change of
+	// kind, which §5.3 forbids. Adopted, recorded, and kept for a quoter's
+	// warning; to and from withdrawn is not one.
+	g := newRig(t)
+	ctx := context.Background()
+	now := time.Date(2026, 11, 12, 12, 0, 0, 0, time.UTC)
+	a := &testblyg.Item{ID: idA, Kind: "fragment", Version: 1, ContentMD: "a leaf", Updated: now}
+	b := &testblyg.Item{ID: idB, Kind: "fragment", Version: 1, ContentMD: "another leaf", Updated: now}
+	g.b.Items = []*testblyg.Item{a, b}
+	g.subscribe()
+	g.poll()
+
+	a.Kind, a.Version, a.ContentMD = "thread", 2, "now it quotes"
+	b.Kind, b.Version, b.ContentMD = "withdrawn", 2, ""
+	g.b.Publish()
+	g.poll()
+	if ra := g.row(idA); ra.kind != "thread" || ra.version != 2 || !strings.Contains(ra.discrepancy, "change of kind") {
+		t.Fatalf("a change of kind must be adopted and recorded: %+v", ra)
+	}
+	if rb := g.row(idB); strings.Contains(rb.discrepancy, "change of kind") {
+		t.Fatalf("a withdrawal is not a change of kind: %+v", rb)
+	}
+	// Same version, same words, other kind: still a change of kind.
+	b.Kind, b.Version, b.ContentMD = "fragment", 3, "back"
+	g.b.Publish()
+	g.poll()
+	b.Kind = "thread"
+	g.b.Publish()
+	g.reconcileNext()
+	g.poll()
+	if rb := g.row(idB); rb.kind != "thread" || !strings.Contains(rb.discrepancy, "change of kind") {
+		t.Fatalf("a kind change at one version and hash: %+v", rb)
+	}
+	if _, err := g.r.Pool.Exec(ctx, `INSERT INTO subscriptions (user_id, remote_origin_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, g.uid, g.sid); err != nil {
+		t.Fatal(err)
+	}
+	snaps, err := g.r.Snapshots(ctx, g.uid, []string{idA, idB})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snaps[idA]) != 1 || snaps[idA][0].KindChanged != "fragment at v1, thread at v2" {
+		t.Fatalf("the snapshot must carry the change for the quoter: %+v", snaps[idA])
+	}
+}
+
+func TestTextThatIsNotTextIsMalformed(t *testing.T) {
+	// §5.1 and §13.2 (decision #103): a content_md with a C0 control or an
+	// unpaired surrogate is malformed input: skipped, nothing changed, and
+	// never repaired into bytes the hash does not cover.
+	g := newRig(t)
+	now := time.Date(2026, 11, 12, 12, 0, 0, 0, time.UTC)
+	a := &testblyg.Item{ID: idA, Kind: "fragment", Version: 1, ContentMD: "fine", Updated: now}
+	b := &testblyg.Item{ID: idB, Kind: "fragment", Version: 1, ContentMD: "a bell\a", Updated: now}
+	g.b.Items = []*testblyg.Item{a, b}
+	g.subscribe()
+	g.r.PollNow(context.Background(), g.sid) // the bad document fails its part of the poll
+	if g.row(idA) == nil || g.row(idB) != nil {
+		t.Fatalf("the good document is imported and the bad one skipped: %v %v", g.row(idA), g.row(idB))
+	}
+
+	a.Version, a.ContentMD = 2, "fine, then not"
+	g.b.Publish()
+	path := "/blyg/items/" + idA + ".json"
+	g.b.S.Set(path, strings.Replace(mustGet(t, g.b, path), `"fine, then not"`, `"fine, then \ud800not"`, 1))
+	g.r.PollNow(context.Background(), g.sid)
+	if ra := g.row(idA); ra.version != 1 || g.docField(idA, "content_md") != "fine" {
+		t.Fatalf("a lone surrogate must not change stored state: %+v %q", ra, g.docField(idA, "content_md"))
+	}
+	_, err := g.r.ApplyDocument(context.Background(), g.sid, blyg.Surface{Origin: g.b.Origin()}, idA, []byte(mustGet(t, g.b, path)), g.b.Origin()+"items/"+idA+".json")
+	if !errors.Is(err, errMalformedText) {
+		t.Fatalf("want errMalformedText, got %v", err)
+	}
+	// Bytes that encoding/json would quietly read as U+FFFD: a surrogate
+	// written as raw bytes, and an invalid byte (review of PR #5).
+	for _, bad := range []string{"\xed\xa0\x80", "\xff"} {
+		doc := strings.Replace(mustGet(t, g.b, path), "\\ud800", bad, 1)
+		_, err := g.r.ApplyDocument(context.Background(), g.sid, blyg.Surface{Origin: g.b.Origin()}, idA, []byte(doc), g.b.Origin()+"items/"+idA+".json")
+		if !errors.Is(err, errMalformedText) {
+			t.Errorf("%q: want errMalformedText, got %v", bad, err)
+		}
+	}
+	if ra := g.row(idA); ra.version != 1 || g.docField(idA, "content_md") != "fine" {
+		t.Fatalf("stored state changed: %+v", ra)
 	}
 }

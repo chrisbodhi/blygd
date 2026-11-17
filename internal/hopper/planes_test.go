@@ -12,7 +12,7 @@ import (
 // surface for curation).
 func TestHopperNeverWritesTheSurface(t *testing.T) {
 	archtest.Check(t, ".", archtest.Rule{
-		Banned: regexp.MustCompile(`(?i)\b(INTO|UPDATE|DELETE\s+FROM)\s+(surface_files|items|item_versions|version_media|media)\b`),
+		Banned: regexp.MustCompile(`(?i)\b(INTO|UPDATE|DELETE\s+FROM)\s+(surface_files|items|item_versions|version_media|media|public_hoppers)\b`),
 		Why:    "this writes plane 1: hoppers only read it",
 	})
 }

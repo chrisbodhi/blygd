@@ -237,6 +237,9 @@ func (s *Studio) CreateDraft(ctx context.Context, originID int64, in NewDraft) (
 	if in.Kind != "" && in.Kind != "fragment" && in.Kind != "thread" {
 		return nil, invalid("kind must be fragment or thread")
 	}
+	if strings.ContainsRune(in.ContentMD, 0) {
+		return nil, invalid(nulText)
+	}
 	var forked any
 	if in.ForkedFrom != nil {
 		ref := *in.ForkedFrom
@@ -305,6 +308,10 @@ func (s *Studio) CreateDraft(ctx context.Context, originID int64, in NewDraft) (
 	return it, err
 }
 
+// nulText refuses U+0000, which no draft can hold: content_md is text, and
+// a C0 control could never publish (§5.1).
+const nulText = "text cannot hold U+0000 (§5.1)"
+
 // DraftEdit changes a draft; nil leaves a field alone.
 type DraftEdit struct {
 	ContentMD *string
@@ -320,6 +327,9 @@ type DraftEdit struct {
 // the generation metadata. Editing a published item's draft changes
 // nothing on the wire until the next publish.
 func (s *Studio) UpdateDraft(ctx context.Context, originID int64, id string, in DraftEdit) (*Item, error) {
+	if in.ContentMD != nil && strings.ContainsRune(*in.ContentMD, 0) || in.Note != nil && strings.ContainsRune(*in.Note, 0) {
+		return nil, invalid(nulText)
+	}
 	var gen any
 	if in.Generation != nil {
 		norm, err := normalizeGeneration(in.Generation)
@@ -491,6 +501,7 @@ func (s *Studio) Publish(ctx context.Context, originID int64, id string, opts Pu
 		if strings.TrimSpace(md) == "" {
 			return invalid("nothing to publish: the draft is empty")
 		}
+		res.Warnings = append(res.Warnings, c.Warnings...)
 		if n := utf8.RuneCountInString(md); it.Kind == "fragment" && s.FragmentCap > 0 && n > s.FragmentCap {
 			return invalid("fragment is %d characters; the cap is %d (§5.3)", n, s.FragmentCap)
 		}
@@ -514,6 +525,13 @@ func (s *Studio) Publish(ctx context.Context, originID int64, id string, opts Pu
 		if note != nil && strings.TrimSpace(*note) == "" {
 			note = nil
 		}
+		if note != nil {
+			// A note reaches feed.xml (§7), where these characters would
+			// make the whole feed unparseable, as in content_md (§5.1).
+			if fault := blyg.PublishFault(*note); fault != "" {
+				return invalid("the note holds %s, which cannot be published as text (§5.1)", fault)
+			}
+		}
 		at := s.now()
 		if prev != nil && at.Before(prev.At) {
 			at = prev.At // keep the changelog ordered if the clock stepped back
@@ -527,9 +545,7 @@ func (s *Studio) Publish(ctx context.Context, originID int64, id string, opts Pu
 				}
 				// §5.9: each remote entry carries its human half, frozen now.
 				c.Transclusions[i].Cited = cited(rs.quoted[t.Origin+" "+t.ID], at)
-				if !t.Pinned {
-					res.Warnings = append(res.Warnings, unpinnedQuote(t))
-				}
+				res.Warnings = append(res.Warnings, quoteWarnings(t, rs)...)
 			}
 			b, err := json.Marshal(c.Transclusions)
 			if err != nil {
@@ -618,10 +634,21 @@ func (s *Studio) Publish(ctx context.Context, originID int64, id string, opts Pu
 	return res, nil
 }
 
-// unpinnedQuote is §10.2's notice for a remote quote of an unpinned version.
-func unpinnedQuote(t *blyg.Target) string {
-	return fmt.Sprintf("![[%s]] quotes v%d at %s, which is not pinned: if it is withdrawn, this thread cannot be republished until the quote is removed (§10.2)",
-		t.ID, t.Version, t.Origin)
+// quoteWarnings is what the author should know about a remote quote: that
+// it is unpinned (§10.2 SHOULD), and that its origin changed its kind
+// (§13.3 SHOULD, decision #100), so it may carry words of third parties
+// the author never chose.
+func quoteWarnings(t *blyg.Target, rs *resolver) []string {
+	var out []string
+	if !t.Pinned {
+		out = append(out, fmt.Sprintf("![[%s]] quotes v%d at %s, which is not pinned: if it is withdrawn, this thread cannot be republished until the quote is removed (§10.2)",
+			t.ID, t.Version, t.Origin))
+	}
+	if snap := rs.quoted[t.Origin+" "+t.ID]; snap != nil && snap.KindChanged != "" {
+		out = append(out, fmt.Sprintf("![[%s]] changed kind at %s (%s), which §5.3 forbids: v%d is a %s, and what it quotes is baked into this thread with it (§13.3)",
+			t.ID, t.Origin, snap.KindChanged, t.Version, t.Kind))
+	}
+	return out
 }
 
 // built is a draft composed as publishing it now would compose it.
@@ -712,7 +739,7 @@ func (s *Studio) Preview(ctx context.Context, originID int64, id string, content
 			return err
 		}
 		p = &Preview{ContentMD: b.ContentMD, ContentHTML: b.ContentHTML, Transclusions: b.Transclusions,
-			Links: b.Links, Generated: b.Generated, Problems: b.Problems, Warnings: []string{}}
+			Links: b.Links, Generated: b.Generated, Problems: b.Problems, Warnings: append([]string{}, b.Warnings...)}
 		if p.Links == nil {
 			p.Links = []blyg.Link{}
 		}
@@ -740,8 +767,8 @@ func (s *Studio) Preview(ctx context.Context, originID int64, id string, content
 			p.Problems = []blyg.Problem{}
 		}
 		for _, t := range b.Quoted {
-			if t.Origin != "" && !t.Pinned {
-				p.Warnings = append(p.Warnings, unpinnedQuote(t))
+			if t.Origin != "" {
+				p.Warnings = append(p.Warnings, quoteWarnings(t, b.rs)...)
 			}
 		}
 		return nil

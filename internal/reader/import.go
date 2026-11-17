@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -147,6 +148,9 @@ func (r *Reader) ApplyDocument(ctx context.Context, remoteID int64, s blyg.Surfa
 	if err := json.Unmarshal(body, &d); err != nil {
 		return ApplyResult{}, fmt.Errorf("item document %s: %w", itemID, err)
 	}
+	if err := checkText(body, d.ContentMD); err != nil {
+		return ApplyResult{}, fmt.Errorf("item document %s: %w", itemID, err)
+	}
 	if !knownKind(d.Kind) {
 		return ApplyResult{Outcome: "ignored"}, nil // §5.3, §13.1 rule 4
 	}
@@ -193,9 +197,9 @@ func (r *Reader) ApplyDocument(ctx context.Context, remoteID int64, s blyg.Surfa
 	err := tx.Run(ctx, r.Pool, pgx.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
 		var watermark, version int
 		var curHash *string
-		var curState string
-		err := tx.QueryRow(ctx, `SELECT watermark, version, state, content_hash FROM imported_items
-			WHERE remote_origin_id = $1 AND item_id = $2 FOR UPDATE`, remoteID, itemID).Scan(&watermark, &version, &curState, &curHash)
+		var curState, curKind string
+		err := tx.QueryRow(ctx, `SELECT watermark, version, state, kind, content_hash FROM imported_items
+			WHERE remote_origin_id = $1 AND item_id = $2 FOR UPDATE`, remoteID, itemID).Scan(&watermark, &version, &curState, &curKind, &curHash)
 		if errors.Is(err, pgx.ErrNoRows) {
 			res.Outcome = "new"
 			_, err = tx.Exec(ctx, `INSERT INTO imported_items
@@ -226,22 +230,37 @@ func (r *Reader) ApplyDocument(ctx context.Context, remoteID int64, s blyg.Surfa
 			_, err = tx.Exec(ctx, `UPDATE imported_items SET fetched_at = $3, discrepancy = $4, discrepancy_at = $3
 				WHERE remote_origin_id = $1 AND item_id = $2`, remoteID, itemID, now, joinNotes(notes))
 			return err
-		case d.Version == version && curHash != nil && *curHash == d.ContentHash && (curState == "withdrawn") == (d.Kind == "withdrawn"):
+		case d.Version == version && curHash != nil && *curHash == d.ContentHash && curKind == d.Kind:
 			res.Outcome = "unchanged"
 			_, err = tx.Exec(ctx, `UPDATE imported_items SET fetched_at = $3, page_url = coalesce($4, page_url),
 				doc = CASE WHEN state = 'current' THEN $5::jsonb ELSE NULL END,
 				discrepancy = coalesce($6, discrepancy), discrepancy_at = CASE WHEN $6::text IS NULL THEN discrepancy_at ELSE $3 END
 				WHERE remote_origin_id = $1 AND item_id = $2`, remoteID, itemID, now, pageURL, doc, joinNotes(notes))
 			return err
+		}
+		// §13.3 (decision #100): a fragment fetched as a thread, or a thread
+		// as a fragment, is a change of kind, which §5.3 forbids. It is
+		// adopted, like any content the origin serves, and recorded once
+		// for good, so that a quote of it warns (studio.Snapshot). A change
+		// to or from withdrawn is not one; the kind an item had before its
+		// withdrawal is not kept, so a return in the other kind is missed.
+		var kindChanged any
+		if (curKind == "fragment" || curKind == "thread") && (d.Kind == "fragment" || d.Kind == "thread") && curKind != d.Kind {
+			change := fmt.Sprintf("%s at v%d, %s at v%d", curKind, version, d.Kind, d.Version)
+			kindChanged = change
+			notes = append([]string{"change of kind: " + change + ", which §5.3 forbids; adopted (§13.3)"}, notes...)
+		}
+		switch {
 		case d.Version == version:
 			// §13.3: same version, different content — a stealth edit.
 			// Content ground truth wins; the watermark is unchanged.
 			res.Outcome = "stealth"
 			notes = append([]string{fmt.Sprintf("stealth edit: v%d changed without a version bump; adopted (§13.3)", d.Version)}, notes...)
 			_, err = tx.Exec(ctx, `UPDATE imported_items SET state = $3, kind = $4, doc = $5, content_hash = $6,
-				page_url = coalesce($7, page_url), claimed_updated = $8, fetched_at = $9, discrepancy = $10, discrepancy_at = $9
+				page_url = coalesce($7, page_url), claimed_updated = $8, fetched_at = $9, discrepancy = $10, discrepancy_at = $9,
+				kind_changed = coalesce($11, kind_changed)
 				WHERE remote_origin_id = $1 AND item_id = $2`,
-				remoteID, itemID, state, d.Kind, doc, d.ContentHash, pageURL, claimed, now, joinNotes(notes))
+				remoteID, itemID, state, d.Kind, doc, d.ContentHash, pageURL, claimed, now, joinNotes(notes), kindChanged)
 			return err
 		}
 		// A higher version: adopt it, and the watermark follows. A later
@@ -250,12 +269,44 @@ func (r *Reader) ApplyDocument(ctx context.Context, remoteID int64, s blyg.Surfa
 		_, err = tx.Exec(ctx, `UPDATE imported_items SET state = $3, kind = $4, doc = $5, content_hash = $6,
 			page_url = coalesce($7, page_url), claimed_updated = $8, version = $9, watermark = $9,
 			version_seen_at = $10, fetched_at = $10,
-			discrepancy = coalesce($11, discrepancy), discrepancy_at = CASE WHEN $11::text IS NULL THEN discrepancy_at ELSE $10 END
+			discrepancy = coalesce($11, discrepancy), discrepancy_at = CASE WHEN $11::text IS NULL THEN discrepancy_at ELSE $10 END,
+			kind_changed = coalesce($12, kind_changed)
 			WHERE remote_origin_id = $1 AND item_id = $2`,
-			remoteID, itemID, state, d.Kind, doc, d.ContentHash, pageURL, claimed, d.Version, now, joinNotes(notes))
+			remoteID, itemID, state, d.Kind, doc, d.ContentHash, pageURL, claimed, d.Version, now, joinNotes(notes), kindChanged)
 		return err
 	})
 	return res, err
+}
+
+// errMalformedText is a content_md that is not text (§5.1): a C0 control
+// other than tab, LF and CR, an unpaired surrogate, U+FFFE or U+FFFF. The
+// document is malformed input (§13.2): skipped like one that does not
+// parse, and nothing stored changes. Never normalized or repaired: a
+// reader holds only bytes the hash covers (§5.1).
+var errMalformedText = errors.New("content_md is not text (§5.1); the document is malformed input and is skipped (§13.2)")
+
+func checkText(body []byte, md *string) error {
+	if md == nil {
+		return nil
+	}
+	var raw struct {
+		ContentMD json.RawMessage `json:"content_md"`
+	}
+	// Checked on the bytes served: encoding/json reads invalid UTF-8, a
+	// surrogate written as raw bytes (ED A0 80) and a lone \uD800 alike as
+	// U+FFFD, which TextFault accepts (review of PR #5).
+	if json.Unmarshal(body, &raw) == nil {
+		if !utf8.Valid(raw.ContentMD) {
+			return fmt.Errorf("%w: invalid UTF-8, or a surrogate written as bytes", errMalformedText)
+		}
+		if blyg.LoneSurrogate(raw.ContentMD) {
+			return fmt.Errorf("%w: an unpaired surrogate", errMalformedText)
+		}
+	}
+	if fault := blyg.TextFault(*md); fault != "" {
+		return fmt.Errorf("%w: %s", errMalformedText, fault)
+	}
+	return nil
 }
 
 func joinNotes(notes []string) any {

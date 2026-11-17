@@ -177,16 +177,76 @@ No API change: everything the studio now does is an operation
 - [x] `go test ./...` green against Postgres 16.
 - [x] Merged into `claude/adoring-cray-iexclk`; the merge is green.
 
-**The spec has moved.** blygd implements `protocol-v0.4.md` at its sixth
-revision (2026-10-20). `blygger-spec` `d248bc4` (2026-11-12) has nine more,
-the seventh to the fifteenth, including #103's one-spelling rule above.
-Nothing in them was implemented here beyond the redirect. Read them and
-rerun parity and interop before Friday, and decide what ships before the
-demo and what waits.
+**The spec has moved**, and is taken in below: "Spec revisions 7–16".
+
+## Spec revisions 7–16 (Monday)
+
+`[x]` on `claude/adoring-cray-iexclk`, 2026-11-16, from trunk `3a96ffa`.
+`protocol-v0.4.md` at `blygger-spec` `9fa1d7e` (2026-11-13), the
+sixteenth revision; blygd had implemented the sixth (`24b9770`). DESIGN.md
+cites the new commit and has the detail.
+
+- [x] **7th, the fixed name at every identity (#87).** blygd already
+  serves `{origin}blyg.json` at every origin, old mounts and `~` alike.
+  The "rel-named manifest" departure in DESIGN.md is now the spec's rule,
+  and says so. No code.
+- [x] **8th, hopper feeds (#86), publisher side.** The manifest's
+  `hoppers` key, through a plane-1 copy (migration 009, `public_hoppers`,
+  backfilled from hoppers public today), and a live
+  `{origin}h/{slug}/feed.xml` held to §13.5 rules (a)–(d).
+  `TestHopperFeeds`, `TestHopperFeedIsWellFormedAndPlain`. **Not built:**
+  hopper subscriptions on the reader side (§12.1 step 7, §12.2, §13.6),
+  which the spec allows a reader to skip; they need a subscription
+  identity of (origin, feed) beside the origin's own.
+- [x] **9th (three sentences).** A directive or reserved line ends a
+  partial selection (`attachedQuote`). §13.7 folding and §13.2's wordless
+  maintenance are reader MAYs blygd does not do.
+- [x] **10th.** What an origin serves does not depend on who asks: true
+  already (suspension leaves the surface alone). A compelled removal is a
+  404 with no marker: blygd has no removal, and the schema forbids one.
+- [x] **11th, 12th.** Notes, and §16.14 `syndication` as a ruled shape.
+  No code.
+- [x] **13th, a kind is fixed (#100).** The items guard already kept it;
+  now tested. The importer records a change of kind and adopts it
+  (migration 008, `kind_changed`), and a preview or publish quoting such
+  an item warns. `openapi.json` and `llms.txt` tell clients acting for an
+  author to create threads.
+- [x] **14th, the reader suite's nine choices (#102).** Authored relative
+  URLs resolve against the origin, not the page (two e2e expectations
+  changed with it); a directive inside generated output transcludes and
+  divides the wrapper (a refusal before); a directive in a fragment is
+  the spec's publish error, no longer a departure. Already so, now
+  tested: tab-indented code, plain-text labels, the reserved form inline,
+  the item-document link fallback, a bake absolutized against its source,
+  and a retained pin's version in the bake.
+- [x] **15th, Unicode (#103).** content_md and notes are held to text at
+  publish (C0 controls, invalid UTF-8, U+FFFE/U+FFFF); NFC and unpaired
+  bidi controls warn; the importer skips a content_md that is not text,
+  lone surrogate escapes included; caps count code points and cut on
+  grapheme boundaries; `NormalizeOrigin` writes A-labels and uppercase
+  escapes; pages isolate baked quotes and strangers' strings.
+- [x] **16th, mathematics (#105).** Pages replace a `math` element with
+  its TeX annotation as text, or drop it, never passing it through.
+  blygd emits no MathML.
+- [x] `go test ./...` green against Postgres 16; `make test-all` green
+  against Postgres 18 after merging trunk (#6).
+- [x] Against blygger-studio 0.62.0 (`28b0c8d`), the first release that
+  publishes MathML: `make parity`, 61 cases, no unexpected mismatches,
+  and `make interop`, all eight scenarios, 0 failed, the two gaps as
+  before. Scenario 8 (#6) is the mathematics check, and passes only with
+  this branch's `mathText`. `make vuln` passes (the owner's run).
+- [ ] Parity's corpus has no cases yet for the wrapper divided around a
+  quote or for origin-relative URLs: add them once the reference is
+  confirmed to emit both.
+- [ ] **This deploy migrates** (008, 009), unlike A–F: a binary refuses a
+  database newer than itself, so the old binary is no longer a rollback
+  on its own; the preflight's backup is (DEPLOY.md, "Deploying"). The
+  rebuild step (step 4) puts existing public hoppers into their
+  manifests, and re-renders nothing else: published bytes are stored.
 
 ## Track D — invites (Sunday)
 
-- [ ] Migration 008: `invites` in `internal/account`, holding the SHA-256
+- [ ] Migration 010 (008 and 009 went to the spec revisions): `invites` in `internal/account`, holding the SHA-256
   of the code (never the code), `expires_at`, `redeemed_at`,
   `redeemed_by`, `note`. Recorded in `migrations.sum`.
 - [ ] `blygd invite [--expires 7d] [--count N] [--note …]` prints codes
@@ -356,7 +416,7 @@ of people. Each fix has a test that fails without it.
   and the DEPLOYS.md row. Then set `BLYGD_BACKUP_PING_URL` and the uptime
   check (Track F).
 - [ ] D (invites) and C (handles or a mount) wait on the decisions at the
-  top; D brings migration 008 and its own preflight.
+  top; D brings migration 010 and its own preflight.
 - [ ] Monday: three testers. Tuesday: the rest, if nothing broke.
 - [ ] An OPML of every tester's origin, imported by each
   (`POST /api/subscriptions/imports`), so everyone follows everyone.
