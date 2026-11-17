@@ -30,7 +30,7 @@ their reason and are reported, not failed.
 
 `run.sh` starts both studios on localhost, blygd on :18090 and the
 reference under Miniflare on :18787 (cron control on :18788). Each
-subscribes to the other, and `check.py` runs seven scenarios:
+subscribes to the other, and `check.py` runs eight scenarios:
 
 1. blygd imports the reference: hashes, retained pins, `page`.
 2. blygd quotes the reference (partial, whole, nested, `[[id]]`); the
@@ -55,6 +55,11 @@ subscribes to the other, and `check.py` runs seven scenarios:
    (§10.1, §10.3a, §5.7 rules 8 and 9). The reference verifies the
    `source` mention and the labelled quote. blygd verifies the
    reference's labelled quote.
+8. Mathematics (§5.2, §14, #105). The reference publishes formulas as
+   MathML with their TeX as an annotation, and blygd quotes them whole.
+   The bake in blygd's item document keeps the MathML as sent; blygd's
+   page passes no `math` element through and shows each formula's TeX as
+   text instead.
 
 A **gap** is a check of something the spec asks of the reference that it
 does not do yet: verifying a `link` mention as a notice, and emitting

@@ -521,6 +521,27 @@ def main():
          lambda: any(m["relation"] == "transclusion" and m["status"] == "verified" and rl in m["source_url"]
                      for m in blygd("GET", "/mentions")[1]["mentions"]) or None, ref_tick)
 
+    # 8 ─ mathematics: the reference publishes MathML, blygd bakes it as
+    # sent, and blygd's own page shows the author's TeX in its place.
+    section("8. mathematics (§5.2, §14, #105)")
+    rm = ref_publish("Euler: $e^{i\\pi} + 1 = 0$, and $a < b$.\n\n$$\\frac{a}{b}$$")
+    _, rmdoc = get(f"{REF}items/{rm}.json")
+    check("the reference publishes MathML, its TeX as an annotation (§5.2)",
+          '<annotation encoding="application/x-tex">e^{i\\pi} + 1 = 0</annotation>' in rmdoc["content_html"]
+          and '<math display="block"' in rmdoc["content_html"], rmdoc["content_html"])
+    wait("blygd imports the reference's formulas",
+         lambda: blygd("GET", f"/reader/items/{sid}/{rm}")[0] == 200 or None, lambda: blygd_poll(sid))
+    am, _ = blygd_publish(f"Alice quotes the formulas whole.\n\n![[{rm}]]\n\nAnd moves on.", "thread")
+    _, adoc = get(f"{ALICE}items/{am}.json")
+    check("blygd bakes the reference's MathML as sent (§10.2)",
+          rmdoc["content_html"].strip() in adoc["content_html"], adoc["content_html"])
+    code, page = get(urllib.parse.urljoin(ALICE, adoc["page"]))
+    check("blygd's page passes no math element through (§14)",
+          code == 200 and "<math" not in page.lower(), (code, page))
+    check("blygd's page shows the author's TeX as text in their place (§14)",
+          "<code>e^{i\\pi} + 1 = 0</code>" in page and "<code>a &lt; b</code>" in page
+          and "<pre><code>\\frac{a}{b}</code></pre>" in page, page)
+
     if gaps:
         print(f"\n{len(gaps)} gap(s), not failures: " + "; ".join(gaps))
     print(f"\n{len(failures)} failed" + (": " + "; ".join(failures) if failures else ""))
