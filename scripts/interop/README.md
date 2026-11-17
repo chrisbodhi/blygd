@@ -49,17 +49,17 @@ subscribes to the other, and `check.py` runs seven scenarios:
    must be byte-identical. Every mention must reach Sol's endpoint naming
    the item document (#85), and nothing may ask for a default path. A
    second origin, Luna, on :18790, is the same with no `blyg.json` at all:
-   both studios read it, and blygd refuses to fork it (see DESIGN.md,
-   departures).
+   both studios read it, the reference forks it from its stored surface,
+   and blygd refuses to (see DESIGN.md, departures).
 7. Labels, `links[]` and remote generation sources, published by blygd
    (§10.1, §10.3a, §5.7 rules 8 and 9). The reference verifies the
    `source` mention and the labelled quote. blygd verifies the
    reference's labelled quote.
 
 A **gap** is a check of something the spec asks of the reference that it
-does not do yet: verifying a `link` mention as a notice, emitting
-`links[]`, and baking `data-blyg-label`. Gaps are printed and counted but
-never fail the run. When the reference catches up they print PASS, and
+does not do yet: verifying a `link` mention as a notice, and emitting
+`links[]`. Gaps are printed and counted but never fail the run. When the
+reference catches up they print PASS, and
 then they should become checks.
 
 It takes about two minutes, most of it the reference's 60 s
