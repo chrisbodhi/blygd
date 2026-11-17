@@ -343,8 +343,9 @@ its own, and the version string moves last.
 7. **Take in revisions 7–16** (2026-11-01 to 2026-11-13), read at
    `blygger-spec` `9fa1d7e`.
 
-   *(Done, 2026-11-16, except hopper subscriptions on the reader side and
-   the parity and interop reruns: TODO.md, "Spec revisions 7–16".)*
+   *(Done, 2026-11-17 (#5), except hopper subscriptions on the reader
+   side. Parity and interop pass against blygger-studio 0.62.0: TODO.md,
+   "Spec revisions 7–16".)*
 
 **Open question:** §10.2 step 2 (#82) resolves against any snapshot the
 publisher holds, not only a subscribed origin's. `reader.Snapshots` joins
@@ -360,9 +361,20 @@ Left for later, all optional in the spec:
   revision), and folding items published together (§13.7, #78).
 - Hopper subscriptions (§12.1 step 7, §12.2, §13.6, #86): the reader side
   of hopper feeds. blygd publishes hopper feeds.
-- Showing a `math` element by redrawing it from its TeX (§14, #105), and
-  rendering `$…$` to MathML on publish (§5.2 SHOULD for a client that
-  renders mathematics; blygd does not).
+- **Mathematics, both halves** (§5.2, §14, #105). Optional, but no longer
+  hypothetical: blygger-studio 0.62.0 publishes `$…$` and `$$…$$` as
+  MathML. blygd publishes `$…$` as written, so its authors' formulas reach
+  no reader as formulas, a fork or export of the reference's `content_md`
+  loses them (the parity corpus's "dollar formula" departure), and #71's
+  note asks a client with no reason to differ to read `$…$` the same.
+  Pages show other origins' formulas as TeX text where a browser could
+  draw them. One piece serves both halves: a TeX-to-MathML-Core renderer
+  in `internal/blyg`, emitting the TeX as an `application/x-tex`
+  annotation on publish, and redrawing a `math` element from its
+  annotation on our pages in place of `mathText`'s replacement (the
+  treatment §14 prefers). The first step is finding a Go renderer that
+  emits MathML Core with no stylesheet, script or font; many math
+  extensions only wrap the TeX for a script to draw, which §5.2 rules out.
 - Re-sending a version's mentions when it is pinned (§15.2, #73).
 - §16.9 `pinned_at` and `cid`, and §16.10 image sizes: ruled shapes, not
   yet normative.
@@ -520,7 +532,7 @@ them.
 Checked against the reference client, blygger-studio 0.39.0 (`9f6bab8`).
 Both checks are in the repo and are rerun when the spec or the reference
 moves (`scripts/interop/README.md`). This is the first run; the latest,
-against 0.48.2 with seven scenarios, is under Phase 5 step 6.
+against 0.62.0 with eight scenarios, is in TODO.md, "Spec revisions 7–16".
 
 - **`make parity`**, differential: 56 cases through both implementations'
   pure functions (§10.2 text content, quote normalization, partial
