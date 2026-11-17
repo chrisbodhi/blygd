@@ -44,6 +44,14 @@ func parityCorpus(t *testing.T) []parityCase {
 	html("figure and dl", "<figure>f<figcaption>cap</figcaption></figure><dl><dt>t</dt><dd>d</dd></dl>")
 	html("bake", `<blockquote class="blyg-transclusion" data-blyg-id="x" data-blyg-version="1">`+"\n<p>quoted</p>\n</blockquote>\n<p>after</p>")
 	html("attribute with >", `<p><a title="a>b" href="#">link</a> text</p>`)
+	// Mathematics as the reference publishes it (§5.2, #105): MathML Core
+	// with the author's TeX as an annotation. Text content makes no
+	// exception for it (§2), so the annotation is part of the text.
+	inlineMath := `<math><semantics><mrow><msup><mi>e</mi><mrow class="tml-sml-pad"><mi>i</mi><mi>π</mi></mrow></msup><mo>+</mo><mn>1</mn><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">e^{i\pi} + 1 = 0</annotation></semantics></math>`
+	displayMath := `<math display="block" class="tml-display"><semantics><mfrac><mi>a</mi><mi>b</mi></mfrac><annotation encoding="application/x-tex">\frac{a}{b}</annotation></semantics></math>`
+	mathHTML := "<p>Euler: " + inlineMath + " and a &lt; b.</p>\n<p>" + displayMath + "</p>\n"
+	html("inline formula", "<p>Euler: "+inlineMath+" and a &lt; b.</p>")
+	html("display formula", "<p>"+displayMath+"</p>")
 
 	// A quote as the author writes it, rendered by each client's own
 	// markdown and normalized: the needle of the check.
@@ -62,6 +70,10 @@ func parityCorpus(t *testing.T) []parityCase {
 	quote("heading", "# Heading")
 	quote("html-looking", "<b>bold</b> stays text")
 	quote("trailing spaces", "words   ")
+	// The reference reads $…$ as a formula; blygd renders no mathematics, so
+	// a quote across one cannot match, which §5.2 already advises against.
+	cs = append(cs, parityCase{Op: "quote", Name: "dollar formula", Quote: `Euler: $e^{i\pi} + 1 = 0$`,
+		Departure: "blygd renders no mathematics: $…$ stays as written (§5.2 names $…$ only non-normatively)"})
 
 	// The whole check, against HTML each renderer produces.
 	target := "<p>Stigmergy is what a <em>protocol</em> looks like\nfrom inside.</p>\n<p>Second &amp; last, “quoted”.</p>\n"
@@ -72,6 +84,7 @@ func parityCorpus(t *testing.T) []parityCase {
 	locate("not present", target, "absent words")
 	locate("prefix and suffix", "<p>"+repeat("x", 40)+" needle "+repeat("y", 40)+"</p>", "needle")
 	locate("astral context", "<p>𝔘𝔘𝔘 needle 𝔘𝔘𝔘</p>", "needle")
+	locate("prose beside a formula", mathHTML, "and a < b.")
 
 	// §5.6 rule 6, on bakes in the shared wire format.
 	o := "https://ex.test/me/"
@@ -98,6 +111,8 @@ func parityCorpus(t *testing.T) []parityCase {
 		`<blockquote class="blyg-transclusion" data-blyg-id="`+q+`" data-blyg-version="3">`+"\n<ul>\n<li>one</li>\n<li>two</li>\n</ul>\n<pre><code>x := 1\n</code></pre>\n</blockquote>\n", "")
 	flatten("markdown specials in quoted text", "![["+q+"]]",
 		`<blockquote class="blyg-transclusion" data-blyg-id="`+q+`" data-blyg-version="3">`+"\n<p>a * b _c_ [d] &lt;e&gt; `f`</p>\n</blockquote>\n", "")
+	flatten("formula in a quote", "![["+q+"]]",
+		`<blockquote class="blyg-transclusion" data-blyg-id="`+q+`" data-blyg-version="3">`+"\n"+mathHTML+"</blockquote>\n", "")
 	return cs
 }
 
