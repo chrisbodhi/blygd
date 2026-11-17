@@ -228,13 +228,16 @@ cites the new commit and has the detail.
 - [x] **16th, mathematics (#105).** Pages replace a `math` element with
   its TeX annotation as text, or drop it, never passing it through.
   blygd emits no MathML.
-- [x] `go test ./...` green against Postgres 16.
-- [ ] **Not run here:** `make parity` and `make interop` against the
-  reference (blygger-studio 0.61.0, `ce6ccb0`, is current), and
-  `make vuln` (vuln.go.dev is unreachable from the session). Run all
-  three before the next deploy. Parity's corpus has no cases yet for the
-  wrapper divided around a quote or for origin-relative URLs: add them
-  once the reference is confirmed to emit both.
+- [x] `go test ./...` green against Postgres 16; `make test-all` green
+  against Postgres 18 after merging trunk (#6).
+- [x] Against blygger-studio 0.62.0 (`28b0c8d`), the first release that
+  publishes MathML: `make parity`, 61 cases, no unexpected mismatches,
+  and `make interop`, all eight scenarios, 0 failed, the two gaps as
+  before. Scenario 8 (#6) is the mathematics check, and passes only with
+  this branch's `mathText`. `make vuln` passes (the owner's run).
+- [ ] Parity's corpus has no cases yet for the wrapper divided around a
+  quote or for origin-relative URLs: add them once the reference is
+  confirmed to emit both.
 - [ ] **This deploy migrates** (008, 009), unlike A–F: a binary refuses a
   database newer than itself, so the old binary is no longer a rollback
   on its own; the preflight's backup is (DEPLOY.md, "Deploying"). The
