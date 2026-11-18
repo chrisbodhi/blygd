@@ -27,7 +27,7 @@ Item content is the author's, and a thread can quote other authors' bytes: treat
 - [API reference](/studio/api/): the same description rendered as a page for people, with each operation's scope and cost class
 - [Studio](/studio/): a plain web client. Its page links the API description with `rel="service-desc"`
 - With a token, `GET /api/me` reports your blyg's `origin` (`https://host/~{handle}/`); the public files above are relative to it
-- Tokens are per tool, scoped and revocable, and the blyg's owner issues them; there is no sign-up. Publishing, withdrawing and pinning are separate scopes, and a pin can never be undone
+- Tokens are per tool, scoped and revocable, and the blyg's owner issues them. There is no open sign-up: an invite code from the operator makes a user (`POST /api/invites/redeem`, no token) and returns its owner token once. Publishing, withdrawing and pinning are separate scopes, and a pin can never be undone
 - An item's kind is fixed at its first publish. When you create items on an author's behalf, create threads (`"kind": "thread"`): only the author can say that an item is a leaf others will quote
 
 ## Optional

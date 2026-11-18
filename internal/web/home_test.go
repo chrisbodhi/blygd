@@ -11,7 +11,7 @@ import (
 )
 
 // The host root page links the API description (also as service-desc,
-// §16.6), the source, Blygger and llms.txt; lists the operator's links
+// §16.6), the source, Blygger, llms.txt and the studio's invite form; lists the operator's links
 // as rel="me"; and every host-relative link on it resolves.
 func TestHomePage(t *testing.T) {
 	page := string(HomePage("https://github.com/chrisbodhi/blygd", []config.Link{
@@ -24,6 +24,7 @@ func TestHomePage(t *testing.T) {
 		`<a href="https://github.com/chrisbodhi/blygd">`,
 		`<a href="https://blygger.com/">`,
 		`<a href="/llms.txt">`,
+		`<a href="/studio/#invite">`,
 		`<a rel="me" href="https://social.example/@me">Mastodon</a>`,
 		`<a rel="me" href="https://ex.com/?a=1&amp;b=2">&lt;b&gt;&#34;x&#34;&lt;/b&gt;</a>`,
 	} {
@@ -37,8 +38,9 @@ func TestHomePage(t *testing.T) {
 
 	h := Router(&API{}, &Surface{}, discardLog())
 	for _, m := range regexp.MustCompile(`href="(/[^"]*)"`).FindAllStringSubmatch(page, -1) {
+		path, _, _ := strings.Cut(m[1], "#") // a browser never sends the fragment
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest("GET", m[1], nil))
+		h.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
 		if rec.Code != 200 {
 			t.Errorf("home page links %s: %d", m[1], rec.Code)
 		}

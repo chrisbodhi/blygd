@@ -28,9 +28,9 @@ Each track names the branch it is on.
 - [x] **Reserved handles.** Settled by the mount: the list no longer keeps
   routes apart, and stays as it is so that `~api` or `~studio` cannot pass
   for the service. Nothing added.
-- [ ] **Invites or the CLI.** Invites if people at the launch should get an
-  account on the spot; otherwise `blygd user add` and a one-time secret
-  link to send the owner token.
+- [x] **Invites** (decided 2026-11-17), so people at the launch can make
+  an account on the spot. `blygd user add` and a one-time secret link stay
+  for the operator. Done in Track D.
 
 ## Track A — isolation, proved (Saturday)
 
@@ -244,24 +244,28 @@ cites the new commit and has the detail.
   rebuild step (step 4) puts existing public hoppers into their
   manifests, and re-renders nothing else: published bytes are stored.
 
-## Track D — invites (Sunday)
+## Track D — invites
 
-- [ ] Migration 010 (008 and 009 went to the spec revisions): `invites` in `internal/account`, holding the SHA-256
+`[x]` on `claude/track-d-invites`, 2026-11-17.
+
+- [x] Migration 010 (008 and 009 went to the spec revisions): `invites` in `internal/account`, holding the SHA-256
   of the code (never the code), `expires_at`, `redeemed_at`,
   `redeemed_by`, `note`. Recorded in `migrations.sum`.
-- [ ] `blygd invite [--expires 7d] [--count N] [--note …]` prints codes
-  once.
-- [ ] `POST /api/invites/redeem {code, handle, title}`, no token. Charged
+- [x] `blygd invite [--expires 7d] [--count N] [--note …]` prints codes
+  once, each beside a `/studio/#invite/{code}` link.
+- [x] `POST /api/invites/redeem {code, handle, title}`, no token. Charged
   to the `fetch` cost class and to the failed-authentication budget per
   address. The invite is redeemed in the transaction that creates the
   user, through a `CreateUser` that takes the caller's transaction.
   Returns the owner token once. Described in `openapi.json`.
-- [ ] Studio: "Have an invite?" shows the permanent URL before submitting,
+- [x] Studio: "Have an invite?" shows the permanent URL before submitting,
   shows the owner token once with a prompt to save it, then trades it for
   a studio token as today.
-- [ ] Tests: a second redemption fails; an expired invite is refused; a
+- [x] Tests: a second redemption fails; an expired invite is refused; a
   taken or reserved handle leaves the invite unused; a wrong code costs
   the address's budget.
+- [ ] **Deploying it migrates** (010): run `scripts/deploy.sh --check`
+  first, as for 008 and 009. No new setting; no rebuild needed.
 
 ## Track E — CORS on `/api/` (Sunday)
 
@@ -415,8 +419,8 @@ of people. Each fix has a test that fails without it.
   `make vuln` first; then `scripts/deploy.sh --check`, `scripts/deploy.sh`,
   and the DEPLOYS.md row. Then set `BLYGD_BACKUP_PING_URL` and the uptime
   check (Track F).
-- [ ] D (invites) and C (handles or a mount) wait on the decisions at the
-  top; D brings migration 010 and its own preflight.
+- [~] D (invites) is merged on its branch; it brings migration 010 and
+  its own preflight. C (the mount) is done.
 - [ ] Monday: three testers. Tuesday: the rest, if nothing broke.
 - [ ] An OPML of every tester's origin, imported by each
   (`POST /api/subscriptions/imports`), so everyone follows everyone.

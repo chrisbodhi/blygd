@@ -27,17 +27,19 @@ import (
 
 // API is the private write surface. It is host-rooted (/api/…), never under
 // an origin: a studio and its API are client internals, not protocol (§15.1,
-// §16.6). Every route takes a bearer token and checks one scope.
+// §16.6). Every route takes a bearer token and checks one scope, except
+// redeeming an invite, which is how someone without a token gets one.
 type API struct {
-	Pool     *pgxpool.Pool
-	Accounts *account.Accounts
-	Studio   *studio.Studio
-	Hoppers  *hopper.Store
-	Mentions *mention.Store
-	Reader   *reader.Reader
-	Events   *events.Hub // GET /api/events; nil means unavailable
-	Log      *slog.Logger
-	Limits   *Limits // request budgets; nil means none
+	PublicURL string // where new users' origins mount (config.PublicURL)
+	Pool      *pgxpool.Pool
+	Accounts  *account.Accounts
+	Studio    *studio.Studio
+	Hoppers   *hopper.Store
+	Mentions  *mention.Store
+	Reader    *reader.Reader
+	Events    *events.Hub // GET /api/events; nil means unavailable
+	Log       *slog.Logger
+	Limits    *Limits // request budgets; nil means none
 
 	streams streamCount
 	// hopperPublicity serializes the hopper changes that list or unlist a
@@ -55,10 +57,14 @@ func principal(ctx context.Context) *account.Principal {
 	return p
 }
 
-// Handler returns the API's routes.
+// noToken is the scope of a route that takes no bearer token: it is
+// authorized by what its body carries. openapi.json gives it
+// "security": [].
+const noToken = "public"
+
 // route is one /api/ route: its mux pattern, the scope a token needs (""
-// for any token), and its handler. The table is the single source both the
-// mux and the OpenAPI coverage test read.
+// for any token, noToken for none), and its handler. The table is the
+// single source both the mux and the OpenAPI coverage test read.
 type route struct {
 	pattern string
 	scope   string
@@ -109,9 +115,12 @@ func (a *API) routes() []route {
 		route{"POST /api/tokens", account.ScopeTokensWrite, a.mintToken},
 		route{"DELETE /api/tokens/self", "", a.revokeSelf},
 		route{"DELETE /api/tokens/{tid}", account.ScopeTokensWrite, a.revokeToken},
+
+		route{"POST /api/invites/redeem", noToken, a.redeemInvite},
 	)
 }
 
+// Handler returns the API's routes.
 func (a *API) Handler() http.Handler {
 	mux := http.NewServeMux()
 	for _, r := range a.routes() {
@@ -148,6 +157,20 @@ func (a *API) guard(rt route) http.Handler {
 		if blocked, wait := a.Limits.authBlocked(addr); blocked {
 			retryAfter(w, wait)
 			writeError(w, http.StatusTooManyRequests, "rate_limited", "too many failed authentications from this address")
+			return
+		}
+		if scope == noToken {
+			// No token to charge: the route's cost class is charged to the
+			// address, and the handler charges a refused credential to the
+			// failed-authentication budget, as a wrong token is.
+			if ok, wait := a.Limits.spendAddr(cost, addr); !ok {
+				retryAfter(w, wait)
+				writeError(w, http.StatusTooManyRequests, "rate_limited", "over the "+cost+" request budget")
+				return
+			}
+			if err := rt.fn(w, r); err != nil {
+				a.handleErr(w, r, err)
+			}
 			return
 		}
 		p, err := a.Accounts.Authenticate(r.Context(), r.Header.Get("Authorization"))
@@ -978,6 +1001,30 @@ func (a *API) mintToken(w http.ResponseWriter, r *http.Request) error {
 	}
 	writeJSON(w, 201, map[string]any{"id": id, "token": secret, "scopes": in.Scopes, "expires_at": expires,
 		"note": "This is the only time the token is shown."})
+	return nil
+}
+
+// redeemInvite spends an invite on a new user, their origin and their
+// owner token, which it returns once. It takes no token: the code is the
+// credential, so a refused one costs the address as a wrong token does.
+func (a *API) redeemInvite(w http.ResponseWriter, r *http.Request) error {
+	var in struct {
+		Code   string `json:"code"`
+		Handle string `json:"handle"`
+		Title  string `json:"title"`
+	}
+	if err := decode(r, &in); err != nil {
+		return err
+	}
+	handle, origin, secret, err := a.Accounts.Redeem(r.Context(), in.Code, in.Handle, a.PublicURL, in.Title)
+	if errors.Is(err, account.ErrBadInvite) {
+		a.Limits.authFailed(a.Limits.addr(r))
+	}
+	if err != nil {
+		return err
+	}
+	writeJSON(w, 201, map[string]any{"handle": handle, "origin": origin, "token": secret,
+		"note": "This is the owner token, and the only time it is shown. It never expires: keep it somewhere safe, such as a password manager."})
 	return nil
 }
 

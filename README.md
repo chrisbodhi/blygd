@@ -42,6 +42,10 @@ keep the owner token somewhere safe, such as a password manager, to sign
 in again. Other tools get their own tokens:
 `blygd token mint chris my-tool --expires 30d items:read`.
 
+To let others make their own blyg, `blygd invite --count 5` prints codes,
+each with a link that opens the studio's sign-up form; each code makes one
+user (`POST /api/invites/redeem`, which takes no token).
+
 Every command applies pending schema migrations first (tern, embedded in
 the binary). `blygd migrate status` reports where a database stands, and
 `blygd migrate` applies migrations explicitly. Set

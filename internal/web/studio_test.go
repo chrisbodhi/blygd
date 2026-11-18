@@ -124,7 +124,8 @@ func discardLog() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard,
 
 // studioCall is one API request the studio's source makes. Path
 // parameters are "{}". fn is the helper that makes it: api, with the
-// studio's own token, or call, with a token pasted at sign-in.
+// studio's own token, call, with a token pasted at sign-in, or anon, with
+// none.
 type studioCall struct{ file, fn, method, path string }
 
 // studioCalls reads every API request out of the studio's source:
@@ -134,7 +135,7 @@ type studioCall struct{ file, fn, method, path string }
 // dropped. It also returns every fetch() target as is.
 func studioCalls(t *testing.T, files ...string) (calls []studioCall, fetches []studioCall) {
 	t.Helper()
-	call := regexp.MustCompile("\\b(api|call)\\(\"([A-Z]+)\",\\s*(?:\"([^\"]*)\"(\\s*\\+\\s*[A-Za-z_$])?|`([^`]*)`)")
+	call := regexp.MustCompile("\\b(api|call|anon)\\(\"([A-Z]+)\",\\s*(?:\"([^\"]*)\"(\\s*\\+\\s*[A-Za-z_$])?|`([^`]*)`)")
 	interp := regexp.MustCompile(`\$\{[^}]*\}`)
 	fetch := regexp.MustCompile("\\bfetch\\(\\s*([\"'`])([^\"'`]*)")
 	for _, file := range files {
@@ -252,8 +253,8 @@ func TestStudioHoldsWhatItCalls(t *testing.T) {
 	held := studioScopes(t)
 	calls, _ := studioCalls(t, "studio/app.js")
 	for _, c := range calls {
-		if c.fn == "call" {
-			continue // made with the pasted token, to mint the studio's own
+		if c.fn != "api" {
+			continue // made with the pasted token, to mint the studio's own, or with none
 		}
 		tmpl := operationFor(paths, c.method, c.path)
 		if tmpl == "" {

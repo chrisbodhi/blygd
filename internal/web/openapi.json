@@ -3,7 +3,7 @@
   "info": {
     "title": "blygd API",
     "version": "0.4.0",
-    "description": "The write and reading API of blygd, a Blygger studio (protocol 0.4). It is studio-private, not protocol (§16.6): the public surface is each origin's static files. Spec references (§) are to blygger-spec docs/protocol-v0.4.md.\n\nEvery HTML string that came from another origin is returned verbatim; clients MUST sanitize it before rendering (§14). Responses that carry imported bytes include a notice saying so.\n\nAuthenticate with a bearer token. Each operation's security requirement names the one scope it needs; the owner token `*` holds every scope.\n\nCross-origin clients: every response carries `Access-Control-Allow-Origin: *` and exposes `Retry-After` and `WWW-Authenticate`, and preflights are answered for any path here (methods GET, POST, PUT, PATCH, DELETE; headers Authorization and Content-Type; cached two hours). The bearer token is the only credential: no cookie is ever read, and no response allows credentials. Preflights are not budgeted.\n\nFinding the blyg: this host has no directory of blygs, and nothing is served at its root. Each blyg is mounted at its own path, `https://host/~{handle}/` (a blyg made before the `~` namespace keeps `https://host/{handle}/`). `GET /api/me` returns the caller's `origin`, that base URL, and every public file (`blyg.json`, `feed.xml`, `items/index.json`, `items/{id}.json`) is relative to it.\n\nRequests are budgeted per token and per user (a user's budget is twice a token's, across all their tokens). Each operation's `x-blygd-cost` names its class: `default` (120 a minute, bursts of 60), `fetch` (12 a minute; the call fetches from other hosts), `export` (2 a minute), `upload` (30 a minute, bursts of 20) and `stream` (no per-request budget; at most 8 open streams). Over budget is a 429 with `Retry-After`. An address that presents a wrong token too often is refused for a while, whatever token it then sends; a request with no `Authorization` header is not counted."
+    "description": "The write and reading API of blygd, a Blygger studio (protocol 0.4). It is studio-private, not protocol (§16.6): the public surface is each origin's static files. Spec references (§) are to blygger-spec docs/protocol-v0.4.md.\n\nEvery HTML string that came from another origin is returned verbatim; clients MUST sanitize it before rendering (§14). Responses that carry imported bytes include a notice saying so.\n\nAuthenticate with a bearer token; the one operation that takes none, redeeming an invite, is how someone without one gets one. Each operation's security requirement names the one scope it needs; the owner token `*` holds every scope.\n\nCross-origin clients: every response carries `Access-Control-Allow-Origin: *` and exposes `Retry-After` and `WWW-Authenticate`, and preflights are answered for any path here (methods GET, POST, PUT, PATCH, DELETE; headers Authorization and Content-Type; cached two hours). The bearer token is the only credential: no cookie is ever read, and no response allows credentials. Preflights are not budgeted.\n\nFinding the blyg: this host has no directory of blygs, and nothing is served at its root. Each blyg is mounted at its own path, `https://host/~{handle}/` (a blyg made before the `~` namespace keeps `https://host/{handle}/`). `GET /api/me` returns the caller's `origin`, that base URL, and every public file (`blyg.json`, `feed.xml`, `items/index.json`, `items/{id}.json`) is relative to it.\n\nRequests are budgeted per token and per user (a user's budget is twice a token's, across all their tokens), and an operation that takes no token per address. Each operation's `x-blygd-cost` names its class: `default` (120 a minute, bursts of 60), `fetch` (12 a minute; the call fetches from other hosts), `export` (2 a minute), `upload` (30 a minute, bursts of 20) and `stream` (no per-request budget; at most 8 open streams). Over budget is a 429 with `Retry-After`. An address that presents a wrong token too often is refused for a while, whatever token it then sends; a request with no `Authorization` header is not counted."
   },
   "servers": [
     {
@@ -34,6 +34,9 @@
     },
     {
       "name": "tokens"
+    },
+    {
+      "name": "invites"
     }
   ],
   "security": [
@@ -2673,6 +2676,52 @@
           }
         }
       }
+    },
+    "/api/invites/redeem": {
+      "post": {
+        "operationId": "redeemInvite",
+        "tags": [
+          "invites"
+        ],
+        "summary": "Make a new user and blyg with an invite code.",
+        "description": "Takes no token: the invite code is the credential. An operator mints codes with `blygd invite`; each makes one user. The new blyg is mounted at `https://host/~{handle}/`, and the handle is in its URL for good, as everything it publishes is (§4). The response carries the owner token (`*`, never expiring) once; trade it for a narrower, expiring token (POST /api/tokens) and keep it offline. A handle that is taken or malformed leaves the invite unused. Every refused code, unknown, used or expired, is the same 422, and counts as a failed authentication from this address, as a wrong token does; the cost class is charged to the address.",
+        "security": [],
+        "x-blygd-cost": "fetch",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InviteRedeem"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InviteRedeemed"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2680,7 +2729,7 @@
       "bearer": {
         "type": "http",
         "scheme": "bearer",
-        "description": "A token minted by `blygd user add`, `blygd token mint` or POST /api/tokens. Scopes are listed per operation."
+        "description": "A token minted by `blygd user add`, `blygd token mint`, POST /api/tokens, or, as an owner token, POST /api/invites/redeem. Scopes are listed per operation."
       }
     },
     "schemas": {
@@ -5092,6 +5141,57 @@
           "problems",
           "warnings",
           "notice"
+        ],
+        "additionalProperties": false
+      },
+      "InviteRedeem": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "The invite code, `blygd-invite-…`."
+          },
+          "handle": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+            "description": "1–63 lowercase letters, digits or hyphens, not starting with a hyphen; a few are reserved. It is in the blyg's URL for good."
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "The blyg's title; editable later (PATCH /api/origin)."
+          }
+        },
+        "required": [
+          "code",
+          "handle"
+        ],
+        "additionalProperties": false
+      },
+      "InviteRedeemed": {
+        "type": "object",
+        "properties": {
+          "handle": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string",
+            "format": "uri",
+            "description": "The new blyg's base URL."
+          },
+          "token": {
+            "type": "string",
+            "description": "The owner token (`*`, never expiring). Shown once."
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "handle",
+          "origin",
+          "token",
+          "note"
         ],
         "additionalProperties": false
       }
