@@ -5154,7 +5154,7 @@
           "handle": {
             "type": "string",
             "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
-            "description": "1–63 lowercase letters, digits or hyphens, not starting with a hyphen; a few are reserved. Case and surrounding space are dropped. It is in the blyg's URL for good."
+            "description": "1–63 lowercase letters, digits or hyphens, not starting with a hyphen; a few are reserved. It is in the blyg's URL for good."
           },
           "title": {
             "type": "string",

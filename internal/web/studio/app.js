@@ -160,33 +160,35 @@ class APIError extends Error {
 }
 
 async function api(method, path, body) {
-  const res = await fetch("/api" + path, {
-    method,
-    headers: Object.assign(
-      { Authorization: "Bearer " + localStorage.getItem(TOKEN_KEY) },
-      body === undefined ? {} : { "Content-Type": "application/json" },
-    ),
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  const res = await send(method, path, body, localStorage.getItem(TOKEN_KEY));
   if (res.status === 401) {
     localStorage.removeItem(TOKEN_KEY);
     route();
     throw new APIError(401, { message: "signed out: the token was refused" });
   }
-  const text = await res.text();
-  const json = text ? JSON.parse(text) : null;
-  if (!res.ok) throw new APIError(res.status, json);
-  return json;
+  return answer(res);
 }
 
 // anon makes a request with no token at all: redeeming an invite, which is
 // how someone without a token gets one.
 async function anon(method, path, body) {
-  const res = await fetch("/api" + path, {
+  return answer(await send(method, path, body));
+}
+
+// send makes one /api/ request, with a bearer token unless token is
+// undefined; answer reads its JSON, throwing an APIError for a refusal.
+function send(method, path, body, token) {
+  return fetch("/api" + path, {
     method,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    headers: Object.assign(
+      token === undefined ? {} : { Authorization: "Bearer " + token },
+      body === undefined ? {} : { "Content-Type": "application/json" },
+    ),
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
+}
+
+async function answer(res) {
   const text = await res.text();
   const json = text ? JSON.parse(text) : null;
   if (!res.ok) throw new APIError(res.status, json);
@@ -389,10 +391,12 @@ function viewSignIn() {
 
 // ── invites ───────────────────────────────────────────────────────────────
 // An invite link carries its code in the fragment, which no browser sends,
-// so only this script sees it; it is dropped from the address bar at once.
+// so only this script sees it; it is dropped from the address bar as soon
+// as the form shows.
 
 function viewInvite(fromLink) {
-  if (fromLink) history.replaceState(null, "", "#invite");
+  // A browser signed in already keeps the code in the address bar, for
+  // after signing out.
   if (localStorage.getItem(TOKEN_KEY)) {
     return show(
       h("h1", {}, "Make your blyg"),
@@ -400,6 +404,7 @@ function viewInvite(fromLink) {
       h("div", { class: "row" }, h("button", { onclick: () => { location.hash = "#items"; } }, "Back to the studio")),
     );
   }
+  if (fromLink) history.replaceState(null, "", "#invite");
   const code = h("input", { id: "i-code", type: "password", autocomplete: "off", placeholder: "blygd-invite-…", value: fromLink || null });
   const handle = h("input", { id: "i-handle", type: "text", autocomplete: "username", autocapitalize: "none", spellcheck: "false", maxlength: "63", placeholder: "yourname" });
   const title = h("input", { id: "i-title", type: "text", maxlength: "200", placeholder: "Your blyg's title" });
@@ -409,8 +414,9 @@ function viewInvite(fromLink) {
   const preview = () => {
     const v = clean();
     url.textContent = location.origin + "/~" + (v || "yourname") + "/";
-    button.disabled = !/^[a-z0-9][a-z0-9-]{0,62}$/.test(v);
+    button.disabled = !code.value.trim() || !/^[a-z0-9][a-z0-9-]{0,62}$/.test(v);
   };
+  code.addEventListener("input", preview);
   handle.addEventListener("input", preview);
   preview();
   show(
@@ -422,10 +428,13 @@ function viewInvite(fromLink) {
         const made = await attempt(() => anon("POST", "/invites/redeem", { code: code.value.trim(), handle: clean(), title: title.value.trim() }));
         if (!made) return preview();
         // Signed in at once, so a reload from here loses at most this
-        // sight of the owner token, never the way into the new blyg.
+        // sight of the owner token, never the way into the new blyg. The
+        // code is spent either way, so leave the invite form behind: if
+        // the trade fails, Continue lands on sign-in, which takes the
+        // owner token.
+        history.replaceState(null, "", "#items");
         try {
           localStorage.setItem(TOKEN_KEY, await studioToken(made.token));
-          history.replaceState(null, "", "#items");
         } catch (e) {
           toast(e.message);
         }

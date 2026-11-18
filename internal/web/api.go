@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -1017,18 +1016,14 @@ func (a *API) redeemInvite(w http.ResponseWriter, r *http.Request) error {
 	if err := decode(r, &in); err != nil {
 		return err
 	}
-	_, originID, secret, err := a.Accounts.Redeem(r.Context(), in.Code, in.Handle, a.PublicURL, in.Title)
+	handle, origin, secret, err := a.Accounts.Redeem(r.Context(), in.Code, in.Handle, a.PublicURL, in.Title)
 	if errors.Is(err, account.ErrBadInvite) {
 		a.Limits.authFailed(a.Limits.addr(r))
 	}
 	if err != nil {
 		return err
 	}
-	o, err := a.Studio.GetOrigin(r.Context(), originID)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, 201, map[string]any{"handle": strings.ToLower(strings.TrimSpace(in.Handle)), "origin": o.BaseURL, "token": secret,
+	writeJSON(w, 201, map[string]any{"handle": handle, "origin": origin, "token": secret,
 		"note": "This is the owner token, and the only time it is shown. It never expires: keep it somewhere safe, such as a password manager."})
 	return nil
 }

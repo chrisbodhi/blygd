@@ -168,10 +168,14 @@ func TestInviteBudgets(t *testing.T) {
 	}
 	expect(t, alice.apiFrom("203.0.113.30", "GET", "/me"), 429)
 
-	// A handle refused before any code is read is no guess.
-	for i := 0; i < fetch; i++ {
-		expect(t, e.redeem("blygd-invite-guess", "studio", from("203.0.113.31")...), 400)
+	// A handle refused before any code is read, or no code at all, is no
+	// guess: with all but one failure spent on wrong tokens, neither
+	// spends the last.
+	for i := 1; i < int(AuthFailBudget.Burst); i++ {
+		expect(t, bad.apiFrom("203.0.113.31", "GET", "/me"), 401)
 	}
+	expect(t, e.redeem("blygd-invite-guess", "studio", from("203.0.113.31")...), 400)
+	expect(t, e.redeem("  ", "bob", from("203.0.113.31")...), 400)
 	expect(t, alice.apiFrom("203.0.113.31", "GET", "/me"), 200)
 
 	expect(t, e.redeem(e.invite(t), "bob", from("203.0.113.32")...), 201)

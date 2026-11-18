@@ -110,6 +110,16 @@ const tokenPrefix = "blygd_"
 
 var tokenEncoding = base32.StdEncoding.WithPadding(base32.NoPadding)
 
+// newSecret is prefix and n random bytes in lowercase base32: a token or
+// an invite code. Only its hashSecret is ever stored.
+func newSecret(prefix string, n int) (string, error) {
+	raw := make([]byte, n)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	return prefix + strings.ToLower(tokenEncoding.EncodeToString(raw)), nil
+}
+
 func hashSecret(secret string) []byte {
 	sum := sha256.Sum256([]byte(secret))
 	return sum[:]
@@ -213,16 +223,15 @@ func mint(ctx context.Context, tx pgx.Tx, userID int64, name string, scopes []st
 			return "", 0, apperr.Errorf(apperr.BadRequest, "unknown scope %q", s)
 		}
 	}
-	var raw [32]byte
-	if _, err := rand.Read(raw[:]); err != nil {
+	secret, err := newSecret(tokenPrefix, 32)
+	if err != nil {
 		return "", 0, err
 	}
-	secret := tokenPrefix + strings.ToLower(tokenEncoding.EncodeToString(raw[:]))
 	var id int64
 	if expiresAt != nil && !expiresAt.After(time.Now()) {
 		return "", 0, apperr.New(apperr.BadRequest, "a token cannot expire in the past")
 	}
-	err := tx.QueryRow(ctx, `INSERT INTO tokens (user_id, name, secret_hash, scopes, expires_at) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+	err = tx.QueryRow(ctx, `INSERT INTO tokens (user_id, name, secret_hash, scopes, expires_at) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
 		userID, name, hashSecret(secret), scopes, expiresAt).Scan(&id)
 	return secret, id, err
 }
