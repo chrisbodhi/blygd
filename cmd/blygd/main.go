@@ -7,6 +7,7 @@
 //	blygd migrate [status]                   apply pending schema migrations, or report them
 //	blygd user add <handle> [title]          create a user, their origin and an owner token
 //	blygd token mint <handle> <name> [--expires 30d] <scope>…  mint a scoped token (paste-a-token path, §16.6)
+//	blygd invite [--count 1] [--expires 7d] [--note …]       mint invite codes, each good for one new user
 //	blygd user suspend <handle>              revoke every token a user holds and abandon their unsent mentions
 //	blygd token revoke-all <handle>          revoke every token a user holds (minting a new one lifts it)
 //	blygd rebuild <handle>                   re-render an origin's surface
@@ -49,6 +50,7 @@ var usage = `usage:
   blygd migrate [status]
   blygd user add <handle> [title]
   blygd token mint <handle> <name> [--expires 30d] <scope>...
+  blygd invite [--count 1] [--expires 7d] [--note text]
   blygd user suspend <handle>
   blygd token revoke-all <handle>
   blygd rebuild <handle>
@@ -114,6 +116,22 @@ func run(log *slog.Logger, args []string) error {
 		fmt.Printf("token (shown once): %s\n", secret)
 		if expires != nil {
 			fmt.Printf("expires: %s\n", expires.Format(time.RFC3339))
+		}
+		return nil
+	case args[0] == "invite":
+		n, expires, note, err := inviteArgs(args[1:])
+		if err != nil {
+			return err
+		}
+		codes, err := accts.CreateInvites(ctx, n, expires, note)
+		if err != nil {
+			return err
+		}
+		// The code rides in the fragment, which a browser never sends: it
+		// reaches only the studio's script, never a log.
+		fmt.Printf("%d invite(s), each good for one new user until %s (shown once):\n", len(codes), expires.Format(time.RFC3339))
+		for _, c := range codes {
+			fmt.Printf("%s  %sstudio/#invite/%s\n", c, cfg.PublicURL, c)
 		}
 		return nil
 	case len(args) == 3 && args[0] == "user" && args[1] == "suspend":
@@ -186,6 +204,34 @@ func mintArgs(args []string) ([]string, *time.Time, error) {
 		return nil, nil, errors.New(usage)
 	}
 	return scopes, expires, nil
+}
+
+// inviteArgs reads `invite`'s flags: how many codes (1), how long they
+// last (7 days), and a note for the operator's own records.
+func inviteArgs(args []string) (n int, expires time.Time, note string, err error) {
+	n, life := 1, 7*24*time.Hour
+	for i := 0; i < len(args); i++ {
+		if i+1 == len(args) {
+			return 0, time.Time{}, "", errors.New(usage)
+		}
+		flag, val := args[i], args[i+1]
+		i++
+		switch flag {
+		case "--count":
+			if n, err = strconv.Atoi(val); err != nil || n < 1 {
+				return 0, time.Time{}, "", fmt.Errorf("--count %q: want a positive number", val)
+			}
+		case "--expires":
+			if life, err = parseDays(val); err != nil || life <= 0 {
+				return 0, time.Time{}, "", fmt.Errorf("--expires %q: want a positive duration, such as 7d or 12h", val)
+			}
+		case "--note":
+			note = val
+		default:
+			return 0, time.Time{}, "", errors.New(usage)
+		}
+	}
+	return n, time.Now().Add(life).UTC().Truncate(time.Second), note, nil
 }
 
 func parseDays(s string) (time.Duration, error) {

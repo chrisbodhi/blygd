@@ -37,6 +37,7 @@ var routeCosts = map[string]string{
 	"POST /api/media":                       costUpload,
 	"PATCH /api/origin":                     costUpload, // re-renders every item
 	"GET /api/events":                       costStream,
+	"POST /api/invites/redeem":              costFetch, // makes and renders a whole origin; charged per address
 }
 
 func routeCost(pattern string) string {
@@ -55,6 +56,7 @@ type Limits struct {
 
 	token    map[string]*limit.Limiter // per cost class, per token
 	user     map[string]*limit.Limiter // per cost class, per user: twice a token's
+	address  map[string]*limit.Limiter // per cost class, per address: routes that take no token
 	surface  *limit.Limiter            // per address: origin files, hoppers, studio
 	mention  *limit.Limiter            // per address: POST {origin}webmention
 	authFail *limit.Limiter            // per address: failed bearer attempts
@@ -80,9 +82,10 @@ const maxLimitKeys = 100_000
 
 // NewLimits builds the limiters from Budgets and the per-address budgets.
 func NewLimits(trustProxy bool) *Limits {
-	l := &Limits{TrustProxy: trustProxy, token: map[string]*limit.Limiter{}, user: map[string]*limit.Limiter{}}
+	l := &Limits{TrustProxy: trustProxy, token: map[string]*limit.Limiter{}, user: map[string]*limit.Limiter{}, address: map[string]*limit.Limiter{}}
 	for cost, r := range Budgets {
 		l.token[cost] = limit.New(r, maxLimitKeys)
+		l.address[cost] = limit.New(r, maxLimitKeys)
 		l.user[cost] = limit.New(limit.Rate{PerMinute: 2 * r.PerMinute, Burst: 2 * r.Burst}, maxLimitKeys)
 	}
 	l.surface = limit.New(SurfaceBudget, maxLimitKeys)
@@ -93,7 +96,7 @@ func NewLimits(trustProxy bool) *Limits {
 
 // SetNow points every limiter at a clock, for tests.
 func (l *Limits) SetNow(now func() time.Time) {
-	for _, m := range []map[string]*limit.Limiter{l.token, l.user} {
+	for _, m := range []map[string]*limit.Limiter{l.token, l.user, l.address} {
 		for _, lim := range m {
 			lim.Now = now
 		}
@@ -158,6 +161,15 @@ func (l *Limits) spend(cost string, tokenID, userID int64) (bool, time.Duration)
 		return false, wait
 	}
 	return l.user[cost].Allow(strconv.FormatInt(userID, 10))
+}
+
+// spendAddr charges one request of a cost class to an address, for a
+// route that takes no token.
+func (l *Limits) spendAddr(cost, addr string) (bool, time.Duration) {
+	if l == nil || cost == costStream {
+		return true, 0
+	}
+	return l.address[cost].Allow(addr)
 }
 
 // public charges an unauthenticated request to its address: the surface

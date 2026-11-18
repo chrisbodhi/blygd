@@ -59,7 +59,7 @@ func New(cfg *config.Config, pool *pgxpool.Pool, log *slog.Logger) *App {
 	mentions := &mention.Store{Pool: pool}
 	hub := &events.Hub{Pool: pool, Log: log}
 	receiver := &mention.Receiver{Pool: pool, Limits: mention.DefaultRateLimits}
-	api := &API{Pool: pool, Accounts: accts, Studio: st, Hoppers: hoppers, Mentions: mentions, Reader: rd, Events: hub, Log: log}
+	api := &API{PublicURL: cfg.PublicURL, Pool: pool, Accounts: accts, Studio: st, Hoppers: hoppers, Mentions: mentions, Reader: rd, Events: hub, Log: log}
 	if cfg.RateLimits {
 		api.Limits = NewLimits(cfg.TrustProxy)
 	}

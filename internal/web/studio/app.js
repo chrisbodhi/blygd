@@ -179,6 +179,20 @@ async function api(method, path, body) {
   return json;
 }
 
+// anon makes a request with no token at all: redeeming an invite, which is
+// how someone without a token gets one.
+async function anon(method, path, body) {
+  const res = await fetch("/api" + path, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  const json = text ? JSON.parse(text) : null;
+  if (!res.ok) throw new APIError(res.status, json);
+  return json;
+}
+
 // Runs an action, showing what went wrong instead of throwing. It returns
 // the response, or true for one with no body (a 204), so a caller can test
 // for success either way; undefined means it failed.
@@ -203,6 +217,11 @@ const views = { write: viewEditor, items: viewItems, item: viewEditor, reader: v
 const can = (scope) => !!me && (me.scopes.includes("*") || me.scopes.includes(scope));
 
 async function route() {
+  const [name, arg] = (location.hash.slice(1) || "items").split("/");
+  if (name === "invite") {
+    tabs.hidden = true;
+    return viewInvite(arg);
+  }
   if (!localStorage.getItem(TOKEN_KEY)) {
     tabs.hidden = true;
     return viewSignIn();
@@ -217,7 +236,6 @@ async function route() {
   }
   tabs.hidden = false;
   startStream();
-  const [name, arg] = (location.hash.slice(1) || "items").split("/");
   current = name === "item" ? "items" : name;
   updatesEl.hidden = true;
   tabs.querySelector(`a[href="#${current}"]`)?.classList.remove("dot");
@@ -364,7 +382,96 @@ function viewSignIn() {
         route();
       },
     }, h("label", { for: "token" }, "Token"), input, h("div", { class: "row" }, h("button", { class: "primary" }, "Sign in"))),
+    h("p", { class: "muted small" }, "Have an invite? ", h("a", { href: "#invite" }, "Make your blyg"), "."),
     h("p", { class: "muted small" }, "Writing a tool of your own? See the ", h("a", { href: "/studio/api/" }, "API reference"), "."),
+  );
+}
+
+// ── invites ───────────────────────────────────────────────────────────────
+// An invite link carries its code in the fragment, which no browser sends,
+// so only this script sees it; it is dropped from the address bar at once.
+
+function viewInvite(fromLink) {
+  if (fromLink) history.replaceState(null, "", "#invite");
+  if (localStorage.getItem(TOKEN_KEY)) {
+    return show(
+      h("h1", {}, "Make your blyg"),
+      h("p", {}, "This browser is signed in to a blyg already. Sign out first to make a new one with this invite."),
+      h("div", { class: "row" }, h("button", { onclick: () => { location.hash = "#items"; } }, "Back to the studio")),
+    );
+  }
+  const code = h("input", { id: "i-code", type: "password", autocomplete: "off", placeholder: "blygd-invite-…", value: fromLink || null });
+  const handle = h("input", { id: "i-handle", type: "text", autocomplete: "username", autocapitalize: "none", spellcheck: "false", maxlength: "63", placeholder: "yourname" });
+  const title = h("input", { id: "i-title", type: "text", maxlength: "200", placeholder: "Your blyg's title" });
+  const url = h("code", {});
+  const button = h("button", { class: "primary" }, "Make my blyg");
+  const clean = () => handle.value.trim().toLowerCase();
+  const preview = () => {
+    const v = clean();
+    url.textContent = location.origin + "/~" + (v || "yourname") + "/";
+    button.disabled = !/^[a-z0-9][a-z0-9-]{0,62}$/.test(v);
+  };
+  handle.addEventListener("input", preview);
+  preview();
+  show(
+    h("h1", {}, "Make your blyg"),
+    h("form", {
+      onsubmit: async (ev) => {
+        ev.preventDefault();
+        button.disabled = true;
+        const made = await attempt(() => anon("POST", "/invites/redeem", { code: code.value.trim(), handle: clean(), title: title.value.trim() }));
+        if (!made) return preview();
+        // Signed in at once, so a reload from here loses at most this
+        // sight of the owner token, never the way into the new blyg.
+        try {
+          localStorage.setItem(TOKEN_KEY, await studioToken(made.token));
+          history.replaceState(null, "", "#items");
+        } catch (e) {
+          toast(e.message);
+        }
+        viewOwnerToken(made);
+      },
+    },
+      h("label", { for: "i-code" }, "Invite code"), code,
+      h("label", { for: "i-handle" }, "Handle"), handle,
+      h("p", { class: "muted small" }, "Lowercase letters, digits and hyphens."),
+      h("div", { class: "problems" },
+        h("div", {}, "Your blyg will live at ", url),
+        h("div", { class: "small" }, "That address is permanent, and so is everything you publish there. The handle cannot be changed later.")),
+      h("label", { for: "i-title" }, "Title"), title,
+      h("p", { class: "muted small" }, "You can change the title later, in Settings."),
+      h("div", { class: "row" }, button)),
+    h("p", { class: "muted small" }, h("a", { href: "#" }, "I have a token already"), "."),
+  );
+}
+
+// The owner token is shown here once. It never expires and can do
+// anything, so it belongs in a password manager; the studio has already
+// traded it for its own narrower, expiring token, as at sign-in, and keeps
+// only that.
+function viewOwnerToken(made) {
+  const token = h("input", { id: "o-token", type: "text", readonly: true, value: made.token });
+  const saved = h("input", { id: "o-saved", type: "checkbox" });
+  const go = h("button", { class: "primary", disabled: true }, "Continue to the studio");
+  saved.addEventListener("change", () => { go.disabled = !saved.checked; });
+  go.addEventListener("click", () => {
+    me = null;
+    route(); // signed in, or, if the trade failed, the sign-in page, which takes this token
+  });
+  show(
+    h("h1", {}, "Your blyg is live"),
+    h("p", {}, "It is at ", h("a", { href: made.origin, target: "_blank", rel: "noopener" }, made.origin), "."),
+    h("h2", {}, "Save your owner token"),
+    h("p", {}, "This is the only time it is shown. It never expires and can do anything on your blyg, so keep it in a password manager. You need it to sign in on another device, or again here after 30 days."),
+    h("label", { for: "o-token" }, "Owner token"), token,
+    h("div", { class: "row" }, h("button", {
+      onclick: async () => {
+        token.select();
+        await attempt(() => navigator.clipboard.writeText(made.token), "Copied.");
+      },
+    }, "Copy")),
+    h("label", { class: "check", for: "o-saved" }, saved, "I have saved it somewhere safe"),
+    h("div", { class: "row" }, go),
   );
 }
 

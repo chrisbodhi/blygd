@@ -728,6 +728,19 @@ revoking another takes `tokens:write`. Issuing stays separate from the
 policy: a login, when there are users who log in, is one more way to mint
 an expiring, scoped token.
 
+**Invites.** Someone without a token gets one by redeeming an invite:
+`blygd invite` mints codes (stored as SHA-256 hashes, shown once, expiring,
+7 days by default), and `POST /api/invites/redeem {code, handle, title}`
+makes the user, origin and owner token as `user add` does, returning the
+token once. It is the one `/api/` operation that takes no token, so its
+`fetch` cost class is charged to the address, and a refused code, unknown,
+used or expired alike, is charged to the failed-authentication budget, as
+a wrong token is. The invite is spent in the transaction that makes the
+user (`SELECT … FOR UPDATE`, then `createUser` in the same transaction), so
+a taken handle or a failed origin leaves it unused, and two redemptions of
+one code make one user. There is no open sign-up: an origin is permanent,
+so who may make one stays the operator's call.
+
 Tools discover the write surface from the studio page (§16.6), never the
 manifest: `/studio/` carries `<link rel="service-desc"
 type="application/openapi+json" href="/api/openapi.json">` (RFC 8631),
