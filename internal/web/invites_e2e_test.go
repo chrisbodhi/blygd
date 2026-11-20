@@ -2,6 +2,9 @@ package web
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -62,6 +65,40 @@ func TestInviteMakesOneUser(t *testing.T) {
 	r = e.redeem(code, "bob")
 	expect(t, r, 422)
 	expect(t, e.do("GET", e.srv.URL+"/~bob/blyg.json", "", nil), 404)
+}
+
+// The invite form is told where the blyg will live before the code is
+// spent: under the public URL, whichever host asks (a former public host
+// still serves the API), and exactly where redeeming then puts it.
+func TestInviteOriginIsWhereRedeemingMounts(t *testing.T) {
+	e := newEnv(t, mention.DefaultRateLimits)
+	r := e.do("GET", e.srv.URL+"/api/invites/origin", "", nil)
+	expect(t, r, 200)
+	tmpl, _ := r.json(t)["origin_template"].(string)
+	if tmpl != e.srv.URL+"/~{handle}/" {
+		t.Fatalf("template: %s", r.body)
+	}
+
+	req, _ := http.NewRequest("GET", e.srv.URL+"/api/invites/origin", nil)
+	req.Host = "old-host.example"
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		OriginTemplate string `json:"origin_template"`
+	}
+	err = json.NewDecoder(res.Body).Decode(&got)
+	res.Body.Close()
+	if err != nil || got.OriginTemplate != tmpl {
+		t.Fatalf("asked by another host: %q, %v", got.OriginTemplate, err)
+	}
+
+	made := e.redeem(e.invite(t), "alice")
+	expect(t, made, 201)
+	if o := made.json(t)["origin"]; o != strings.Replace(tmpl, "{handle}", "alice", 1) {
+		t.Fatalf("template %s, but the blyg is at %v", tmpl, o)
+	}
 }
 
 // Two redemptions of one code at once make one user.

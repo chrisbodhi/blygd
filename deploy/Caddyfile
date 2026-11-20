@@ -33,9 +33,9 @@ blyg.example {
 
 # A former BLYGD_PUBLIC_URL host (DEPLOY.md, "Changing the public host").
 # Its origins are permanent identities, so it is served for good. The
-# studio moves: it shows a new user's URL under the host it is loaded
-# from, and new users mount under BLYGD_PUBLIC_URL. The #invite/ fragment
-# survives the redirect.
+# studio moves, so that everyone signs in at one host (a browser keeps
+# the token per host); its API stays, for other clients. The #invite/
+# fragment survives the redirect.
 #old.blyg.example {
 #	@studio path /studio /studio/*
 #	redir @studio https://blyg.example{uri} 308

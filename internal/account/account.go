@@ -134,8 +134,13 @@ func hashSecret(secret string) []byte {
 // base_url serves both.
 const UserMount = "~"
 
+// UserOrigin is the origin a user with this handle gets under base, a
+// normalized public URL. Given "{handle}", it is the template
+// GET /api/invites/origin answers.
+func UserOrigin(base, handle string) string { return base + UserMount + handle + "/" }
+
 // CreateUser creates a user and their origin at
-// publicURL + UserMount + handle + "/", rendered, and mints an all-scopes
+// UserOrigin(publicURL, handle), rendered, and mints an all-scopes
 // owner token, all in one transaction. The secret is returned once and never
 // stored.
 func (a *Accounts) CreateUser(ctx context.Context, handle, publicURL, title string) (userID, originID int64, secret string, err error) {
@@ -147,7 +152,7 @@ func (a *Accounts) CreateUser(ctx context.Context, handle, publicURL, title stri
 		return 0, 0, "", fmt.Errorf("public URL: %w", err)
 	}
 	err = tx.Run(ctx, a.Pool, pgx.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
-		userID, originID, secret, err = a.createUser(ctx, tx, handle, base+UserMount+handle+"/", title)
+		userID, originID, secret, err = a.createUser(ctx, tx, handle, UserOrigin(base, handle), title)
 		return err
 	})
 	return userID, originID, secret, err

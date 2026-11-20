@@ -450,11 +450,13 @@ undoes it. After that, both hosts are permanent.
 2. A fresh backup: `sudo systemctl start blygd-backup`.
 3. Caddy: the new host gets the site block, and the old one the commented
    block at the end of [`deploy/Caddyfile`](../deploy/Caddyfile), which
-   sends `/studio/` to the new host. The studio's invite form shows the
-   new URL under the host it was loaded from, so it must only ever be
-   loaded from the public host; invite links already sent keep working,
-   because the `#invite/` fragment survives the redirect. Validate, reload,
-   and check the journal for the new certificate.
+   sends `/studio/` to the new host, so everyone signs in at one host.
+   Invite links already sent keep working, because the `#invite/`
+   fragment survives the redirect. (The invite form asks the API where a
+   new blyg will live, `GET /api/invites/origin`, so it is right on either
+   host; a binary older than that one shows the host it was loaded from,
+   and then the redirect is what keeps it right.) Validate, reload, and
+   check the journal for the new certificate.
 4. Set `BLYGD_PUBLIC_URL` in `/etc/blygd/blygd.env` and
    `sudo systemctl restart blygd`. The `listening` line shows the new
    `public`. Nothing needs rebuilding: an origin's pages are written from

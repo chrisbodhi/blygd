@@ -24,11 +24,13 @@ Each track names the branch it is on.
   public host"). Live 2026-11-20, before the launch's invites, and checked
   with `~example`: quotes and mentions verify in both directions between
   the hosts.
-- [ ] **The API should say where new users mount.** The studio's invite
-  form shows `location.origin + "/~" + handle`, which is right only when
-  the studio is loaded from `BLYGD_PUBLIC_URL`'s host; Caddy's redirect
-  keeps it so for now. After the demo: a described field the form reads
-  instead (`openapi.json`).
+- [x] **The API says where new users mount** (2026-11-20). The studio's
+  invite form showed `location.origin + "/~" + handle`, right only when
+  the studio is loaded from `BLYGD_PUBLIC_URL`'s host. Now it asks
+  `GET /api/invites/origin`, which takes no token and answers a template
+  under the public URL whichever host asks, and it submits nothing until
+  the answer is in. `TestInviteOriginIsWhereRedeemingMounts` fails on a
+  template taken from the request's host. Not yet deployed.
 - [x] **How users are mounted: `https://host/~{handle}/`** (decided
   2026-11-14), as home directories were on a shared Unix host. Nothing
   host-rooted can begin with `~`, so no handle shadows a route. The
@@ -440,7 +442,7 @@ of people. Each fix has a test that fails without it.
   tester, mention verifies, approve, shown, fork, withdraw and endcap);
   a timed restore drill; `free -m` against DEPLOY.md's 400 MB; check
   whether `blygger-spec` has moved past `24b9770`.
-- [ ] Friday: demo.
+- [x] Friday: demo (2026-11-20).
 
 ## Not this week
 

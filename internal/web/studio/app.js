@@ -411,14 +411,25 @@ function viewInvite(fromLink) {
   const url = h("code", {});
   const button = h("button", { class: "primary" }, "Make my blyg");
   const clean = () => handle.value.trim().toLowerCase();
+  // The server says where the blyg will live, never this page's host: a
+  // former public host still serves the studio. Until it has said, there
+  // is no address to promise, so nothing can be submitted.
+  let template = null;
   const preview = () => {
     const v = clean();
-    url.textContent = location.origin + "/~" + (v || "yourname") + "/";
-    button.disabled = !code.value.trim() || !/^[a-z0-9][a-z0-9-]{0,62}$/.test(v);
+    url.textContent = template ? template.replace("{handle}", v || "yourname") : "…";
+    button.disabled = !template || !code.value.trim() || !/^[a-z0-9][a-z0-9-]{0,62}$/.test(v);
   };
   code.addEventListener("input", preview);
   handle.addEventListener("input", preview);
   preview();
+  (async () => {
+    const o = await attempt(() => anon("GET", "/invites/origin"));
+    if (o) {
+      template = o.origin_template;
+      preview();
+    }
+  })();
   show(
     h("h1", {}, "Make your blyg"),
     h("form", {

@@ -741,10 +741,12 @@ an expiring, scoped token.
 `blygd invite` mints codes (stored as SHA-256 hashes, shown once, expiring,
 7 days by default), and `POST /api/invites/redeem {code, handle, title}`
 makes the user, origin and owner token as `user add` does, returning the
-token once. It is the one `/api/` operation that takes no token, so its
-`fetch` cost class is charged to the address, and a refused code, unknown,
-used or expired alike, is charged to the failed-authentication budget, as
-a wrong token is. The invite is spent in the transaction that makes the
+token once. It and `GET /api/invites/origin`, which says where the new
+blyg will live (`BLYGD_PUBLIC_URL`, not the host asking, which may be a
+former public host), are the `/api/` operations that take no token, so
+their cost classes are charged to the address. Redeeming is `fetch`,
+and a refused code, unknown, used or expired alike, is charged to the
+failed-authentication budget, as a wrong token is. The invite is spent in the transaction that makes the
 user (`SELECT … FOR UPDATE`, then `createUser` in the same transaction), so
 a taken handle or a failed origin leaves it unused, and two redemptions of
 one code make one user. There is no open sign-up: an origin is permanent,

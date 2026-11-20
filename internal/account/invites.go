@@ -82,7 +82,7 @@ func (a *Accounts) Redeem(ctx context.Context, code, handle, publicURL, title st
 	if !strings.HasPrefix(code, invitePrefix) {
 		return "", "", "", ErrBadInvite
 	}
-	origin = base + UserMount + handle + "/"
+	origin = UserOrigin(base, handle)
 	err = tx.Run(ctx, a.Pool, pgx.TxOptions{}, func(ctx context.Context, tx pgx.Tx) error {
 		// FOR UPDATE: a second redemption waits for the first, then finds
 		// the code spent.
