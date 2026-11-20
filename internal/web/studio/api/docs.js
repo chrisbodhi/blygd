@@ -191,6 +191,12 @@ function render(doc) {
   follow();
 }
 
+// The tab is titled with the instance's name; the page is the software's
+// API either way.
+fetch("/api/instance")
+  .then((res) => (res.ok ? res.json() : Promise.reject(new Error("HTTP " + res.status))))
+  .then((i) => { document.title = i.name + " API"; }, () => {});
+
 fetch("/api/openapi.json")
   .then((res) => (res.ok ? res.json() : Promise.reject(new Error("HTTP " + res.status))))
   .then(render)

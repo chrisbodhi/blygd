@@ -154,8 +154,8 @@ and a planes test in each package):
   and its API are client internals, not protocol (§15.1, §16.6). The
   reserved handles no longer keep routes apart (the namespace does); they
   stay so that `~api` or `~studio` cannot pass for the service itself.
-- `/llms.txt` (llmstxt.org) is host-rooted too: a static, embedded
-  description of the service and where to read more (the spec, the
+- `/llms.txt` (llmstxt.org) is host-rooted too: an embedded description
+  of the service, headed with the instance's name, and where to read more (the spec, the
   reference client, `/api/openapi.json`, `/studio/`). It names no origin
   and lists no users, so it says nothing about who publishes here. No
   handle can contain a dot, and no surface file is called `llms.txt`, so
@@ -169,6 +169,14 @@ and a planes test in each package):
   links back can verify the host. It loads nothing and runs nothing. The
   surface serves it only when no origin is mounted at the root, so a
   root-mounted custom domain keeps its own index.
+- **The instance has a name; the software is blygd.** `BLYGD_NAME`
+  (default `blygd`) heads the home page, `llms.txt` and the studio's tab
+  and sign-in, each of which still says it runs blygd. The studio is
+  static, so it learns the name as any client would, from
+  `GET /api/instance`, which takes no token and names no user. What
+  names the software stays `blygd`: the manifest's `generator` (§3.2),
+  the token and invite-code prefixes (`blygd_`, `blygd-invite-`), which
+  issued secrets carry, and messages about what blygd itself does.
 
 ## Webmentions (§15)
 
@@ -741,8 +749,8 @@ an expiring, scoped token.
 `blygd invite` mints codes (stored as SHA-256 hashes, shown once, expiring,
 7 days by default), and `POST /api/invites/redeem {code, handle, title}`
 makes the user, origin and owner token as `user add` does, returning the
-token once. It and `GET /api/invites/origin`, which says where the new
-blyg will live (`BLYGD_PUBLIC_URL`, not the host asking, which may be a
+token once. It and `GET /api/instance`, which says (with the instance's
+name) where the new blyg will live (`BLYGD_PUBLIC_URL`, not the host asking, which may be a
 former public host), are the `/api/` operations that take no token, so
 their cost classes are charged to the address. Redeeming is `fetch`,
 and a refused code, unknown, used or expired alike, is charged to the

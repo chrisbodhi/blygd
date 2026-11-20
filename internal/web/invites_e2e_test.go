@@ -68,18 +68,19 @@ func TestInviteMakesOneUser(t *testing.T) {
 }
 
 // The invite form is told where the blyg will live before the code is
-// spent: under the public URL, whichever host asks (a former public host
-// still serves the API), and exactly where redeeming then puts it.
-func TestInviteOriginIsWhereRedeemingMounts(t *testing.T) {
+// spent (GET /api/instance): under the public URL, whichever host asks (a
+// former public host still serves the API), and exactly where redeeming
+// then puts it.
+func TestInstanceSaysWhereRedeemingMounts(t *testing.T) {
 	e := newEnv(t, mention.DefaultRateLimits)
-	r := e.do("GET", e.srv.URL+"/api/invites/origin", "", nil)
+	r := e.do("GET", e.srv.URL+"/api/instance", "", nil)
 	expect(t, r, 200)
 	tmpl, _ := r.json(t)["origin_template"].(string)
-	if tmpl != e.srv.URL+"/~{handle}/" {
-		t.Fatalf("template: %s", r.body)
+	if tmpl != e.srv.URL+"/~{handle}/" || r.json(t)["name"] != "blygd" {
+		t.Fatalf("instance: %s", r.body)
 	}
 
-	req, _ := http.NewRequest("GET", e.srv.URL+"/api/invites/origin", nil)
+	req, _ := http.NewRequest("GET", e.srv.URL+"/api/instance", nil)
 	req.Host = "old-host.example"
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {

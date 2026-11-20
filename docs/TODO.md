@@ -27,10 +27,14 @@ Each track names the branch it is on.
 - [x] **The API says where new users mount** (2026-11-20). The studio's
   invite form showed `location.origin + "/~" + handle`, right only when
   the studio is loaded from `BLYGD_PUBLIC_URL`'s host. Now it asks
-  `GET /api/invites/origin`, which takes no token and answers a template
-  under the public URL whichever host asks, and it submits nothing until
-  the answer is in. `TestInviteOriginIsWhereRedeemingMounts` fails on a
-  template taken from the request's host. Not yet deployed.
+  `GET /api/instance`, which takes no token and answers a template under
+  the public URL whichever host asks, and it submits nothing until the
+  answer is in. `TestInstanceSaysWhereRedeemingMounts` fails on a template
+  taken from the request's host. Not yet deployed.
+- [x] **The instance's name** (2026-11-20): `BLYGD_NAME` heads the home
+  page, `llms.txt` and the studio, which reads it from `GET /api/instance`;
+  each still says it runs blygd. Set `BLYGD_NAME=Eurypos` on the server
+  with the deploy that carries it. Not yet deployed.
 - [x] **How users are mounted: `https://host/~{handle}/`** (decided
   2026-11-14), as home directories were on a shared Unix host. Nothing
   host-rooted can begin with `~`, so no handle shadows a route. The

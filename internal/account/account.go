@@ -136,7 +136,7 @@ const UserMount = "~"
 
 // UserOrigin is the origin a user with this handle gets under base, a
 // normalized public URL. Given "{handle}", it is the template
-// GET /api/invites/origin answers.
+// GET /api/instance answers.
 func UserOrigin(base, handle string) string { return base + UserMount + handle + "/" }
 
 // CreateUser creates a user and their origin at

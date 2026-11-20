@@ -2,6 +2,7 @@ package config
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -17,6 +18,17 @@ func TestParseLinks(t *testing.T) {
 	for _, bad := range []string{"https://no-label.example/", "=https://ex.com/", "Me=/relative", "Me=javascript:alert(1)", "Me=mailto:me@ex.com", "Me=https://"} {
 		if _, err := parseLinks(bad); err == nil {
 			t.Errorf("parseLinks(%q) accepted", bad)
+		}
+	}
+}
+
+func TestParseName(t *testing.T) {
+	if got, err := parseName("  Eurypos "); err != nil || got != "Eurypos" {
+		t.Errorf("parseName = %q, %v", got, err)
+	}
+	for _, bad := range []string{"", "   ", "two\nlines", "tab\there", strings.Repeat("é", 61)} {
+		if _, err := parseName(bad); err == nil {
+			t.Errorf("parseName(%q) accepted", bad)
 		}
 	}
 }

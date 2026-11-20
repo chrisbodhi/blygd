@@ -8,6 +8,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/chrisbodhi/blygd/internal/blyg"
 )
@@ -48,6 +50,11 @@ type Config struct {
 	// at the host root with rel="me" (BLYGD_OPERATOR_LINKS: comma-separated
 	// Label=https://url pairs, e.g. "Mastodon=https://social.example/@me").
 	OperatorLinks []Link
+	// Name is what this instance is called on its pages: the host root,
+	// llms.txt and the studio (BLYGD_NAME, default "blygd"). The software
+	// is blygd whatever the instance is called, and the manifest's
+	// generator says so (§3.2).
+	Name string
 }
 
 // Link is a labelled absolute http(s) URL.
@@ -55,6 +62,7 @@ type Link struct{ Label, URL string }
 
 // Load reads the environment.
 func Load() (*Config, error) {
+	var err error
 	c := &Config{
 		DatabaseURL:    os.Getenv("BLYGD_DATABASE_URL"),
 		Listen:         envOr("BLYGD_LISTEN", ":8080"),
@@ -65,7 +73,9 @@ func Load() (*Config, error) {
 		MigrateOnStart: os.Getenv("BLYGD_MIGRATE_ON_START") != "false",
 		RateLimits:     os.Getenv("BLYGD_RATE_LIMITS") != "false",
 	}
-	var err error
+	if c.Name, err = parseName(envOr("BLYGD_NAME", "blygd")); err != nil {
+		return nil, fmt.Errorf("BLYGD_NAME: %w", err)
+	}
 	if c.FragmentCap, err = intEnv("BLYGD_FRAGMENT_CAP", 2000); err != nil {
 		return nil, err
 	}
@@ -119,6 +129,16 @@ func intEnv(k string, def int) (int, error) {
 		return 0, fmt.Errorf("%s: %w", k, err)
 	}
 	return n, nil
+}
+
+// parseName reads an instance name: 1–60 characters once trimmed, none
+// of them control characters, since it is a page title and a heading.
+func parseName(v string) (string, error) {
+	v = strings.TrimSpace(v)
+	if n := utf8.RuneCountInString(v); n == 0 || n > 60 || strings.IndexFunc(v, unicode.IsControl) >= 0 {
+		return "", errors.New("1–60 characters, and no control characters")
+	}
+	return v, nil
 }
 
 // parseLinks reads comma-separated Label=URL pairs. A label holds neither

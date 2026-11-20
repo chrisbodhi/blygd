@@ -1,23 +1,37 @@
 package web
 
 import (
+	"bytes"
 	_ "embed"
 	"log/slog"
 	"net/http"
 	"strings"
+	"text/template"
 	"time"
 )
 
 // llmsTxt says what this service is and where to read more (llmstxt.org).
 // It lives at the host root beside /api/ and /studio/: it describes the
 // service, never one origin, and lists no users. Handles cannot contain a
-// dot, so no origin can claim the path.
+// dot, so no origin can claim the path. It is headed with the instance's
+// name (config.Name).
 //
 //go:embed llms.txt
-var llmsTxt []byte
+var llmsSrc string
+
+var llmsTmpl = template.Must(template.New("llms").Parse(llmsSrc))
+
+func llmsTxt(name string) []byte {
+	var b bytes.Buffer
+	if err := llmsTmpl.Execute(&b, struct{ Name string }{instanceName(name)}); err != nil {
+		panic(err) // the template is embedded, and its data is a string
+	}
+	return b.Bytes()
+}
 
 // Router joins the host-rooted API with the origin surfaces.
 func Router(api *API, surface *Surface, log *slog.Logger) http.Handler {
+	llms := llmsTxt(api.Name)
 	mux := http.NewServeMux()
 	mux.Handle("/api/", cors(api.Handler()))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -33,7 +47,7 @@ func Router(api *API, surface *Surface, log *slog.Logger) http.Handler {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Header().Set("Cache-Control", "public, max-age=3600")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Write(llmsTxt) //nolint:errcheck
+		w.Write(llms) //nolint:errcheck
 	})
 	mux.Handle("/", surface)
 	return logRequests(publicBudget(mux, api.Limits), api.Limits, log)

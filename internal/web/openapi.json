@@ -3,7 +3,7 @@
   "info": {
     "title": "blygd API",
     "version": "0.4.0",
-    "description": "The write and reading API of blygd, a Blygger studio (protocol 0.4). It is studio-private, not protocol (§16.6): the public surface is each origin's static files. Spec references (§) are to blygger-spec docs/protocol-v0.4.md.\n\nEvery HTML string that came from another origin is returned verbatim; clients MUST sanitize it before rendering (§14). Responses that carry imported bytes include a notice saying so.\n\nAuthenticate with a bearer token; the two operations that take none, under /api/invites/, are how someone without one gets one. Each operation's security requirement names the one scope it needs; the owner token `*` holds every scope.\n\nCross-origin clients: every response carries `Access-Control-Allow-Origin: *` and exposes `Retry-After` and `WWW-Authenticate`, and preflights are answered for any path here (methods GET, POST, PUT, PATCH, DELETE; headers Authorization and Content-Type; cached two hours). The bearer token is the only credential: no cookie is ever read, and no response allows credentials. Preflights are not budgeted.\n\nFinding the blyg: this host has no directory of blygs, and nothing is served at its root. Each blyg is mounted at its own path, `https://host/~{handle}/` (a blyg made before the `~` namespace keeps `https://host/{handle}/`). `GET /api/me` returns the caller's `origin`, that base URL, and every public file (`blyg.json`, `feed.xml`, `items/index.json`, `items/{id}.json`) is relative to it.\n\nRequests are budgeted per token and per user (a user's budget is twice a token's, across all their tokens), and an operation that takes no token per address. Each operation's `x-blygd-cost` names its class: `default` (120 a minute, bursts of 60), `fetch` (12 a minute; the call fetches from other hosts), `export` (2 a minute), `upload` (30 a minute, bursts of 20) and `stream` (no per-request budget; at most 8 open streams). Over budget is a 429 with `Retry-After`. An address that presents a wrong token too often is refused for a while, whatever token it then sends; a request with no `Authorization` header is not counted."
+    "description": "The write and reading API of blygd, a Blygger studio (protocol 0.4). It is studio-private, not protocol (§16.6): the public surface is each origin's static files. Spec references (§) are to blygger-spec docs/protocol-v0.4.md.\n\nEvery HTML string that came from another origin is returned verbatim; clients MUST sanitize it before rendering (§14). Responses that carry imported bytes include a notice saying so.\n\nAuthenticate with a bearer token; the two operations that take none, GET /api/instance and redeeming an invite, are how someone without one gets one. Each operation's security requirement names the one scope it needs; the owner token `*` holds every scope.\n\nCross-origin clients: every response carries `Access-Control-Allow-Origin: *` and exposes `Retry-After` and `WWW-Authenticate`, and preflights are answered for any path here (methods GET, POST, PUT, PATCH, DELETE; headers Authorization and Content-Type; cached two hours). The bearer token is the only credential: no cookie is ever read, and no response allows credentials. Preflights are not budgeted.\n\nFinding the blyg: this host has no directory of blygs, and nothing is served at its root. Each blyg is mounted at its own path, `https://host/~{handle}/` (a blyg made before the `~` namespace keeps `https://host/{handle}/`). `GET /api/me` returns the caller's `origin`, that base URL, and every public file (`blyg.json`, `feed.xml`, `items/index.json`, `items/{id}.json`) is relative to it.\n\nRequests are budgeted per token and per user (a user's budget is twice a token's, across all their tokens), and an operation that takes no token per address. Each operation's `x-blygd-cost` names its class: `default` (120 a minute, bursts of 60), `fetch` (12 a minute; the call fetches from other hosts), `export` (2 a minute), `upload` (30 a minute, bursts of 20) and `stream` (no per-request budget; at most 8 open streams). Over budget is a 429 with `Retry-After`. An address that presents a wrong token too often is refused for a while, whatever token it then sends; a request with no `Authorization` header is not counted."
   },
   "servers": [
     {
@@ -93,6 +93,33 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/api/instance": {
+      "get": {
+        "operationId": "getInstance",
+        "tags": [
+          "meta"
+        ],
+        "summary": "What this instance is called, and where a blyg made here will live.",
+        "description": "Takes no token, and names no user. `name` is the operator's name for the instance; the software is blygd whatever it is called. Before redeeming an invite, show the new user their blyg's permanent URL: put the handle in `origin_template` in place of `{handle}`. New blygs are mounted under the instance's public URL, which is not always the host serving this API: a host the instance once had still serves it, and the blygs made there. The cost class is charged to the address.",
+        "security": [],
+        "x-blygd-cost": "default",
+        "responses": {
+          "200": {
+            "description": "OK.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Instance"
+                }
+              }
+            }
           },
           "429": {
             "$ref": "#/components/responses/TooManyRequests"
@@ -2677,33 +2704,6 @@
         }
       }
     },
-    "/api/invites/origin": {
-      "get": {
-        "operationId": "inviteOrigin",
-        "tags": [
-          "invites"
-        ],
-        "summary": "Where a blyg made with an invite will live.",
-        "description": "Takes no token. Ask before redeeming, to show the new user their blyg's permanent URL: put the handle in `origin_template` in place of `{handle}`. The blyg is mounted under the instance's public URL, which is not always the host serving this API: a host the instance once had still serves it, and the blygs made there. The cost class is charged to the address.",
-        "security": [],
-        "x-blygd-cost": "default",
-        "responses": {
-          "200": {
-            "description": "OK.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InviteOrigin"
-                }
-              }
-            }
-          },
-          "429": {
-            "$ref": "#/components/responses/TooManyRequests"
-          }
-        }
-      }
-    },
     "/api/invites/redeem": {
       "post": {
         "operationId": "redeemInvite",
@@ -2711,7 +2711,7 @@
           "invites"
         ],
         "summary": "Make a new user and blyg with an invite code.",
-        "description": "Takes no token: the invite code is the credential. An operator mints codes with `blygd invite`; each makes one user. The new blyg is mounted where GET /api/invites/origin says, and the handle is in its URL for good, as everything it publishes is (§4). The response carries the owner token (`*`, never expiring) once; trade it for a narrower, expiring token (POST /api/tokens) and keep it offline. A handle that is taken or malformed leaves the invite unused. Every refused code, unknown, used or expired, is the same 422, and counts as a failed authentication from this address, as a wrong token does; the cost class is charged to the address.",
+        "description": "Takes no token: the invite code is the credential. An operator mints codes with `blygd invite`; each makes one user. The new blyg is mounted where GET /api/instance says, and the handle is in its URL for good, as everything it publishes is (§4). The response carries the owner token (`*`, never expiring) once; trade it for a narrower, expiring token (POST /api/tokens) and keep it offline. A handle that is taken or malformed leaves the invite unused. Every refused code, unknown, used or expired, is the same 422, and counts as a failed authentication from this address, as a wrong token does; the cost class is charged to the address.",
         "security": [],
         "x-blygd-cost": "fetch",
         "requestBody": {
@@ -5171,15 +5171,20 @@
         ],
         "additionalProperties": false
       },
-      "InviteOrigin": {
+      "Instance": {
         "type": "object",
         "properties": {
+          "name": {
+            "type": "string",
+            "description": "What the operator calls this instance (BLYGD_NAME); `blygd` when they have not said."
+          },
           "origin_template": {
             "type": "string",
             "description": "The new blyg's base URL, with `{handle}` for its handle (RFC 6570, level 1), e.g. `https://host/~{handle}/`."
           }
         },
         "required": [
+          "name",
           "origin_template"
         ],
         "additionalProperties": false

@@ -22,16 +22,27 @@ const homeCSP = "default-src 'none'; base-uri 'none'; form-action 'none'; frame-
 // its API is described (with rel="service-desc", as on the studio's page,
 // §16.6), its source, and the operator's own links, each rel="me" so a
 // profile that links back here can verify it. Like llms.txt it names no
-// origin and lists no users.
-func HomePage(source string, operator []config.Link) []byte {
+// origin and lists no users. It is headed with the instance's name, and
+// says it runs blygd.
+func HomePage(name, source string, operator []config.Link) []byte {
 	var b bytes.Buffer
 	if err := homeTmpl.Execute(&b, struct {
+		Name     string
 		Source   string
 		Operator []config.Link
-	}{source, operator}); err != nil {
+	}{instanceName(name), source, operator}); err != nil {
 		panic(err) // the template is embedded, and its data are strings
 	}
 	return b.Bytes()
+}
+
+// instanceName is what this instance is called (config.Name), or blygd,
+// the software's own name, when nothing says.
+func instanceName(name string) string {
+	if name == "" {
+		return "blygd"
+	}
+	return name
 }
 
 // serveHome writes the host root page. Surface calls it only when no

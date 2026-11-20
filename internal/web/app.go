@@ -59,12 +59,12 @@ func New(cfg *config.Config, pool *pgxpool.Pool, log *slog.Logger) *App {
 	mentions := &mention.Store{Pool: pool}
 	hub := &events.Hub{Pool: pool, Log: log}
 	receiver := &mention.Receiver{Pool: pool, Limits: mention.DefaultRateLimits}
-	api := &API{PublicURL: cfg.PublicURL, Pool: pool, Accounts: accts, Studio: st, Hoppers: hoppers, Mentions: mentions, Reader: rd, Events: hub, Log: log}
+	api := &API{PublicURL: cfg.PublicURL, Name: cfg.Name, Pool: pool, Accounts: accts, Studio: st, Hoppers: hoppers, Mentions: mentions, Reader: rd, Events: hub, Log: log}
 	if cfg.RateLimits {
 		api.Limits = NewLimits(cfg.TrustProxy)
 	}
 	surface := &Surface{Studio: st, Receiver: receiver, Hoppers: hoppers, Scheme: cfg.Scheme(), TrustProxy: cfg.TrustProxy, Log: log,
-		Home: HomePage(cfg.GeneratorURL, cfg.OperatorLinks)}
+		Home: HomePage(cfg.Name, cfg.GeneratorURL, cfg.OperatorLinks)}
 	// Same-instance reads, forks and mentions are answered in-process, from
 	// the surface any remote client would see (and outside its budgets).
 	fc.Local, fc.LocalBase = surface, cfg.PublicURL

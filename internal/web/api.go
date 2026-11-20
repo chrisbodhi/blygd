@@ -28,10 +28,11 @@ import (
 // API is the private write surface. It is host-rooted (/api/…), never under
 // an origin: a studio and its API are client internals, not protocol (§15.1,
 // §16.6). Every route takes a bearer token and checks one scope, except
-// the two under /api/invites/, which are how someone without a token gets
-// one.
+// the two someone without a token needs to get one: what this instance is,
+// and redeeming an invite.
 type API struct {
 	PublicURL string // where new users' origins mount (config.PublicURL)
+	Name      string // what this instance is called (config.Name)
 	Pool      *pgxpool.Pool
 	Accounts  *account.Accounts
 	Studio    *studio.Studio
@@ -117,7 +118,7 @@ func (a *API) routes() []route {
 		route{"DELETE /api/tokens/self", "", a.revokeSelf},
 		route{"DELETE /api/tokens/{tid}", account.ScopeTokensWrite, a.revokeToken},
 
-		route{"GET /api/invites/origin", noToken, a.inviteOrigin},
+		route{"GET /api/instance", noToken, a.instance},
 		route{"POST /api/invites/redeem", noToken, a.redeemInvite},
 	)
 }
@@ -1006,16 +1007,17 @@ func (a *API) mintToken(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// inviteOrigin says where a redeemed invite's blyg will live, before the
-// code is spent. It is under BLYGD_PUBLIC_URL, which need not be the host
-// the asking client was loaded from: a former public host still serves
-// the API (DEPLOY.md, "Changing the public host").
-func (a *API) inviteOrigin(w http.ResponseWriter, r *http.Request) error {
+// instance says what this instance is called, and where a blyg made with
+// an invite will live, before the code is spent. That is under
+// BLYGD_PUBLIC_URL, which need not be the host the asking client was
+// loaded from: a former public host still serves the API (DEPLOY.md,
+// "Changing the public host"). It names no user.
+func (a *API) instance(w http.ResponseWriter, r *http.Request) error {
 	base, err := blyg.NormalizeOrigin(a.PublicURL)
 	if err != nil {
 		return err // config.Load normalized it; this is the server's fault
 	}
-	writeJSON(w, 200, map[string]any{"origin_template": account.UserOrigin(base, "{handle}")})
+	writeJSON(w, 200, map[string]any{"name": instanceName(a.Name), "origin_template": account.UserOrigin(base, "{handle}")})
 	return nil
 }
 

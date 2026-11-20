@@ -453,7 +453,7 @@ undoes it. After that, both hosts are permanent.
    sends `/studio/` to the new host, so everyone signs in at one host.
    Invite links already sent keep working, because the `#invite/`
    fragment survives the redirect. (The invite form asks the API where a
-   new blyg will live, `GET /api/invites/origin`, so it is right on either
+   new blyg will live, `GET /api/instance`, so it is right on either
    host; a binary older than that one shows the host it was loaded from,
    and then the redirect is what keeps it right.) Validate, reload, and
    check the journal for the new certificate.
