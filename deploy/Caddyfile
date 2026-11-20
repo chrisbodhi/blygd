@@ -1,5 +1,5 @@
 # /etc/caddy/Caddyfile
-blyg.example {
+(blygd) {
 	encode zstd gzip
 
 	# Matches the 10 MiB media cap (BLYGD_MEDIA_MAX_BYTES) with headroom.
@@ -25,3 +25,19 @@ blyg.example {
 		}
 	}
 }
+
+# BLYGD_PUBLIC_URL's host.
+blyg.example {
+	import blygd
+}
+
+# A former BLYGD_PUBLIC_URL host (DEPLOY.md, "Changing the public host").
+# Its origins are permanent identities, so it is served for good. The
+# studio moves, so that everyone signs in at one host (a browser keeps
+# the token per host); its API stays, for other clients. The #invite/
+# fragment survives the redirect.
+#old.blyg.example {
+#	@studio path /studio /studio/*
+#	redir @studio https://blyg.example{uri} 308
+#	import blygd
+#}

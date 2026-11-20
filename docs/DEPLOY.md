@@ -28,7 +28,8 @@ Choose the host name with care. `BLYGD_PUBLIC_URL` is where origins mount
 (`https://host/~{handle}/`), published items stay permanent (DESIGN.md
 "Invariants"), and the URL is the origin's identity. To try things first, use
 a throwaway name such as `<ip-with-dashes>.sslip.io`, then drop and recreate
-the database before real use.
+the database before real use. A host chosen later changes only where new
+users mount; see "Changing the public host".
 
 ## 2. First login and hardening
 
@@ -428,6 +429,49 @@ assumption: what the `blyg` version string in manifests and items
 already published, which are permanent, are to be read by a studio on the
 new version. Anything the spec turns into a deliberate difference from the
 code goes in DESIGN.md.
+
+## Changing the public host
+
+A new `BLYGD_PUBLIC_URL` moves nobody. An origin's URL is its identity
+(§12.2) and what it published is permanent, so every origin keeps the host
+it was made on, and the old host is served for as long as the instance
+runs. What changes: new users (`user add`, an invite redeemed) mount under
+the new host, invite links are printed with it, and only it is answered
+in-process (DESIGN.md "Same-instance fetches"); origins on the old host are
+fetched over the network, through Caddy, like anyone else's. One handle is
+one user and one origin, so a handle taken on the old host is taken on the
+new one too.
+
+Until the first user exists on the new host, putting the old settings back
+undoes it. After that, both hosts are permanent.
+
+1. DNS: `A` and `AAAA` for the new name, as in step 1. Keep the old name's
+   records for good.
+2. A fresh backup: `sudo systemctl start blygd-backup`.
+3. Caddy: the new host gets the site block, and the old one the commented
+   block at the end of [`deploy/Caddyfile`](../deploy/Caddyfile), which
+   sends `/studio/` to the new host, so everyone signs in at one host.
+   Invite links already sent keep working, because the `#invite/`
+   fragment survives the redirect. (The invite form asks the API where a
+   new blyg will live, `GET /api/instance`, so it is right on either
+   host; a binary older than that one shows the host it was loaded from,
+   and then the redirect is what keeps it right.) Validate, reload, and
+   check the journal for the new certificate.
+4. Set `BLYGD_PUBLIC_URL` in `/etc/blygd/blygd.env` and
+   `sudo systemctl restart blygd`. The `listening` line shows the new
+   `public`. Nothing needs rebuilding: an origin's pages are written from
+   its own `base_url`.
+5. Check `/healthz` on both hosts, an old origin's `blyg.json` on the old
+   host, the old `/studio/`'s 308, and `/api/me` on both. Then publish from
+   a new-host origin something that quotes an old-host origin, and the
+   reverse, and see each mention verify: those are the fetches that now go
+   over the network.
+6. Point the uptime check at the new host's `/healthz`, keeping the old.
+7. Tell users their blygs have not moved, but the studio has: a browser
+   keeps the token per host, so they paste it once at the new `/studio/`.
+   The API answers on both hosts, so their other clients keep working.
+
+Add a DEPLOYS.md row for it, though no binary changed.
 
 ## Keeping it patched
 

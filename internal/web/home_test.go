@@ -1,6 +1,7 @@
 package web
 
 import (
+	"encoding/json"
 	"net/http/httptest"
 	"regexp"
 	"strings"
@@ -14,7 +15,7 @@ import (
 // §16.6), the source, Blygger, llms.txt and the studio's invite form; lists the operator's links
 // as rel="me"; and every host-relative link on it resolves.
 func TestHomePage(t *testing.T) {
-	page := string(HomePage("https://github.com/chrisbodhi/blygd", []config.Link{
+	page := string(HomePage("", "https://github.com/chrisbodhi/blygd", []config.Link{
 		{Label: "Mastodon", URL: "https://social.example/@me"},
 		{Label: `<b>"x"</b>`, URL: "https://ex.com/?a=1&b=2"},
 	}))
@@ -47,8 +48,42 @@ func TestHomePage(t *testing.T) {
 	}
 
 	// Without operator links the section is gone, heading and all.
-	if bare := string(HomePage("https://ex.com/src", nil)); strings.Contains(bare, "rel=\"me\"") || strings.Contains(bare, "Who runs") {
+	if bare := string(HomePage("", "https://ex.com/src", nil)); strings.Contains(bare, "rel=\"me\"") || strings.Contains(bare, "Who runs") {
 		t.Errorf("operator section without links:\n%s", bare)
+	}
+}
+
+// The home page is headed with the instance's name, as text, and still
+// says it runs blygd; unnamed, it is blygd.
+func TestHomePageName(t *testing.T) {
+	if page := string(HomePage("", "https://ex.com/src", nil)); !strings.Contains(page, "<title>blygd</title>") ||
+		!strings.Contains(page, "<h1>blygd</h1>\n<p>This host runs blygd, a Blygger studio") {
+		t.Errorf("unnamed:\n%s", page)
+	}
+	if page := string(HomePage("Eurypos", "https://ex.com/src", nil)); !strings.Contains(page, "<title>Eurypos</title>") ||
+		!strings.Contains(page, "<h1>Eurypos</h1>\n<p>Eurypos runs blygd, a Blygger studio") {
+		t.Errorf("named:\n%s", page)
+	}
+	if page := string(HomePage(`<i>E</i> & co`, "https://ex.com/src", nil)); strings.Contains(page, "<i>") ||
+		!strings.Contains(page, "<h1>&lt;i&gt;E&lt;/i&gt; &amp; co</h1>") {
+		t.Errorf("a name is text, never markup:\n%s", page)
+	}
+}
+
+// GET /api/instance names the instance, and llms.txt is headed with it.
+func TestInstanceName(t *testing.T) {
+	h := Router(&API{Name: "Eurypos", PublicURL: "https://eurypos.com/"}, &Surface{}, discardLog())
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/instance", nil))
+	var got map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); rec.Code != 200 || err != nil ||
+		got["name"] != "Eurypos" || got["origin_template"] != "https://eurypos.com/~{handle}/" {
+		t.Errorf("instance: %d %s", rec.Code, rec.Body)
+	}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/llms.txt", nil))
+	if !strings.HasPrefix(rec.Body.String(), "# Eurypos\n\n> Eurypos runs blygd, a Blygger studio: ") {
+		t.Errorf("llms.txt: %.120q", rec.Body)
 	}
 }
 

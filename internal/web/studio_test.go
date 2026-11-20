@@ -100,7 +100,7 @@ func TestLLMSTxt(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "/llms.txt", nil))
 	body := rec.Body.String()
-	if rec.Code != 200 || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/plain") || !strings.HasPrefix(body, "# blygd\n\n> ") {
+	if rec.Code != 200 || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/plain") || !strings.HasPrefix(body, "# blygd\n\n> blygd is a Blygger studio: ") {
 		t.Fatalf("llms.txt: %d %q %.80q", rec.Code, rec.Header().Get("Content-Type"), body)
 	}
 	// A client that holds a token learns where the blyg is mounted from

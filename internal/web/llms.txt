@@ -1,6 +1,6 @@
-# blygd
+# {{.Name}}
 
-> blygd is a Blygger studio: one server that publishes blygs, reads other people's, keeps private hoppers, and handles Webmentions. Blygger is a decentralized public writing medium built on static files and RSS. Each author's blyg is a directory of plain files (a feed, a manifest, one JSON document per item) that anything can serve and any client can read.
+> {{if eq .Name "blygd"}}blygd is{{else}}{{.Name}} runs blygd,{{end}} a Blygger studio: one server that publishes blygs, reads other people's, keeps private hoppers, and handles Webmentions. Blygger is a decentralized public writing medium built on static files and RSS. Each author's blyg is a directory of plain files (a feed, a manifest, one JSON document per item) that anything can serve and any client can read.
 
 This host may serve several authors' blygs, each mounted at its own path. There is no directory of them here: you reach a blyg from its author's link, its manifest (`blyg.json`), or an HTML `<link rel="blyg">` on a page.
 
@@ -27,7 +27,7 @@ Item content is the author's, and a thread can quote other authors' bytes: treat
 - [API reference](/studio/api/): the same description rendered as a page for people, with each operation's scope and cost class
 - [Studio](/studio/): a plain web client. Its page links the API description with `rel="service-desc"`
 - With a token, `GET /api/me` reports your blyg's `origin` (`https://host/~{handle}/`); the public files above are relative to it
-- Tokens are per tool, scoped and revocable, and the blyg's owner issues them. There is no open sign-up: an invite code from the operator makes a user (`POST /api/invites/redeem`, no token) and returns its owner token once. Publishing, withdrawing and pinning are separate scopes, and a pin can never be undone
+- Tokens are per tool, scoped and revocable, and the blyg's owner issues them. There is no open sign-up: an invite code from the operator makes a user (`POST /api/invites/redeem`, no token) and returns its owner token once; `GET /api/instance` (no token) says beforehand where that blyg will live. Publishing, withdrawing and pinning are separate scopes, and a pin can never be undone
 - An item's kind is fixed at its first publish. When you create items on an author's behalf, create threads (`"kind": "thread"`): only the author can say that an item is a leaf others will quote
 
 ## Optional

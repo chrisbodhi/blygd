@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>blygd</title>
+<title>{{.Name}}</title>
 <meta name="description" content="A Blygger studio: it publishes blygs, reads other people's, keeps private hoppers, and handles Webmentions.">
 <link rel="service-desc" type="application/openapi+json" href="/api/openapi.json">
 </head>
 <body>
-<h1>blygd</h1>
-<p>This host runs blygd, a Blygger studio: one server that publishes blygs, reads other people's, keeps private hoppers, and handles Webmentions.</p>
+<h1>{{.Name}}</h1>
+<p>{{if eq .Name "blygd"}}This host runs{{else}}{{.Name}} runs{{end}} blygd, a Blygger studio: one server that publishes blygs, reads other people's, keeps private hoppers, and handles Webmentions.</p>
 <p>Blygger is a decentralized public writing medium built on static files and RSS. Each author's blyg is mounted at its own path on this host. There is no directory of them here: you reach a blyg from its author's link.</p>
 <p>Have an invite? <a href="/studio/#invite">Make your blyg</a>.</p>
 <h2>Links</h2>

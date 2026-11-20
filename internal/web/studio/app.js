@@ -211,6 +211,14 @@ async function attempt(fn, okMsg) {
 
 let me = null;
 
+// What this instance is called, and where a blyg made here would live,
+// asked once (GET /api/instance). This page's host says neither: a former
+// public host still serves the studio. A failure is reported where the
+// answer is needed.
+const instance = anon("GET", "/instance");
+instance.then((i) => { document.title = i.name + " studio"; }, () => {});
+const nameOr = async (fallback) => { try { return (await instance).name; } catch { return fallback; } };
+
 // ── routing ───────────────────────────────────────────────────────────────
 
 const views = { write: viewEditor, items: viewItems, item: viewEditor, reader: viewReader, mentions: viewMentions, settings: viewSettings };
@@ -232,7 +240,7 @@ async function route() {
     try {
       me = await api("GET", "/me");
     } catch (e) {
-      if (e.status !== 401) show(h("p", {}, "Could not reach blygd: " + e.message));
+      if (e.status !== 401) show(h("p", {}, "Could not reach " + await nameOr("the server") + ": " + e.message));
       return;
     }
   }
@@ -364,10 +372,11 @@ function renderImporting() {
 
 // ── sign in ───────────────────────────────────────────────────────────────
 
-function viewSignIn() {
+async function viewSignIn() {
+  const name = await nameOr("");
   const input = h("input", { id: "token", name: "token", type: "password", autocomplete: "off", placeholder: "blygd_…" });
   show(
-    h("h1", {}, "blygd studio"),
+    h("h1", {}, name ? name + " studio" : "Studio"),
     h("p", { class: "muted" }, "Paste your token. If it can mint tokens, the studio keeps a 30-day token of its own, with only the access it needs, and forgets the one you pasted."),
     h("form", {
       onsubmit: async (ev) => {
@@ -411,14 +420,25 @@ function viewInvite(fromLink) {
   const url = h("code", {});
   const button = h("button", { class: "primary" }, "Make my blyg");
   const clean = () => handle.value.trim().toLowerCase();
+  // The server says where the blyg will live (instance), never this
+  // page's host. Until it has said, there is no address to promise, so
+  // nothing can be submitted.
+  let template = null;
   const preview = () => {
     const v = clean();
-    url.textContent = location.origin + "/~" + (v || "yourname") + "/";
-    button.disabled = !code.value.trim() || !/^[a-z0-9][a-z0-9-]{0,62}$/.test(v);
+    url.textContent = template ? template.replace("{handle}", v || "yourname") : "…";
+    button.disabled = !template || !code.value.trim() || !/^[a-z0-9][a-z0-9-]{0,62}$/.test(v);
   };
   code.addEventListener("input", preview);
   handle.addEventListener("input", preview);
   preview();
+  (async () => {
+    const o = await attempt(() => instance);
+    if (o) {
+      template = o.origin_template;
+      preview();
+    }
+  })();
   show(
     h("h1", {}, "Make your blyg"),
     h("form", {

@@ -127,6 +127,12 @@ and a planes test in each package):
   `https://host/h/alice/h/reading/` reads `h` two ways. Origins made before
   the namespace keep `https://host/{handle}/`, because an
   origin's URL is its identity (§12.2); longest-prefix routing serves both.
+- **A new public host moves nobody.** `BLYGD_PUBLIC_URL` decides where a
+  new user's origin is made, never where an existing one lives. The
+  routing takes the host from the request, so origins made under an
+  earlier `BLYGD_PUBLIC_URL` are served at their own host as before,
+  for the same reason the pre-`~` origins are (DEPLOY.md "Changing the
+  public host").
 - **One spelling.** An origin is compared byte for byte (§12.2, #103). Its
   one spelling is ASCII: `blyg.NormalizeOrigin` lowercases scheme and
   host, writes an internationalized host as its A-label (`xn--`), drops a
@@ -148,8 +154,8 @@ and a planes test in each package):
   and its API are client internals, not protocol (§15.1, §16.6). The
   reserved handles no longer keep routes apart (the namespace does); they
   stay so that `~api` or `~studio` cannot pass for the service itself.
-- `/llms.txt` (llmstxt.org) is host-rooted too: a static, embedded
-  description of the service and where to read more (the spec, the
+- `/llms.txt` (llmstxt.org) is host-rooted too: an embedded description
+  of the service, headed with the instance's name, and where to read more (the spec, the
   reference client, `/api/openapi.json`, `/studio/`). It names no origin
   and lists no users, so it says nothing about who publishes here. No
   handle can contain a dot, and no surface file is called `llms.txt`, so
@@ -163,6 +169,14 @@ and a planes test in each package):
   links back can verify the host. It loads nothing and runs nothing. The
   surface serves it only when no origin is mounted at the root, so a
   root-mounted custom domain keeps its own index.
+- **The instance has a name; the software is blygd.** `BLYGD_NAME`
+  (default `blygd`) heads the home page, `llms.txt` and the studio's tab
+  and sign-in, each of which still says it runs blygd. The studio is
+  static, so it learns the name as any client would, from
+  `GET /api/instance`, which takes no token and names no user. What
+  names the software stays `blygd`: the manifest's `generator` (§3.2),
+  the token and invite-code prefixes (`blygd_`, `blygd-invite-`), which
+  issued secrets carry, and messages about what blygd itself does.
 
 ## Webmentions (§15)
 
@@ -371,7 +385,10 @@ budgets. The importer sees exactly the bytes a remote reader would, the
 sender's POST reaches the real receiver, and nothing depends on whether
 the instance can dial its own public address. Behind a private reverse
 proxy, it can't. Only that one host is local, so an origin on any other
-host is fetched over the network and vouched for by DNS.
+host is fetched over the network and vouched for by DNS. That includes
+this instance's own origins on a former public host: they are reached
+through Caddy and charged to the instance's own address, as a stranger's
+fetch would be.
 
 **Outbound targets** (§15.2, #85): the publish transaction, which reads
 neither the mirror nor the network, writes the target's default item
@@ -732,10 +749,12 @@ an expiring, scoped token.
 `blygd invite` mints codes (stored as SHA-256 hashes, shown once, expiring,
 7 days by default), and `POST /api/invites/redeem {code, handle, title}`
 makes the user, origin and owner token as `user add` does, returning the
-token once. It is the one `/api/` operation that takes no token, so its
-`fetch` cost class is charged to the address, and a refused code, unknown,
-used or expired alike, is charged to the failed-authentication budget, as
-a wrong token is. The invite is spent in the transaction that makes the
+token once. It and `GET /api/instance`, which says (with the instance's
+name) where the new blyg will live (`BLYGD_PUBLIC_URL`, not the host asking, which may be a
+former public host), are the `/api/` operations that take no token, so
+their cost classes are charged to the address. Redeeming is `fetch`,
+and a refused code, unknown, used or expired alike, is charged to the
+failed-authentication budget, as a wrong token is. The invite is spent in the transaction that makes the
 user (`SELECT … FOR UPDATE`, then `createUser` in the same transaction), so
 a taken handle or a failed origin leaves it unused, and two redemptions of
 one code make one user. There is no open sign-up: an origin is permanent,
