@@ -127,6 +127,12 @@ and a planes test in each package):
   `https://host/h/alice/h/reading/` reads `h` two ways. Origins made before
   the namespace keep `https://host/{handle}/`, because an
   origin's URL is its identity (§12.2); longest-prefix routing serves both.
+- **A new public host moves nobody.** `BLYGD_PUBLIC_URL` decides where a
+  new user's origin is made, never where an existing one lives. The
+  routing takes the host from the request, so origins made under an
+  earlier `BLYGD_PUBLIC_URL` are served at their own host as before,
+  for the same reason the pre-`~` origins are (DEPLOY.md "Changing the
+  public host").
 - **One spelling.** An origin is compared byte for byte (§12.2, #103). Its
   one spelling is ASCII: `blyg.NormalizeOrigin` lowercases scheme and
   host, writes an internationalized host as its A-label (`xn--`), drops a
@@ -371,7 +377,10 @@ budgets. The importer sees exactly the bytes a remote reader would, the
 sender's POST reaches the real receiver, and nothing depends on whether
 the instance can dial its own public address. Behind a private reverse
 proxy, it can't. Only that one host is local, so an origin on any other
-host is fetched over the network and vouched for by DNS.
+host is fetched over the network and vouched for by DNS. That includes
+this instance's own origins on a former public host: they are reached
+through Caddy and charged to the instance's own address, as a stranger's
+fetch would be.
 
 **Outbound targets** (§15.2, #85): the publish transaction, which reads
 neither the mirror nor the network, writes the target's default item

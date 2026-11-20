@@ -15,11 +15,20 @@ Each track names the branch it is on.
 
 ## Decisions open
 
-- [ ] **Host and domain.** Origins are identities and published items are
-  permanent (§4, §8), so whatever host testers publish on, they publish on
-  for good. Choose it before the first tester's origin exists. A sandbox
-  that is wiped later breaks the promise to anyone who subscribed or
-  quoted, the reference studio included.
+- [x] **Host and domain: `eurypos.com`** (decided 2026-11-19). Origins are
+  identities and published items are permanent (§4, §8), so the origin
+  already on `blyg.newschematic.org` stays there, and the host is served
+  for good. Everyone from the launch on mounts at
+  `https://eurypos.com/~{handle}/`. Same instance and database; the old
+  host's `/studio/` redirects to the new one (DEPLOY.md "Changing the
+  public host"). Live 2026-11-20, before the launch's invites, and checked
+  with `~example`: quotes and mentions verify in both directions between
+  the hosts.
+- [ ] **The API should say where new users mount.** The studio's invite
+  form shows `location.origin + "/~" + handle`, which is right only when
+  the studio is loaded from `BLYGD_PUBLIC_URL`'s host; Caddy's redirect
+  keeps it so for now. After the demo: a described field the form reads
+  instead (`openapi.json`).
 - [x] **How users are mounted: `https://host/~{handle}/`** (decided
   2026-11-14), as home directories were on a shared Unix host. Nothing
   host-rooted can begin with `~`, so no handle shadows a route. The
