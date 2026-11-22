@@ -21,6 +21,10 @@ var pagePolicy = func() *bluemonday.Policy {
 		OnElements("blockquote", "span", "div")
 	p.AllowAttrs("data-blyg-id", "data-blyg-version").Matching(regexp.MustCompile(`^[0-9a-z]{1,26}$`)).OnElements("blockquote")
 	p.AllowAttrs("data-blyg-origin").Matching(regexp.MustCompile(`^https?://[^\s"<>]+$`)).OnElements("blockquote")
+	// A list numbered from 3 reads from 3, in our own items and in a whole
+	// quote of one: §16.15 (twentieth revision) asks a reader's sanitizer
+	// to keep an integer start on ol.
+	p.AllowAttrs("start").Matching(regexp.MustCompile(`^-?[0-9]{1,9}$`)).OnElements("ol")
 	return p
 }()
 

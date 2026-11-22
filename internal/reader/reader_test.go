@@ -170,6 +170,19 @@ func TestImportReconcilesAndWatermarks(t *testing.T) {
 		t.Fatalf("regression adopted or silent: %+v", ra)
 	}
 
+	// §5.10 (nineteenth revision): the origin, back at v3 as we hold it,
+	// names a copy of the item elsewhere by rewriting the document in
+	// place: version, content and hash unchanged. That is not a stealth
+	// edit, and the stored document carries the entry.
+	a.Version, a.ContentMD, a.Syndication = 3, "alpha three", `[{"url": "https://bsky.app/profile/x/post/1", "version": 3}]`
+	g.b.Publish()
+	g.reconcileNext()
+	g.poll()
+	if ra = g.row(idA); ra.version != 3 || strings.Contains(ra.discrepancy, "stealth") ||
+		!strings.Contains(g.docField(idA, "syndication"), "https://bsky.app/profile/x/post/1") {
+		t.Fatalf("syndication rewrite: %+v, syndication %q", ra, g.docField(idA, "syndication"))
+	}
+
 	// §13.3: a stealth edit at the same version is adopted and recorded.
 	// Neither feed nor index shows it; the rolling re-check fetches it.
 	a.Version, a.ContentMD = 3, "alpha three, quietly changed"

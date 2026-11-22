@@ -300,6 +300,13 @@ def main():
     section("1. blygd imports the reference")
     r1 = ref_publish("Stigmergy is what a protocol looks like from inside.\n\nSecond *paragraph* & more.")
     ref_change("PUT", r1, "versions/1/pin")
+    # §5.10 (nineteenth revision): the reference names a copy of r1 on
+    # another network, rewriting its document in place with no version.
+    copy = [{"url": "https://bsky.app/profile/rae.example/post/3interop", "version": 1}]
+    code, j = ref_change("PUT", r1, "syndication", {"entries": copy})
+    _, rdoc1 = get(f"{REF}items/{r1}.json")
+    check("the reference records a copy in place (§5.10)",
+          code == 200 and rdoc1.get("syndication") == copy and rdoc1["version"] == 1, (code, j, rdoc1.get("syndication")))
     r2 = ref_publish("An unpinned thought, with a [link](https://example.com/).")
     rt = ref_publish(f"Ref thread.\n\n![[{r1}]]\n> a protocol looks like from inside.\n\nMy own words after.", "thread")
     code, sub = blygd("POST", "/subscriptions", {"url": REF})
@@ -312,6 +319,9 @@ def main():
     code, it = blygd("GET", f"/reader/items/{sid}/{r1}")
     check("the reference's pin is retained", [p["version"] for p in it["item"].get("pins") or []] == [1], it)
     check("the reference's own page is kept", it["item"]["page"] == f"{REF}f/{r1}/", it["item"]["page"])
+    check("blygd keeps the reference's syndication as sent, outside the hash (§5.10)",
+          (it["item"]["doc"] or {}).get("syndication") == copy and not it["item"].get("discrepancy"),
+          ((it["item"]["doc"] or {}).get("syndication"), it["item"].get("discrepancy")))
 
     # 2 ─ blygd quotes the reference; the reference verifies the mentions.
     section("2. blygd quotes the reference")
@@ -502,13 +512,9 @@ def main():
              lambda: (lambda o: o if o and o["relation"] == "link" else None)(link_sent()))
     # The reference keeps no row for a claim that fails, so the only thing
     # to see is a verified one turning up.
-    m, end = None, time.time() + 15
-    while o and o["status"] == "sent" and not m and time.time() < end:
-        ref_tick()
-        m = ref_mention(r3)
-        time.sleep(1)
-    check("the reference verifies a link mention as a notice (§15.4, #79)", bool(m) and m["status"] == "verified",
-          f"blygd's send: {o and (o['status'], o.get('last_result'))}; the reference kept {m and (m['status'], m.get('error'))}")
+    wait("the reference verifies a link mention as a notice (§15.4, #79)",
+         lambda: (lambda m: m if m and m["status"] == "verified" else None)(ref_mention(r3)),
+         ref_tick, evidence=lambda: {"blygd's send": link_sent(), "the reference kept": ref_mention(r3)})
 
     rl = ref_publish(f"Rae links [[{a1} | Alice on planning]].\n\n![[{a1} | Alice's claim]]\n\nAnd answers.", "thread")
     _, rdoc = get(f"{REF}items/{rl}.json")

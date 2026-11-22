@@ -11,8 +11,11 @@ import (
 )
 
 // Pinned version pages (§8.4): gated exactly like the JSON pin, 200 forever,
-// marked frozen, canonical to the live page, linked to their JSON twin,
-// never in the feed or index, and sanitized like every page we serve.
+// canonical to the live page, never in the feed or index, and sanitized
+// like every page we serve. The frozen banner and the link to the JSON
+// twin are blygd's choices, checked here so they do not slip away
+// unnoticed; since the seventeenth revision (#108) §8.4 leaves both to
+// the client.
 func TestPinnedVersionPages(t *testing.T) {
 	e := newEnv(t, mention.DefaultRateLimits)
 	alice := e.user("alice")

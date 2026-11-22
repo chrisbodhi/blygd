@@ -259,28 +259,52 @@ cites the new commit and has the detail.
   rebuild step (step 4) puts existing public hoppers into their
   manifests, and re-renders nothing else: published bytes are stored.
 
-## Spec revisions 17–18
+## Spec revisions 17–20
 
-`[x]` on trunk, 2026-11-21, from `98f8c87`. `protocol-v0.4.md` at
-`blygger-spec` `470f552` (2026-11-19), the eighteenth revision. Neither
-revision changes what a publisher emits, so neither needs code.
+`[x]` on `spec-revisions-17-18`, 2026-11-22, from trunk `98f8c87`.
+`protocol-v0.4.md` at `blygger-spec` `fc751d6` (2026-11-22), the
+twentieth revision. None of the four changes what blygd emits; one small
+reader fix came with the twentieth.
 
 - [x] **17th, a page's look is the client's (#108).** §8.4: a pinned
   version page no longer SHOULD be marked frozen or link its `v{n}.json`
   twin; that is now presentation. `rel="canonical"` is still a SHOULD, and
   the limit on what a version display exposes is unchanged. blygd's
-  pinned page (`pinnedTmpl`) keeps its frozen banner and JSON link, now
-  as choices rather than rules.
+  pinned page (`pinnedTmpl`) keeps its frozen banner and JSON link as
+  choices, and its comment and `TestPinnedVersionPages` now say so.
 - [x] **18th, a placeholder folds, a linked chapter does not (#112).**
   §13.7: a reader MAY fold an item named only in `links[]` when both were
   published in the same act and the item says no more than the link's
   text. A fold covers the burst's versions, and a later version with a new
   `content_hash` SHOULD show as an ordinary update. blygd does no §13.7
   folding (the 9th revision's note above), so this binds nothing here.
-- [x] Against blygger-studio 0.67.0 (`480fc6a`): `make parity`, 61 cases,
-  no unexpected mismatches, and `make interop`, all eight scenarios, 67
-  passed, 0 failed. The two interop gaps (the reference verifying a link
-  mention as a notice, and its `links[]`) now pass, so they are checks.
+- [x] **19th, `syndication` promoted to §5.10 (#98).** An additive
+  OPTIONAL member, rewritten in place with no version. blygd emits none.
+  As a reader it keeps the member verbatim: an in-place rewrite lands in
+  the importer's "unchanged" case, which refreshes the stored document
+  and is not a stealth edit (`TestImportReconcilesAndWatermarks`; fails
+  when that case stops refreshing, tried). blygd renders no syndication
+  link, so §5.10 rule 5's MUSTs have nothing to bind. Pins and endcaps
+  are the publisher's to keep free of it. **Not built:** emitting it,
+  which needs a write route, and showing it in the studio.
+- [x] **20th, a correction is not generation (#115); a partial bake's text
+  is its selector (#114).** §5.7 rule 10 is the publisher's judgement:
+  `openapi.json`'s `Generated` and `llms.txt` now tell a client acting
+  for an author. §10.2's statement was already so by construction.
+  §16.15 (list structure in a partial bake) is ruled, not built; blygd
+  still bakes paragraphs. Its one reader SHOULD, keeping an integer
+  `start` on `ol`, also holds for whole quotes and our own lists, and
+  pages dropped it: `PageHTML` now keeps it (`TestPageHTML`, failed
+  before the fix).
+- [x] Against blygger-studio 0.67.0 (`480fc6a`) and then 0.68.0
+  (`c0f03eb`): `make parity`, 61 cases, no unexpected mismatches; `make
+  interop`, all eight scenarios, 69 passed, 0 failed on 0.68.0. The two
+  interop gaps (the reference verifying a link mention as a notice, and
+  its `links[]`) now pass, so they are checks; the link-mention one waits
+  with `wait()` like the rest. Scenario 1 now has the reference name a
+  copy in place, and blygd keep it, outside the hash. The claims
+  extension on the reference's `main` is unreleased and was not run.
+- [x] `make test-all` green against Postgres 18.
 
 ## Track D — invites
 

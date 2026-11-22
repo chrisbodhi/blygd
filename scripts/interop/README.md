@@ -43,7 +43,8 @@ their reason and are reported, not failed.
 reference under Miniflare on :18787 (cron control on :18788). Each
 subscribes to the other, and `check.py` runs eight scenarios:
 
-1. blygd imports the reference: hashes, retained pins, `page`.
+1. blygd imports the reference: hashes, retained pins, `page`, and a
+   `syndication` entry the reference wrote in place (§5.10).
 2. blygd quotes the reference (partial, whole, nested, `[[id]]`); the
    reference verifies the mentions.
 3. The reference imports, quotes and stubs blygd, including a quote
