@@ -259,6 +259,29 @@ cites the new commit and has the detail.
   rebuild step (step 4) puts existing public hoppers into their
   manifests, and re-renders nothing else: published bytes are stored.
 
+## Spec revisions 17–18
+
+`[x]` on trunk, 2026-11-21, from `98f8c87`. `protocol-v0.4.md` at
+`blygger-spec` `470f552` (2026-11-19), the eighteenth revision. Neither
+revision changes what a publisher emits, so neither needs code.
+
+- [x] **17th, a page's look is the client's (#108).** §8.4: a pinned
+  version page no longer SHOULD be marked frozen or link its `v{n}.json`
+  twin; that is now presentation. `rel="canonical"` is still a SHOULD, and
+  the limit on what a version display exposes is unchanged. blygd's
+  pinned page (`pinnedTmpl`) keeps its frozen banner and JSON link, now
+  as choices rather than rules.
+- [x] **18th, a placeholder folds, a linked chapter does not (#112).**
+  §13.7: a reader MAY fold an item named only in `links[]` when both were
+  published in the same act and the item says no more than the link's
+  text. A fold covers the burst's versions, and a later version with a new
+  `content_hash` SHOULD show as an ordinary update. blygd does no §13.7
+  folding (the 9th revision's note above), so this binds nothing here.
+- [x] Against blygger-studio 0.67.0 (`480fc6a`): `make parity`, 61 cases,
+  no unexpected mismatches, and `make interop`, all eight scenarios, 67
+  passed, 0 failed. The two interop gaps (the reference verifying a link
+  mention as a notice, and its `links[]`) now pass, so they are checks.
+
 ## Track D — invites
 
 `[x]` on `claude/track-d-invites`, 2026-11-17.

@@ -507,14 +507,14 @@ def main():
         ref_tick()
         m = ref_mention(r3)
         time.sleep(1)
-    gap("the reference verifies a link mention as a notice (§15.4, #79)", bool(m) and m["status"] == "verified",
-        f"blygd's send: {o and (o['status'], o.get('last_result'))}; the reference kept {m and (m['status'], m.get('error'))}")
+    check("the reference verifies a link mention as a notice (§15.4, #79)", bool(m) and m["status"] == "verified",
+          f"blygd's send: {o and (o['status'], o.get('last_result'))}; the reference kept {m and (m['status'], m.get('error'))}")
 
     rl = ref_publish(f"Rae links [[{a1} | Alice on planning]].\n\n![[{a1} | Alice's claim]]\n\nAnd answers.", "thread")
     _, rdoc = get(f"{REF}items/{rl}.json")
     check("the reference renders a link label as the anchor text", ">Alice on planning</a>" in rdoc["content_html"], rdoc["content_html"])
-    gap("the reference discloses its link in links[] (§10.3a)", rdoc.get("links") == [{"origin": ALICE, "id": a1}],
-        f"links: {rdoc.get('links')}")
+    check("the reference discloses its link in links[] (§10.3a)", rdoc.get("links") == [{"origin": ALICE, "id": a1}],
+          f"links: {rdoc.get('links')}")
     check("the reference bakes its directive label (§10.2, #81)", "data-blyg-label=" in rdoc["content_html"],
           rdoc["content_html"])
     wait("blygd verifies the reference's labelled quote",
