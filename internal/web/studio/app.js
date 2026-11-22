@@ -59,8 +59,9 @@ function textOf(html) {
 
 // Someone's HTML rebuilt as fresh nodes. The DOMParser document is inert;
 // from it only allowlisted elements are recreated, with no attributes but
-// an http(s) href, and everything else is kept as text. Bare URLs in text
-// become links.
+// an http(s) href and an integer start on ol (so a list numbered from 3
+// still reads from 3, as on our pages), and everything else is kept as
+// text. Bare URLs in text become links.
 const RICH_TAGS = new Set(["p", "br", "blockquote", "em", "i", "strong", "b", "code", "pre", "ul", "ol", "li",
   "h1", "h2", "h3", "h4", "h5", "h6", "hr", "del", "s", "sup", "sub", "a"]);
 
@@ -93,6 +94,8 @@ function copyRich(from, to, inLink) {
       el = extLink(href);
     } else {
       el = document.createElement(tag);
+      const start = tag === "ol" ? n.getAttribute("start") : null;
+      if (start && /^-?[0-9]{1,9}$/.test(start)) el.setAttribute("start", start);
     }
     copyRich(n, el, inLink || tag === "a");
     to.append(el);

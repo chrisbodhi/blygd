@@ -5,6 +5,8 @@ Run by run.sh, which starts both studios and sets:
   BLYGD_URL      blygd host root, e.g. http://127.0.0.1:18090
   BLYGD_ORIGIN   the test user's origin, e.g. http://127.0.0.1:18090/~alice/
   BLYGD_TOKEN    that user's owner token
+  BLYGD_DATABASE_URL  blygd's throwaway database, which blygd_recheck nudges
+  PSQL           the psql that run.sh uses
   REF_URL        the reference's origin, e.g. http://127.0.0.1:18787/
   REF_CONTROL    the reference's cron control, e.g. http://127.0.0.1:18788/
   REF_PASSWORD   the reference's owner password
@@ -22,6 +24,7 @@ default 18789).
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -38,6 +41,8 @@ CONTROL = os.environ["REF_CONTROL"]
 REF_PASSWORD = os.environ.get("REF_PASSWORD", "interop-password")
 DEADLINE = 45  # seconds for any one condition
 
+PSQL = os.environ.get("PSQL", "psql")
+DB_URL = os.environ["BLYGD_DATABASE_URL"]  # run.sh's throwaway database, for blygd_recheck
 SOL_PORT = int(os.environ.get("SOL_PORT", "18789"))
 failures = []
 gaps = []
@@ -126,6 +131,16 @@ def ref_change(method, iid, action, body=None):
     against the item's current revision."""
     _, it = ref("GET", f"/api/items/{iid}")
     return ref(method, f"/api/items/{iid}/{action}", {"expectedRevision": it["revision"], **(body or {})})
+
+
+def blygd_recheck(sid):
+    """Make blygd's next poll of sid a reconciliation that refetches its
+    current documents (§13.3), as the reader tests do. Left alone, that
+    rolling recheck comes round once a day."""
+    subprocess.run([PSQL, "-q", DB_URL, "-c",
+                    f"UPDATE remote_origins SET reconciled_at = NULL WHERE id = {int(sid)}; "
+                    f"UPDATE imported_items SET fetched_at = now() - interval '1 hour' WHERE remote_origin_id = {int(sid)}"],
+                   check=True, capture_output=True)
 
 
 def ref_tick():
@@ -300,13 +315,6 @@ def main():
     section("1. blygd imports the reference")
     r1 = ref_publish("Stigmergy is what a protocol looks like from inside.\n\nSecond *paragraph* & more.")
     ref_change("PUT", r1, "versions/1/pin")
-    # §5.10 (nineteenth revision): the reference names a copy of r1 on
-    # another network, rewriting its document in place with no version.
-    copy = [{"url": "https://bsky.app/profile/rae.example/post/3interop", "version": 1}]
-    code, j = ref_change("PUT", r1, "syndication", {"entries": copy})
-    _, rdoc1 = get(f"{REF}items/{r1}.json")
-    check("the reference records a copy in place (§5.10)",
-          code == 200 and rdoc1.get("syndication") == copy and rdoc1["version"] == 1, (code, j, rdoc1.get("syndication")))
     r2 = ref_publish("An unpinned thought, with a [link](https://example.com/).")
     rt = ref_publish(f"Ref thread.\n\n![[{r1}]]\n> a protocol looks like from inside.\n\nMy own words after.", "thread")
     code, sub = blygd("POST", "/subscriptions", {"url": REF})
@@ -319,9 +327,28 @@ def main():
     code, it = blygd("GET", f"/reader/items/{sid}/{r1}")
     check("the reference's pin is retained", [p["version"] for p in it["item"].get("pins") or []] == [1], it)
     check("the reference's own page is kept", it["item"]["page"] == f"{REF}f/{r1}/", it["item"]["page"])
-    check("blygd keeps the reference's syndication as sent, outside the hash (§5.10)",
-          (it["item"]["doc"] or {}).get("syndication") == copy and not it["item"].get("discrepancy"),
-          ((it["item"]["doc"] or {}).get("syndication"), it["item"].get("discrepancy")))
+
+    # §5.10 (nineteenth revision): with blygd holding r1 at v1, the
+    # reference names a copy of it on another network, rewriting the
+    # document in place: same version, same hash, nothing in the feed.
+    copy = [{"url": "https://bsky.app/profile/rae.example/post/3interop", "version": 1}]
+    _, before = get(f"{REF}items/{r1}.json")
+    code, j = ref_change("PUT", r1, "syndication", {"entries": copy})
+    _, after = get(f"{REF}items/{r1}.json")
+    check("the reference records a copy in place (§5.10)",
+          code == 200 and after.get("syndication") == copy and
+          (after["version"], after["content_hash"], after["updated"]) == (before["version"], before["content_hash"], before["updated"]),
+          (code, j, after.get("syndication")))
+    blygd_recheck(sid)
+    def synced():
+        blygd_poll(sid)
+        _, it = blygd("GET", f"/reader/items/{sid}/{r1}")
+        return it if (it["item"]["doc"] or {}).get("syndication") == copy else None
+    it = wait("blygd's recheck picks up the copy, as sent", synced,
+              evidence=lambda: blygd("GET", f"/reader/items/{sid}/{r1}")[1])
+    check("the in-place rewrite is not a stealth edit (§5.10 rule 3, §13.3)",
+          bool(it) and it["item"]["version"] == 1 and not it["item"].get("discrepancy"),
+          it and (it["item"]["version"], it["item"].get("discrepancy")))
 
     # 2 ─ blygd quotes the reference; the reference verifies the mentions.
     section("2. blygd quotes the reference")

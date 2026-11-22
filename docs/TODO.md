@@ -291,18 +291,25 @@ reader fix came with the twentieth.
   is its selector (#114).** §5.7 rule 10 is the publisher's judgement:
   `openapi.json`'s `Generated` and `llms.txt` now tell a client acting
   for an author. §10.2's statement was already so by construction.
-  §16.15 (list structure in a partial bake) is ruled, not built; blygd
-  still bakes paragraphs. Its one reader SHOULD, keeping an integer
-  `start` on `ol`, also holds for whole quotes and our own lists, and
-  pages dropped it: `PageHTML` now keeps it (`TestPageHTML`, failed
-  before the fix).
+  §16.15 (list structure in a partial bake) is ruled but not in force
+  until a publisher bakes it and a second client shows it; blygd still
+  bakes paragraphs. It notes in passing that a whole quote of a list
+  already needs `start` on `ol`, and that exposed a bug in force today:
+  our pages dropped `start`, so our own lists numbered from 3 and whole
+  quotes of others' read from 1. `PageHTML` now keeps an integer `start`
+  (`TestPageHTML`, failed before the fix), and so does the studio's
+  `copyRich` for its reading cards (checked in Chrome: `3`, `-2` kept;
+  `3x`, `start` on `ul` dropped). The deploy's rebuild re-renders pages
+  already published.
 - [x] Against blygger-studio 0.67.0 (`480fc6a`) and then 0.68.0
   (`c0f03eb`): `make parity`, 61 cases, no unexpected mismatches; `make
   interop`, all eight scenarios, 69 passed, 0 failed on 0.68.0. The two
   interop gaps (the reference verifying a link mention as a notice, and
   its `links[]`) now pass, so they are checks; the link-mention one waits
   with `wait()` like the rest. Scenario 1 now has the reference name a
-  copy in place, and blygd keep it, outside the hash. The claims
+  copy in place after blygd holds the item; blygd's recheck (nudged in
+  the interop database, as the reader tests do) picks it up as sent, with
+  no stealth-edit discrepancy. The claims
   extension on the reference's `main` is unreleased and was not run.
 - [x] `make test-all` green against Postgres 18.
 

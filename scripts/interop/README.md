@@ -44,7 +44,10 @@ reference under Miniflare on :18787 (cron control on :18788). Each
 subscribes to the other, and `check.py` runs eight scenarios:
 
 1. blygd imports the reference: hashes, retained pins, `page`, and a
-   `syndication` entry the reference wrote in place (§5.10).
+   `syndication` entry the reference writes in place afterwards (§5.10),
+   which blygd's recheck must adopt without calling it a stealth edit.
+   `check.py` nudges that recheck in blygd's throwaway database, since it
+   otherwise comes round once a day.
 2. blygd quotes the reference (partial, whole, nested, `[[id]]`); the
    reference verifies the mentions.
 3. The reference imports, quotes and stubs blygd, including a quote
