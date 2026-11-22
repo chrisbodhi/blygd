@@ -42,6 +42,7 @@ var imports = map[string][]string{
 	"internal/archtest": {},
 	"internal/testdb":   {"db"},
 	"internal/testblyg": {"blyg"},
+	"sdk/swift/gendoc":  {}, // build tool for the Swift SDK: reads openapi.json as a file, imports nothing of ours
 }
 
 // mirror is the packages that query the import mirror or the overlay.

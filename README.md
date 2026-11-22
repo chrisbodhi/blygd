@@ -125,4 +125,8 @@ curl -s -H "Authorization: Bearer $T" localhost:8080/api/items \
      -d '{"kind": "thread", "content_md": "Worth reading:\n\n![[<item id>]]"}'
 ```
 
+From Swift, the [Blygd SDK](sdk/swift/README.md) is generated from the same
+document. Add this repository as a Swift package and use the `Blygd`
+product.
+
 See [docs/DESIGN.md](docs/DESIGN.md) for how it works and why.

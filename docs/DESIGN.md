@@ -719,6 +719,15 @@ a route table, and the tests compare that table with the document both
 ways, scopes included. They also validate every response the e2e suite
 sees against the documented schema.
 
+The Swift SDK (`sdk/swift`, with `Package.swift` at the root because
+SwiftPM looks for it there) is generated from the same document and
+committed. Each generated file records the document's hash, and a Go test
+fails when that hash goes stale, so an API change regenerates the SDK in
+the same change (`make sdk`). Hand-written code covers what the generator
+can't do: bearer auth, microsecond timestamps (an `as_of` must come back
+as it was sent), and `ImportedDoc`, whose `null` branch the generator
+cannot model. `sdk/README.md` gives the pattern for any further SDK.
+
 **Draft revisions.** Every item carries `draft_rev`, a hash of what an
 edit changes and a publish reads (`draft_md`, `draft_note`, generation).
 `PATCH` and publish take it back as an optional precondition and answer
