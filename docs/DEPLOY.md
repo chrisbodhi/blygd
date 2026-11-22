@@ -253,7 +253,7 @@ sudo -u blygd sh -c 'set -a; . /etc/blygd/blygd.env; blygd <command>'
 |---|---|
 | Add someone | `user add <handle> "Title"`. The handle is in their URL for good. Send the owner token through a one-time secret link, never plain chat. They paste it into `/studio/` once and keep it in a password manager. |
 | Invite people | `invite --count 10 --expires 7d --note "launch"`. Each code makes one user, who picks their own handle: the command prints each code beside a link, `https://<host>/studio/#invite/<code>`, which opens the studio's form with the code filled in (the code rides in the fragment, so it never reaches a log). The studio shows them their permanent URL before they submit, and their owner token once after. Codes are shown once and stored hashed; a refused code costs the address as a wrong token does. To see what is spent: `psql -c 'SELECT note, expires_at, redeemed_at, u.handle FROM invites LEFT JOIN users u ON u.id = redeemed_by'`. To withdraw unused ones: `UPDATE invites SET expires_at = now() WHERE redeemed_at IS NULL`. |
-| Replace a lost owner token | `token mint <handle> owner '*'`. Revoke the old one from the new token if it may have leaked (`DELETE /api/tokens/{id}`). |
+| Replace a lost owner token | Make sure it is them first, through a channel you already know is theirs: the token can publish and pin as them. Then `token mint <handle> owner '*'`, sent as any owner token is. If the old one may have leaked, run `token revoke-all <handle>` before minting; otherwise revoke the old one from the new token if it may have leaked (`DELETE /api/tokens/{id}`). |
 | Suspend someone | `user suspend <handle>`. Every token they hold is revoked, their open event streams end within 25 s, and every mention their blyg had yet to send is abandoned, so their queued stubs and quotes stop reaching anyone. A send already in flight may still arrive, once, but is never retried. A publish that authenticated just before the revoke can still queue sends after it, so run the command again a minute later to catch them. What they published stays published; their subscriptions are still polled. Minting them a token lifts it; abandoned sends stay abandoned. |
 | Revoke every token, nothing else | `token revoke-all <handle>`, after a leak, say. |
 | Take an item down | Suspend them if needed, then `token mint <handle> takedown --expires 1d items:withdraw` and `POST /api/items/{id}/withdraw` with it. The item becomes an endcap (§9) and its unpinned versions stop being served. **Pinned versions are served forever** (§8, enforced in the schema), and nothing here removes one. |
@@ -269,6 +269,7 @@ Tell testers, before their first publish:
   and back in once.
 - What other testers can and cannot see of their reading: the section below,
   in words they can take as they are.
+- What to do if they lose their token: "If you lose your token", below.
 
 ### What testers can see of each other
 
@@ -300,6 +301,34 @@ That is true of every hosted service; here it is said out loud.
 
 DESIGN.md ("What one user can infer of another's reading") has the reasons,
 and what closing it would cost.
+
+### If you lose your token
+
+Tell testers this too; it is written to them.
+
+**Keep it.** Your owner token is the only way in: there is no password,
+email or reset link. It never expires, so keep it in a password manager.
+When you sign in, the studio keeps a 30-day token of its own and forgets
+the one you pasted, so you need the owner token again on another device,
+or here after 30 days. The studio's token cannot mint tokens, so being
+signed in somewhere does not get you a new one.
+
+**If you lose it,** ask the operator. They will check that it is you through
+a channel they already know is yours, then send you a new owner token
+through a one-time link. Paste it into the studio as you did the first one.
+Nothing you published, drafted or subscribed to changes.
+
+**If someone else may have it,** say so: a lost laptop, a token pasted
+somewhere public. The operator revokes every token you hold before minting
+the new one, so it signs you out of the studio everywhere, and whoever has
+the old one can do nothing more with it. What they did with it before then
+stays done, and a pin cannot be undone.
+
+**If the right token is refused** with "too many failed authentications",
+you are not locked out of your blyg. After 30 wrong tokens from one address,
+blygd refuses that address for a while, whatever token it sends. Wait a
+minute and try again. Everyone behind a shared address (see below) shares
+that allowance.
 
 ### A room on one address
 
