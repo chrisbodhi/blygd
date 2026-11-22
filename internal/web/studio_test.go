@@ -56,7 +56,7 @@ func TestStudioNeverWritesHTML(t *testing.T) {
 		if m := regexp.MustCompile(`innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval\(|new Function`).Find(src); m != nil {
 			t.Errorf("%s uses %q: build nodes with textContent instead", file, m)
 		}
-		if m := regexp.MustCompile(`cloneNode|importNode|adoptNode|\.attributes\b|getAttributeNames`).Find(src); m != nil {
+		if m := regexp.MustCompile(`cloneNode|importNode|adoptNode|\.attributes\b|getAttributeNames|getAttributeNS|getAttributeNode|\.dataset\b`).Find(src); m != nil {
 			t.Errorf("%s uses %q: rebuild foreign nodes, never copy them or their attributes", file, m)
 		}
 		// A foreign attribute is read only by name, and only two: href,

@@ -339,8 +339,10 @@ def main():
           code == 200 and after.get("syndication") == copy and
           (after["version"], after["content_hash"], after["updated"]) == (before["version"], before["content_hash"], before["updated"]),
           (code, j, after.get("syndication")))
-    blygd_recheck(sid)
     def synced():
+        # Re-armed on every try: a recheck resets fetched_at, and blygd
+        # refetches only documents older than a minute.
+        blygd_recheck(sid)
         blygd_poll(sid)
         _, it = blygd("GET", f"/reader/items/{sid}/{r1}")
         return it if (it["item"]["doc"] or {}).get("syndication") == copy else None
