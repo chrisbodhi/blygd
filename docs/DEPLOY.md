@@ -253,7 +253,7 @@ sudo -u blygd sh -c 'set -a; . /etc/blygd/blygd.env; blygd <command>'
 |---|---|
 | Add someone | `user add <handle> "Title"`. The handle is in their URL for good. Send the owner token through a one-time secret link, never plain chat. They paste it into `/studio/` once and keep it in a password manager. |
 | Invite people | `invite --count 10 --expires 7d --note "launch"`. Each code makes one user, who picks their own handle: the command prints each code beside a link, `https://<host>/studio/#invite/<code>`, which opens the studio's form with the code filled in (the code rides in the fragment, so it never reaches a log). The studio shows them their permanent URL before they submit, and their owner token once after. Codes are shown once and stored hashed; a refused code costs the address as a wrong token does. To see what is spent: `psql -c 'SELECT note, expires_at, redeemed_at, u.handle FROM invites LEFT JOIN users u ON u.id = redeemed_by'`. To withdraw unused ones: `UPDATE invites SET expires_at = now() WHERE redeemed_at IS NULL`. |
-| Replace a lost owner token | Make sure it is them first, through a channel you already know is theirs: the token can publish and pin as them. Then `token mint <handle> owner '*'`, sent as any owner token is. If the old one may have leaked, run `token revoke-all <handle>` before minting; otherwise revoke the old one from the new token if it may have leaked (`DELETE /api/tokens/{id}`). |
+| Replace a lost owner token | Make sure it is them first, through a channel you already know is theirs: the token can publish and pin as them. **If the old one may have leaked**, revoke before you mint, since revoking afterwards would kill the new token too. `token revoke-all <handle>` is the floor: tokens record no lineage, and an owner token can mint more, so revoking only the old one leaves any tokens minted from it working. If whoever had it may have published, `user suspend <handle>` instead, and again a minute later (Suspend someone, below): it revokes the same tokens and also abandons the mentions their blyg had yet to send, so the intruder's queued stubs and quotes reach no one, at the cost of the author's own unsent ones. Then `token mint <handle> owner '*'`, sent as any owner token is; minting also lifts a suspension. **If it surely did not leak**, just mint; the author can delete the old one with the new token (`DELETE /api/tokens/{id}`) as tidying. |
 | Suspend someone | `user suspend <handle>`. Every token they hold is revoked, their open event streams end within 25 s, and every mention their blyg had yet to send is abandoned, so their queued stubs and quotes stop reaching anyone. A send already in flight may still arrive, once, but is never retried. A publish that authenticated just before the revoke can still queue sends after it, so run the command again a minute later to catch them. What they published stays published; their subscriptions are still polled. Minting them a token lifts it; abandoned sends stay abandoned. |
 | Revoke every token, nothing else | `token revoke-all <handle>`, after a leak, say. |
 | Take an item down | Suspend them if needed, then `token mint <handle> takedown --expires 1d items:withdraw` and `POST /api/items/{id}/withdraw` with it. The item becomes an endcap (§9) and its unpinned versions stop being served. **Pinned versions are served forever** (§8, enforced in the schema), and nothing here removes one. |
@@ -320,9 +320,13 @@ Nothing you published, drafted or subscribed to changes.
 
 **If someone else may have it,** say so: a lost laptop, a token pasted
 somewhere public. The operator revokes every token you hold before minting
-the new one, so it signs you out of the studio everywhere, and whoever has
-the old one can do nothing more with it. What they did with it before then
-stays done, and a pin cannot be undone.
+the new one. That signs you out of the studio everywhere, and also stops
+any token you made for a script or another tool, so make those again
+afterwards. Whoever has the old one can do nothing more with it, or with
+any token they made from it. What they did with it before then stays done,
+and a pin cannot be undone. If they may have published, say so too: the
+operator can also stop the mentions your blyg had yet to send, so their
+quotes and stubs reach no one. Your own unsent mentions stop with them.
 
 **If the right token is refused** with "too many failed authentications",
 you are not locked out of your blyg. After 30 wrong tokens from one address,
