@@ -5,6 +5,8 @@ Run by run.sh, which starts both studios and sets:
   BLYGD_URL      blygd host root, e.g. http://127.0.0.1:18090
   BLYGD_ORIGIN   the test user's origin, e.g. http://127.0.0.1:18090/~alice/
   BLYGD_TOKEN    that user's owner token
+  BLYGD_DATABASE_URL  blygd's throwaway database, which blygd_recheck nudges
+  PSQL           the psql that run.sh uses
   REF_URL        the reference's origin, e.g. http://127.0.0.1:18787/
   REF_CONTROL    the reference's cron control, e.g. http://127.0.0.1:18788/
   REF_PASSWORD   the reference's owner password
@@ -22,6 +24,7 @@ default 18789).
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -38,6 +41,8 @@ CONTROL = os.environ["REF_CONTROL"]
 REF_PASSWORD = os.environ.get("REF_PASSWORD", "interop-password")
 DEADLINE = 45  # seconds for any one condition
 
+PSQL = os.environ.get("PSQL", "psql")
+DB_URL = os.environ["BLYGD_DATABASE_URL"]  # run.sh's throwaway database, for blygd_recheck
 SOL_PORT = int(os.environ.get("SOL_PORT", "18789"))
 failures = []
 gaps = []
@@ -126,6 +131,16 @@ def ref_change(method, iid, action, body=None):
     against the item's current revision."""
     _, it = ref("GET", f"/api/items/{iid}")
     return ref(method, f"/api/items/{iid}/{action}", {"expectedRevision": it["revision"], **(body or {})})
+
+
+def blygd_recheck(sid):
+    """Make blygd's next poll of sid a reconciliation that refetches its
+    current documents (§13.3), as the reader tests do. Left alone, that
+    rolling recheck comes round once a day."""
+    subprocess.run([PSQL, "-q", DB_URL, "-c",
+                    f"UPDATE remote_origins SET reconciled_at = NULL WHERE id = {int(sid)}; "
+                    f"UPDATE imported_items SET fetched_at = now() - interval '1 hour' WHERE remote_origin_id = {int(sid)}"],
+                   check=True, capture_output=True)
 
 
 def ref_tick():
@@ -312,6 +327,30 @@ def main():
     code, it = blygd("GET", f"/reader/items/{sid}/{r1}")
     check("the reference's pin is retained", [p["version"] for p in it["item"].get("pins") or []] == [1], it)
     check("the reference's own page is kept", it["item"]["page"] == f"{REF}f/{r1}/", it["item"]["page"])
+
+    # §5.10 (nineteenth revision): with blygd holding r1 at v1, the
+    # reference names a copy of it on another network, rewriting the
+    # document in place: same version, same hash, nothing in the feed.
+    copy = [{"url": "https://bsky.app/profile/rae.example/post/3interop", "version": 1}]
+    _, before = get(f"{REF}items/{r1}.json")
+    code, j = ref_change("PUT", r1, "syndication", {"entries": copy})
+    _, after = get(f"{REF}items/{r1}.json")
+    check("the reference records a copy in place (§5.10)",
+          code == 200 and after.get("syndication") == copy and
+          (after["version"], after["content_hash"], after["updated"]) == (before["version"], before["content_hash"], before["updated"]),
+          (code, j, after.get("syndication")))
+    def synced():
+        # Re-armed on every try: a recheck resets fetched_at, and blygd
+        # refetches only documents older than a minute.
+        blygd_recheck(sid)
+        blygd_poll(sid)
+        _, it = blygd("GET", f"/reader/items/{sid}/{r1}")
+        return it if (it["item"]["doc"] or {}).get("syndication") == copy else None
+    it = wait("blygd's recheck picks up the copy, as sent", synced,
+              evidence=lambda: blygd("GET", f"/reader/items/{sid}/{r1}")[1])
+    check("the in-place rewrite is not a stealth edit (§5.10 rule 3, §13.3)",
+          bool(it) and it["item"]["version"] == 1 and not it["item"].get("discrepancy"),
+          it and (it["item"]["version"], it["item"].get("discrepancy")))
 
     # 2 ─ blygd quotes the reference; the reference verifies the mentions.
     section("2. blygd quotes the reference")
@@ -502,19 +541,15 @@ def main():
              lambda: (lambda o: o if o and o["relation"] == "link" else None)(link_sent()))
     # The reference keeps no row for a claim that fails, so the only thing
     # to see is a verified one turning up.
-    m, end = None, time.time() + 15
-    while o and o["status"] == "sent" and not m and time.time() < end:
-        ref_tick()
-        m = ref_mention(r3)
-        time.sleep(1)
-    gap("the reference verifies a link mention as a notice (§15.4, #79)", bool(m) and m["status"] == "verified",
-        f"blygd's send: {o and (o['status'], o.get('last_result'))}; the reference kept {m and (m['status'], m.get('error'))}")
+    wait("the reference verifies a link mention as a notice (§15.4, #79)",
+         lambda: (lambda m: m if m and m["status"] == "verified" else None)(ref_mention(r3)),
+         ref_tick, evidence=lambda: {"blygd's send": link_sent(), "the reference kept": ref_mention(r3)})
 
     rl = ref_publish(f"Rae links [[{a1} | Alice on planning]].\n\n![[{a1} | Alice's claim]]\n\nAnd answers.", "thread")
     _, rdoc = get(f"{REF}items/{rl}.json")
     check("the reference renders a link label as the anchor text", ">Alice on planning</a>" in rdoc["content_html"], rdoc["content_html"])
-    gap("the reference discloses its link in links[] (§10.3a)", rdoc.get("links") == [{"origin": ALICE, "id": a1}],
-        f"links: {rdoc.get('links')}")
+    check("the reference discloses its link in links[] (§10.3a)", rdoc.get("links") == [{"origin": ALICE, "id": a1}],
+          f"links: {rdoc.get('links')}")
     check("the reference bakes its directive label (§10.2, #81)", "data-blyg-label=" in rdoc["content_html"],
           rdoc["content_html"])
     wait("blygd verifies the reference's labelled quote",

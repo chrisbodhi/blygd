@@ -6,9 +6,11 @@ reader, hoppers and Webmentions together. It is headless — every client
 multi-tenant, with each user owning one origin.
 
 Spec references (§) are to `blygger-spec` `docs/protocol-v0.4.md`, read at
-commit `9fa1d7e` (2026-11-13, its sixteenth revision). Phase 5 was built
-at `24b9770` (2026-10-20, the sixth), and the seventh to the sixteenth
-were taken in on 2026-11-16 (TODO.md, "Spec revisions 7–16"). Phases 1–3
+commit `fc751d6` (2026-11-22, its twentieth revision). Phase 5 was built
+at `24b9770` (2026-10-20, the sixth), the seventh to the sixteenth were
+taken in on 2026-11-16 (TODO.md, "Spec revisions 7–16"), and the
+seventeenth to the twentieth on 2026-11-22 (TODO.md, "Spec revisions
+17–20"). Phases 1–3
 were built against `docs/protocol-v0.3.md` at `c2da39f` and `d008e21`
 (2026-10-07). Section numbers carry over, with §10.3a new in 0.4. blygd
 emits `"blyg": "0.4"` (§3.1), and reads any `0.x`.

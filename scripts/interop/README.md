@@ -43,7 +43,11 @@ their reason and are reported, not failed.
 reference under Miniflare on :18787 (cron control on :18788). Each
 subscribes to the other, and `check.py` runs eight scenarios:
 
-1. blygd imports the reference: hashes, retained pins, `page`.
+1. blygd imports the reference: hashes, retained pins, `page`, and a
+   `syndication` entry the reference writes in place afterwards (§5.10),
+   which blygd's recheck must adopt without calling it a stealth edit.
+   `check.py` nudges that recheck in blygd's throwaway database, since it
+   otherwise comes round once a day.
 2. blygd quotes the reference (partial, whole, nested, `[[id]]`); the
    reference verifies the mentions.
 3. The reference imports, quotes and stubs blygd, including a quote
@@ -73,10 +77,10 @@ subscribes to the other, and `check.py` runs eight scenarios:
    text instead.
 
 A **gap** is a check of something the spec asks of the reference that it
-does not do yet: verifying a `link` mention as a notice, and emitting
-`links[]`. Gaps are printed and counted but never fail the run. When the
-reference catches up they print PASS, and
-then they should become checks.
+does not do yet. Gaps are printed and counted but never fail the run. When
+the reference catches up they print PASS, and then they should become
+checks. None is open: the last two, verifying a `link` mention as a notice
+and emitting `links[]`, passed against 0.67.0 and are checks now.
 
 It takes about two minutes, most of it the reference's 60 s
 cooldown on re-sent mention pairs. It needs node, python3, go, and a

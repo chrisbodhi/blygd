@@ -139,6 +139,9 @@ type Item struct {
 	NoPage    bool   // omit page, as a blyg with no HTML pages does (§5.8)
 	Pinned    []int
 	Updated   time.Time
+	// Syndication is the raw JSON of the item's syndication member
+	// (§5.10); empty omits it.
+	Syndication string
 }
 
 // Blyg writes a whole conformant-looking surface at a mount on a Server.
@@ -220,6 +223,9 @@ func (b *Blyg) Doc(it *Item) string {
 	pageMember := fmt.Sprintf(`"page": %q, `, page)
 	if it.NoPage {
 		pageMember = ""
+	}
+	if it.Syndication != "" {
+		pageMember += `"syndication": ` + it.Syndication + ", "
 	}
 	return fmt.Sprintf(`{"blyg": "0.3", "id": %q, "kind": %q, "origin": %q, %s"created": "%s", "updated": "%s",
 		"version": %d, "content_md": %q, "content_html": %q, "content_hash": %q, "media": [], "x-unknown": {"kept": true},

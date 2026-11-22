@@ -388,9 +388,26 @@ func TestPageHTML(t *testing.T) {
 		t.Errorf("the bake's wire attributes must survive: %s", got)
 	}
 	// Our own renderer's output passes through unchanged.
-	own := compose(t, "Hi *there* [x](https://o.test/a?b=1&c=2) `code`\n\n- one\n\n> q", false).ContentHTML
+	own := compose(t, "Hi *there* [x](https://o.test/a?b=1&c=2) `code`\n\n- one\n\n3. three\n4. four\n\n> q", false).ContentHTML
+	if !strings.Contains(own, `<ol start="3">`) {
+		t.Fatalf("the renderer no longer numbers from 3: %s", own)
+	}
 	if string(PageHTML(own)) != own {
 		t.Errorf("own HTML changed:\n%s\n%s", own, PageHTML(own))
+	}
+	// A list's first ordinal survives on a page, so a whole quote of a
+	// list numbered from 3 still reads from 3; §16.15 (twentieth revision)
+	// asks a reader's sanitizer to keep an integer start, and only that.
+	for in, want := range map[string]string{
+		`<ol start="3"><li>c</li></ol>`:            `<ol start="3"><li>c</li></ol>`,
+		`<ol start="-2"><li>c</li></ol>`:           `<ol start="-2"><li>c</li></ol>`,
+		`<ol start="3x"><li>c</li></ol>`:           `<ol><li>c</li></ol>`,
+		`<ol start="javascript:1"><li>c</li></ol>`: `<ol><li>c</li></ol>`,
+		`<ul start="3"><li>c</li></ul>`:            `<ul><li>c</li></ul>`,
+	} {
+		if got := string(PageHTML(in)); got != want {
+			t.Errorf("PageHTML(%s) = %s, want %s", in, got, want)
+		}
 	}
 }
 

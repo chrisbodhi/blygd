@@ -66,8 +66,10 @@ var pageFuncs = template.FuncMap{
 }
 
 // pinnedTmpl is a pinned version page (§8.4). Gated like its JSON twin,
-// linked to it, marked frozen, canonical to the live page, and absent from
-// every feed and index. It advertises no Webmention endpoint: §15.3 takes
+// canonical to the live page, and absent from every feed and index, as
+// §8.4 says. The frozen banner and the link to the JSON twin are our
+// choices: since the seventeenth revision (#108) they are presentation,
+// which §8.4 leaves to the client. It advertises no Webmention endpoint: §15.3 takes
 // a target only as an item's page or document.
 var pinnedTmpl = template.Must(template.New("pinned").Funcs(pageFuncs).Parse(`<!doctype html>
 <html lang="en">

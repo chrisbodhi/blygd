@@ -67,7 +67,7 @@ wait_for "http://127.0.0.1:$REF_PORT/blyg.json"
 
 status=0
 BLYGD_URL="http://127.0.0.1:$BLYGD_PORT" BLYGD_ORIGIN="$ORIGIN" BLYGD_TOKEN="$TOKEN" \
-REF_URL="http://127.0.0.1:$REF_PORT/" REF_CONTROL="http://127.0.0.1:$REF_CONTROL_PORT/" \
+REF_URL="http://127.0.0.1:$REF_PORT/" REF_CONTROL="http://127.0.0.1:$REF_CONTROL_PORT/" PSQL="$PSQL" \
   python3 "$HERE/check.py" || status=$?
 if [ "$status" -ne 0 ]; then
   echo; echo "--- blygd log (tail)"; tail -20 "$WORK/blygd.log"

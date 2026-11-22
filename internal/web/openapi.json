@@ -3154,7 +3154,7 @@
         "required": [
           "sources"
         ],
-        "description": "One generated span's provenance (§5.7).",
+        "description": "One generated span's provenance (§5.7). A pass that only corrects the author's own words (spelling, grammar, punctuation, a name's consistent form) is not generation and gets no entry; one that rephrases, restructures, summarizes or translates does (§5.7 rule 10). To say a version was proofread, say so in its changelog note.",
         "additionalProperties": false
       },
       "GenMeta": {
