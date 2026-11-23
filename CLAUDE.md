@@ -21,6 +21,9 @@ make vuln          # govulncheck: known vulnerabilities on paths blygd calls
 make run           # serve on :8080 against BLYGD_DATABASE_URL
 make parity REFERENCE=path/to/blygger-studio   # differential tests vs the reference
 make interop REFERENCE=path/to/blygger-studio  # live: both studios, each subscribed to the other
+make sdk           # regenerate the Swift SDK from openapi.json (needs Swift 6)
+make sdk-test      # the committed SDK is what the document generates, then swift test
+make sdk-test-live # the Swift SDK against this checkout on localhost (Postgres, as for interop)
 ```
 
 Rerun parity and interop when the spec or the reference moves
@@ -84,6 +87,12 @@ on the command line or in the environment. Each test gets a fresh database.
 - **The API is described.** Any change to an `/api/` route, its scope, or
   a request or response shape edits `internal/web/openapi.json` in the
   same change. `openapi_test.go` and the e2e suite fail until it does.
+  The same change regenerates the Swift SDK (`make sdk`), and
+  `TestSwiftSDKIsCurrent` fails until it does. Never edit
+  `sdk/swift/Sources/Blygd/Generated/` by hand. If the generator says a
+  schema is not supported, reshape the schema or add an override
+  (`sdk/swift/gendoc`); never let a field drop out of the SDK. A new scope
+  gets a Swift name in `sdk/swift/openapi-generator-config.yaml`.
 - **Migrations are append-only.** A schema change is a new numbered file
   in `internal/db/migrations/` (tern, run at startup or by
   `blygd migrate`). Never edit one that has shipped: databases already
@@ -115,4 +124,7 @@ internal/web         HTTP: origin surface, /api, /studio (embedded plain client)
 internal/testdb      per-test databases
 internal/testblyg    a fake static blyg for import tests
 internal/archtest    source-reading tests of the house rules: import graph, SQL by plane, HTTP, transactions
+sdk/swift            the Swift SDK: generated client (committed), hand-written auth/dates/ImportedDocument, tests
+sdk/swift/gendoc     prepares openapi.json for the Swift generator (go run; scripts/swift-sdk.sh)
+Package.swift        SwiftPM manifest for sdk/swift; at the root because SwiftPM looks for it there
 ```

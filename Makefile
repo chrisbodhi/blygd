@@ -2,7 +2,7 @@
 # URL, the client connects as the current OS user (the Homebrew default).
 BLYGD_TEST_DATABASE_URL ?= postgres://localhost:5432/postgres?sslmode=disable
 
-.PHONY: build test test-all run vet vuln parity interop
+.PHONY: build test test-all run vet vuln parity interop sdk sdk-check sdk-test sdk-test-live
 
 build:
 	go build -o bin/blygd ./cmd/blygd
@@ -34,3 +34,21 @@ parity:
 # See scripts/interop/README.md.
 interop:
 	scripts/interop/run.sh '$(abspath $(REFERENCE))'
+
+# The Swift SDK (sdk/swift/README.md). Needs a Swift 6 toolchain.
+# Regenerate it after any change to internal/web/openapi.json: make test
+# fails until you do (TestSwiftSDKIsCurrent).
+sdk:
+	scripts/swift-sdk.sh
+
+# The committed client is exactly what the document generates.
+sdk-check:
+	scripts/swift-sdk.sh check
+
+sdk-test: sdk-check
+	swift test
+
+# The SDK against this checkout served on localhost (as for interop, a
+# Postgres 18 whose user may CREATE DATABASE; BLYGD_PG_BASE overrides it).
+sdk-test-live: sdk-check
+	scripts/swift-sdk-live.sh

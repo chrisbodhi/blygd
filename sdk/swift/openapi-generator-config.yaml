@@ -1,0 +1,33 @@
+# swift-openapi-generator configuration for the Blygd Swift SDK.
+# scripts/swift-sdk.sh runs the generator with this file against
+# internal/web/openapi.json and writes Sources/Blygd/Generated.
+generate:
+  - types
+  - client
+accessModifier: public
+namingStrategy: idiomatic
+# Scopes would otherwise be `_ast_` and `items_colon_read`. Every value of
+# the Scope schema needs a line here (TestScopesAreNamed): renaming a case
+# once it has shipped breaks the apps that use it.
+nameOverrides:
+  "*": all
+  "items:read": itemsRead
+  "items:write": itemsWrite
+  "items:publish": itemsPublish
+  "items:withdraw": itemsWithdraw
+  "items:pin": itemsPin
+  "hoppers:read": hoppersRead
+  "hoppers:write": hoppersWrite
+  "mentions:read": mentionsRead
+  "mentions:write": mentionsWrite
+  "origin:write": originWrite
+  "tokens:write": tokensWrite
+  "reader:read": readerRead
+  "reader:write": readerWrite
+typeOverrides:
+  schemas:
+    # ImportedDoc is oneOf null | ItemDocument | L0Document. The generator
+    # cannot model a {"type": "null"} branch and would drop the schema, and
+    # with it the `doc` of every ReaderItem and ImportRef. ImportedDocument
+    # (Sources/Blygd/ImportedDocument.swift) is the hand-written stand-in.
+    ImportedDoc: ImportedDocument
