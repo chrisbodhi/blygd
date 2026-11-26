@@ -2,9 +2,12 @@ package web
 
 import (
 	"bytes"
+	"crypto/sha256"
 	_ "embed"
+	"encoding/base64"
 	"html/template"
 	"net/http"
+	"strings"
 
 	"github.com/chrisbodhi/blygd/internal/config"
 )
@@ -14,9 +17,22 @@ var homeHTML string
 
 var homeTmpl = template.Must(template.New("home").Parse(homeHTML))
 
-// homeCSP: the page is text and links. It loads nothing, runs nothing,
-// and nobody may frame it.
-const homeCSP = "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+// homeCSP: the page is text and links, and a sea drawn in CSS along its
+// foot. It loads nothing, runs nothing, and nobody may frame it. Its one
+// stylesheet is allowed by hash, and no style attributes are.
+var homeCSP = "default-src 'none'; style-src '" + styleHash(homeHTML) + "'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+
+// styleHash is the CSP source for the page's one <style> element: the
+// SHA-256 of exactly the text between its tags.
+func styleHash(page string) string {
+	_, rest, ok := strings.Cut(page, "<style>")
+	css, _, ok2 := strings.Cut(rest, "</style>")
+	if !ok || !ok2 || strings.Contains(rest[len(css):], "<style") {
+		panic("home.html: want exactly one <style> element")
+	}
+	sum := sha256.Sum256([]byte(css))
+	return "sha256-" + base64.StdEncoding.EncodeToString(sum[:])
+}
 
 // HomePage renders the page at the host root: what this service is, where
 // its API is described (with rel="service-desc", as on the studio's page,
