@@ -33,8 +33,8 @@ func TestHomePage(t *testing.T) {
 			t.Errorf("home page lacks %s:\n%s", want, page)
 		}
 	}
-	if strings.Contains(page, "<script") || strings.Contains(page, "<style") || strings.Contains(page, " style=") {
-		t.Error("home page is plain HTML: no script, no styles")
+	if strings.Contains(page, "<script") || strings.Contains(page, " style=") {
+		t.Error("home page runs nothing and has no style attributes: its one stylesheet is the sea's")
 	}
 
 	h := Router(&API{}, &Surface{}, discardLog())
@@ -108,5 +108,18 @@ func TestHomePageShadowsNoOrigin(t *testing.T) {
 	expect(t, r, 200)
 	if strings.Contains(string(r.body), "<h1>blygd</h1>") || r.header.Get("Content-Security-Policy") != pageCSP {
 		t.Fatalf("a root-mounted origin's index was shadowed: %s", r.body)
+	}
+}
+
+// The home page's CSP allows its stylesheet by hash, so the hash must be
+// of the page as rendered (html/template could rewrite it), and the page
+// may carry no style attributes, which the policy would block.
+func TestHomeStyleMatchesCSP(t *testing.T) {
+	page := string(HomePage("Eurypos", "https://example.com/src", nil))
+	if !strings.Contains(homeCSP, "style-src '"+styleHash(page)+"';") {
+		t.Errorf("the CSP's style hash is not the rendered stylesheet's: %s", homeCSP)
+	}
+	if strings.Contains(page, "style=") {
+		t.Error("the home page has a style attribute, which its CSP blocks")
 	}
 }
