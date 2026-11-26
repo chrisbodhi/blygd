@@ -241,6 +241,44 @@ notice, and you hold powers over their blygs that they should know about.
   claimed or finished for 15 minutes, so a big OPML import that the worker
   is working through, one entry a batch, does not warn.
 
+### Usage over time
+
+Alerts say something is wrong now. To see how the box has been, keep a
+record of its CPU, memory, disk and network. Nothing records these by
+default, so a slow afternoon last week has no numbers unless these are
+running first.
+
+- **sysstat** samples every 10 minutes into `/var/log/sysstat/saDD`. Debian
+  keeps 7 days, so raise it to 28. Above 28, files are named `saYYYYMMDD`
+  instead.
+  ```sh
+  sudo apt install -y sysstat
+  sudo sed -i 's/^ENABLED=.*/ENABLED="true"/' /etc/default/sysstat
+  sudo sed -i 's/^HISTORY=.*/HISTORY=28/' /etc/sysstat/sysstat
+  sudo systemctl enable --now sysstat
+  ```
+  Then `sar -u` (CPU, `%steal` included), `sar -q` (load), `sar -r --human`
+  (memory: read `kbavail`), `sar -W` (swapping), `sar -d -p` (disk I/O) and
+  `sar -n DEV` (network), each for today. Add `-f /var/log/sysstat/saDD`
+  for another day, or `-s 14:00:00 -e 16:00:00` for a window. sar shows
+  rates between samples, so the first row appears 20 minutes after it
+  starts. Its first `LINUX RESTART` row is the install; `journalctl
+  --list-boots` says which later ones were reboots.
+- **Your provider's agent**, if it has one, keeps longer graphs and can
+  alert on them. On DigitalOcean, tick Monitoring when you create the
+  droplet, or install `do-agent` later:
+  ```sh
+  curl -sSL https://repos.insights.digitalocean.com/install.sh | sudo bash
+  ```
+  Memory and disk-usage graphs appear in the droplet's Graphs tab, and
+  alert policies (memory or disk above some percent) email you.
+
+On a 1 GiB host, Postgres and the page cache use most of the memory, which
+is fine. Watch `available` (`free -h`, or `kbavail`), and swap-ins in
+`sar -W`, rather than `used`. `systemd-cgtop` shows the split among
+blygd, Postgres and Caddy now. A login in the `systemd-journal` group
+reads every unit's journal without sudo.
+
 ### People
 
 Run these as the `blygd` user, as in step 6:
